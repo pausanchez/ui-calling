@@ -5,3 +5,5 @@ dist
 .claude/worktrees/
 .tmp-cli-test/
 .ui-calling/
+research_notes/
+reports/
