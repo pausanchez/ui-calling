@@ -130,6 +130,51 @@ Tell the agent in its system prompt:
 - **`→ screen now shows`:** these lines hold outcomes such as ticket numbers or new dates.
 - **`error` events:** something failed, so it must never claim the action happened.
 
+## Running the agent on events
+
+Two kinds of events reach `onEvent`. Quiet ones (`opened`, `left`, small domain events) should ride along with the next turn. `wake` events should start a turn now. Both share one queue per conversation with the user's own messages, or a screen event and a new message can run the agent twice at once.
+
+```ts
+const queues = new Map<string, Promise<void>>();
+function enqueue(conversationId: string, turn: () => Promise<void>) {
+  const next = (queues.get(conversationId) ?? Promise.resolve()).then(turn).catch(console.error);
+  queues.set(conversationId, next);
+  return next;
+}
+const pending = new Map<string, UiEvent[]>();   // quiet events wait here for the next turn
+
+export const ui = createUiCalling({
+  // ...
+  abandonAfterMs: 10 * 60_000,
+  onEvent: (e) => {
+    pending.set(e.conversationId, [...(pending.get(e.conversationId) ?? []), e]);
+    if (e.wake) void enqueue(e.conversationId, () => runTurn(e.conversationId));
+  },
+});
+
+// Your webhook calls this for every message the user writes.
+export const onUserMessage = (conversationId: string, text: string) =>
+  enqueue(conversationId, () => runTurn(conversationId, text));
+
+async function runTurn(conversationId: string, userText?: string) {
+  const convo = await db.conversations.get(conversationId);
+  const events = pending.get(conversationId)?.splice(0) ?? [];
+  const content = [
+    events.length ? formatEventsForAgent(events) : "",
+    userText ?? "The user hasn't written. If a short follow-up doesn't help them, reply exactly NO_REPLY.",
+  ].filter(Boolean).join("\n\n");
+  convo.messages.push({ role: "user", content });
+  // Run your model with the surfaces as tools (see the adapters above), save the transcript,
+  // and send the reply with its link, unless it's NO_REPLY.
+}
+```
+
+- **Which events wake the agent:** domain events with `wake: true`, `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`).
+- **A woken turn may say nothing.** The agent gets events without a new message. Let it answer `NO_REPLY` when a follow-up wouldn't help.
+- **Several instances or serverless:** `onEvent` runs inside the screen's `POST /events` request, on whichever instance got it. Keep `pending` in your database (or read it back with `ui.events(conversationId)`), use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
+
+The demo's `apps/demo/server/agent.ts` does all of this with Claude (`enqueue`, `handleUiEvent`, `NO_REPLY`).
+
 ## Rules that keep context right
 
 - **Every action returns fresh data.** The outcome (a ticket number, a new date) reaches the agent through `summarize`, so an action that changes something must return the new data.
@@ -184,6 +229,36 @@ On WhatsApp, Meta identifies each user with a **BSUID** (business-scoped user ID
 
 The demo implements all of this (`apps/demo/server/identity.ts`, `agent.ts` → `receiveWebhook`), and its panel lets you hide the number or change it.
 
+### Sending on WhatsApp
+
+UI_calling builds the message; your server sends it through the Cloud API:
+
+```ts
+import { whatsappCtaMessage, insideServiceWindow } from "@ui-calling/core/whatsapp";
+
+export async function sendReply(convo: Conversation, text: string, link?: SurfaceLink) {
+  if (!insideServiceWindow(convo.lastUserMessageAt)) return sendTemplate(convo);   // see below
+  const to = convo.phone ? { to: convo.phone } : { recipient: convo.bsuid };
+  const payload = link
+    ? whatsappCtaMessage({ ...to, body: text, url: link.url, buttonText: link.label })
+    : { messaging_product: "whatsapp", recipient_type: "individual", ...to, type: "text", text: { body: text } };
+  const res = await fetch(`https://graph.facebook.com/v25.0/${PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${WHATSAPP_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(`WhatsApp ${res.status} (#${body.error?.code}): ${body.error?.message}`);
+  return body.messages[0].id as string;   // the wamid, to match delivery statuses
+}
+```
+
+- **The 24-hour window.** Free-form messages are only allowed within 24 hours of the user's last message, and using the screen doesn't count as one. A link sent at hour 23 and used at hour 25 wakes the agent, but Meta rejects its reply (error 131047). Check `insideServiceWindow()` first; outside it, send an approved template (UI_calling doesn't build those) or wait for the user to write.
+- **The webhook.** Answer Meta's `GET` subscription check (`hub.verify_token`, echo `hub.challenge`). On `POST`, check the signature, start the agent turn after responding (Meta retries slow deliveries), and skip message IDs you've already handled. Subscribe to the `messages` field: it carries incoming messages and the statuses of what you sent.
+- **Delivery failures.** A send can fail after Meta accepted it. `parseWhatsAppStatuses(body)` reads `sent`, `delivered`, `read` and `failed` (with its error code) from the same webhook.
+- **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
+- **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`.
+
 ## Testing without servers
 
 Every route is a plain Hono app, so you can drive the whole loop in-process with `request()`: no ports, no browser.
@@ -229,3 +304,101 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `describe` written as an outcome ("Booked shift…") | A failure reads "did NOT go through. Attempted: Booked shift…" | Describe the request ("Picked shift…") |
 | Readable details sent from the browser and trusted | A tampered payload changes what the agent tells the user | IDs in the payload; details from `summarize` |
 | Always offering "try again" | The user retries something that can't work, like a full shift | Branch on `reason`, `reload()` |
+
+## API reference
+
+### `createUiCalling(options)`
+
+| Option | Default | What it does |
+|---|---|---|
+| `surfaces` | required | The `implement(…)` results to expose as tools |
+| `baseUrl` | required | Public origin of your screens; links are `baseUrl + pathPrefix + token` |
+| `pathPrefix` | `"/s/"` | Path in front of the token |
+| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore` |
+| `ttlSeconds` | `3600` | Link lifetime; a surface's own `ttlSeconds` wins |
+| `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen gets no domain event in this time |
+| `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
+| `toolPrefix` | `"show_"` | Tool name is `toolPrefix + surface name` |
+| `defaultLocale` | `"en"` | Used when a call doesn't pass `locale` |
+| `wakeOnError` | `true` | Wake the agent on the first error of each kind in a session |
+| `describeError` | message, trimmed | Turns unexpected errors into `{ code, message, retryable }`; `SurfaceError`s pass as they are |
+| `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
+
+### The runtime
+
+| Method | Returns |
+|---|---|
+| `ui.tools()` | Tool definitions with JSON Schema, one per surface |
+| `ui.isUiTool(name)` | Whether a tool name belongs to UI_calling |
+| `ui.runTool(name, input, who)` | `{ ok: true, content, link, summary }` or `{ ok: false, content, error }`; never throws for bad input |
+| `ui.call(name, input, who)` | `{ url, sessionId, surface, locale, ctaLabel, expiresAt, summary }`; throws on bad input |
+| `ui.events(conversationId)` | Every recorded event of the conversation, oldest first |
+| `ui.ready` | Resolves once abandon timers from before a restart are re-armed |
+
+`who` is `{ conversationId, subject }`: the conversation events report to, and the user the data is scoped to.
+
+### Contract and implementation
+
+| API | Fields |
+|---|---|
+| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?` |
+| `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent) |
+| `implement(surface, { … })` | `resolve(input, ctx)`, `summarize(data)`, `on?: { [event]: (payload, ctx) => data \| void }` |
+| `ctx` | `{ subject, conversationId, locale, session }` |
+| `new SurfaceError(code, message, { retryable? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason` |
+
+### `UiEvent`
+
+```ts
+type UiEvent = {
+  id: string;
+  sessionId: string;
+  conversationId: string;
+  surface: string;                 // "order_status"
+  type: string;                    // "opened", "reschedule_delivery", "error"…
+  kind: "lifecycle" | "domain" | "error";
+  payload: unknown;                // validated; redacted fields show "[redacted]"
+  description: string;             // the line the agent reads
+  state?: string;                  // summarize() after the event: what the screen showed
+  wake: boolean;
+  at: string;                      // ISO time
+};
+```
+
+### Lifecycle events
+
+| Event | When | Wakes |
+|---|---|---|
+| `opened` | The screen loads; carries `state`, what the user saw | No |
+| `left` | The tab is hidden or closed | No |
+| `returned` | The user comes back to a screen they'd left | No |
+| `completed` | `complete()` is called; the link closes | No |
+| `abandoned` | `abandonAfterMs` after `opened` with no domain event; off unless set | Yes |
+| `error` | `resolve`, a handler, `reportError` or a render crash failed | First of each kind |
+
+### React
+
+| API | What it gives you |
+|---|---|
+| `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"` |
+| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `returnUrl` |
+| `useSurfaceName()` | `status`, `surface`, `locale`, `returnUrl`: to pick which screen to render for a token |
+| `SurfaceActionError` | Thrown by a failed `emit`: `code`, `reason`, `retryable` |
+
+### HTTP
+
+What `@ui-calling/server` serves under your mount point. Any client can use it; React is optional. Every response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+
+| Request | Success |
+|---|---|
+| `GET /sessions/:token` | `200 { surface, locale, data, expiresAt }` |
+| `POST /sessions/:token/events` with `{ type, payload }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it |
+
+Errors are `{ error, message, retryable, reason }`:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| 400 | `invalid_payload`, `unknown_event` | The body didn't match the contract |
+| 404 | `not_found` | No such link |
+| 410 | `expired`, `completed` | The link ran out, or the user already finished |
+| 502 | `upstream_error` | `resolve` or a handler threw; `reason` is your `SurfaceError` code |

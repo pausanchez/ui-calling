@@ -235,7 +235,7 @@ Before the first publish, decide:
 
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
-- Real WhatsApp Cloud API sending (`whatsappCtaMessage` builds the payload; the demo logs it)
+- A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
 - More blocks: payslip viewer, document signing, availability calendar (a shift picker exists in the demo)
 - More languages in the blocks (en and es today)
