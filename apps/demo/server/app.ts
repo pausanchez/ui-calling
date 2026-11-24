@@ -48,6 +48,18 @@ app.use("*", async (_c, next) => {
   saveState();
 });
 
+// Only the screens (/api/ui) and Meta's webhook have to be public. The chat console and its demo
+// switches can read real users' chats and wipe everything, so through a tunnel they answer 403.
+// A tunnel keeps its own hostname in the Host header (Vite's proxy is set to pass it on), so checking it is enough.
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+app.use("/api/*", async (c, next) => {
+  const operatorOnly = c.req.path.startsWith("/api/chat") || c.req.path.startsWith("/api/demo/");
+  if (operatorOnly && !LOCAL_HOSTS.has(new URL(c.req.url).hostname)) {
+    return c.json({ error: "forbidden", message: "The demo console only answers on localhost" }, 403);
+  }
+  await next();
+});
+
 app.route("/api/ui", uiCallingRoutes(ui));
 
 /**

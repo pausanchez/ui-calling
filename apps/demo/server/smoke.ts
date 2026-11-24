@@ -258,6 +258,18 @@ await check("webhook: Meta's verdict on each send reaches the chat, including fa
   assert.match(failed.error, /403 \(#131005\)/);
 });
 
+await check("security: through a tunnel, the console's API refuses; screens and webhook still answer", async () => {
+  const via = (path: string, method = "GET") =>
+    app.request(`https://abc.trycloudflare.com${path}`, { method, body: method === "POST" ? "{}" : undefined });
+  assert.equal((await via("/api/chat")).status, 403);
+  assert.equal((await via("/api/chat?conversation=wa:PF-1000000001:ES.real-sender-1")).status, 403);
+  assert.equal((await via("/api/chat/reset", "POST")).status, 403);
+  assert.equal((await via("/api/demo/failures")).status, 403);
+  assert.equal((await via("/api/ui/sessions/not-a-real-token")).status, 404, "screens are public");
+  assert.equal((await via("/api/whatsapp/webhook", "POST")).status, 200, "Meta can still reach the webhook");
+  assert.equal((await call("GET", "/api/chat")).status, 200, "on localhost the console works");
+});
+
 await check("security: an unknown token is rejected", async () => {
   assert.equal((await call("GET", "/api/ui/sessions/not-a-real-token")).status, 404);
 });

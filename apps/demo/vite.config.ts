@@ -14,7 +14,8 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       allowedHosts: publicHost && publicHost !== "localhost" ? [publicHost] : [],
-      proxy: { "/api": "http://localhost:8787" },
+      // Keep the browser's Host: the API tells the local console apart from a tunnel by it (see app.ts).
+      proxy: { "/api": { target: "http://localhost:8787", changeOrigin: false } },
     },
   };
 });
