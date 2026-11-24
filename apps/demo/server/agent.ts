@@ -33,7 +33,7 @@ export type ToolTrace = {
   error?: string;
   /** What went back to the model as the tool_result (Claude only). */
   toolResult?: string;
-  /** The WhatsApp Cloud API request that would deliver the link. */
+  /** The WhatsApp Cloud API request that delivers (or would deliver) the link. */
   whatsapp?: ReturnType<typeof whatsappCtaMessage>;
 };
 
@@ -53,7 +53,7 @@ type Conversation = {
   /** `wa:<portfolio>:<bsuid>`: who this chat is with, as UI_calling sessions see it. */
   subject: string;
   /** Where replies go: the BSUID always, the phone only when Meta shared it. */
-  whatsapp?: { bsuid: string; phone?: string; username?: string };
+  whatsapp?: { bsuid: string; phone?: string; username?: string; phoneNumberId?: string };
   inbound?: InboundTrace;
   /** Scripted agent only: what the user asked before they had to link their account. */
   pendingAsk?: string;
@@ -116,8 +116,9 @@ export function getConversation(id: string, subject = "") {
   return c;
 }
 
-export function resetConversation(id: string) {
-  conversations.delete(id);
+/** Every conversation: the simulated phone's and the real WhatsApp users'. */
+export function resetConversations() {
+  conversations.clear();
 }
 
 export function snapshot(c: Conversation) {
@@ -164,15 +165,38 @@ function enqueue(c: Conversation, fn: () => Promise<void>) {
 
 function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   c.chat.push({ id: crypto.randomUUID(), from: "agent", text, at: new Date().toISOString(), cta });
-  if (cta && c.whatsapp) {
-    // What a real WhatsApp Cloud API send would look like: the agent's text plus the link as a button.
-    // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
-    const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
-    const payload = whatsappCtaMessage({ ...to, body: text, url: cta.url, buttonText: cta.label });
+  if (!c.whatsapp) return;
+  // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
+  const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
+  // The agent's text, plus the link as a button when there is one.
+  const payload = cta
+    ? whatsappCtaMessage({ ...to, body: text, url: cta.url, buttonText: cta.label })
+    : { messaging_product: "whatsapp", recipient_type: "individual", ...to, type: "text", text: { body: text } };
+  if (cta) {
     const trace = c.calls.findLast((t) => t.result?.url === cta.url);
-    if (trace) trace.whatsapp = payload;
-    console.log("[whatsapp] would send", JSON.stringify(payload));
+    if (trace) trace.whatsapp = payload as ReturnType<typeof whatsappCtaMessage>;
   }
+  // Only chats that came in through Meta's webhook to our number get real sends; the simulated phone doesn't.
+  const live = WHATSAPP_TOKEN && c.whatsapp.phoneNumberId === WHATSAPP_PHONE_NUMBER_ID;
+  if (!live) {
+    if (cta) console.log("[whatsapp] would send", JSON.stringify(payload));
+    return;
+  }
+  void sendWhatsApp(payload);
+}
+
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
+async function sendWhatsApp(payload: object) {
+  const res = await fetch(`https://graph.facebook.com/v25.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${WHATSAPP_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch((err: unknown) => err as Error);
+  if (res instanceof Error) console.error("[whatsapp] send failed", res);
+  else if (!res.ok) console.error("[whatsapp] send failed", res.status, await res.text());
+  else console.log("[whatsapp] sent", (payload as { type?: string }).type);
 }
 
 const whoIs = (c: Conversation) => ({ conversationId: c.id, subject: c.subject });
@@ -201,14 +225,15 @@ async function callSurface(c: Conversation, tool: string, input: unknown): Promi
 
 /**
  * Entry point for a (signature-checked) WhatsApp webhook: work out who wrote, keep the BSUID links
- * up to date, then hand text messages to the agent. The demo has one conversation.
+ * up to date, then hand text messages to the agent. Each sender gets their own conversation, keyed
+ * by subject; the simulated phone passes its fixed `conversationId` instead.
  */
-export function receiveWebhook(conversationId: string, payload: unknown) {
+export function receiveWebhook(payload: unknown, conversationId?: string) {
   let turn: Promise<void> | undefined;
   for (const m of parseWhatsAppWebhook(payload)) {
     if (!m.bsuid) continue;
-    const c = getConversation(conversationId);
     const subject = whatsappSubject(PORTFOLIO_ID, m.bsuid);
+    const c = getConversation(conversationId ?? subject, subject);
     let match: InboundTrace["match"];
     if (m.identityChange) {
       // The BSUID changes when the user changes phone number: carry the customer link over.
@@ -222,7 +247,7 @@ export function receiveWebhook(conversationId: string, payload: unknown) {
       match = "not_linked";
     }
     c.subject = subject;
-    c.whatsapp = { bsuid: m.bsuid, phone: m.phone, username: m.username };
+    c.whatsapp = { bsuid: m.bsuid, phone: m.phone, username: m.username, phoneNumberId: m.phoneNumberId };
     const customer = customerFor(subject);
     c.inbound = {
       at: new Date().toISOString(),

@@ -190,6 +190,30 @@ await check("webhook: requests without a valid signature are rejected", async ()
   delete process.env.WHATSAPP_APP_SECRET;
 });
 
+await check("webhook: each real sender gets their own conversation, apart from the simulated phone", async () => {
+  await call("POST", "/api/chat/reset");
+  await say("Where is my order?");
+  const before = (await chat()).chat.length;
+  const bsuid = "ES.real-sender-1";
+  await app.request("/api/whatsapp/webhook", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entry: [{ id: "waba", changes: [{ field: "messages", value: {
+        metadata: { phone_number_id: "real-number" },
+        messages: [{ id: "m1", type: "text", text: { body: "Where is my order?" }, from_user_id: bsuid }],
+      } }] }],
+    }),
+  });
+  const conversation = `wa:PF-1000000001:${bsuid}`;
+  await settled(conversation);
+  assert.equal((await chat()).chat.length, before, "the simulated chat is untouched");
+  const real = (await call("GET", `/api/chat?conversation=${encodeURIComponent(conversation)}`)).json as Chat;
+  assert.equal(real.chat[0]?.text, "Where is my order?");
+  assert.equal(real.identity.customer, null, "a new sender isn't linked to anyone");
+  assert.equal(real.chat.at(-1)?.cta?.label, "Verify it's you");
+});
+
 await check("security: an unknown token is rejected", async () => {
   assert.equal((await call("GET", "/api/ui/sessions/not-a-real-token")).status, 404);
 });
