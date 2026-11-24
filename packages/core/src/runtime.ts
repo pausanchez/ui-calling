@@ -36,8 +36,11 @@ export type SurfaceImpl<S extends AnySurface = AnySurface> = {
   surface: S;
   /** Load fresh data when the link is opened. Must check that `ctx.subject` is allowed to see it. */
   resolve: (input: SurfaceInput<S>, ctx: SurfaceContext) => Promise<SurfaceData<S>>;
-  /** Short summary handed to the agent in the tool result, so it knows what the user is about to see. */
-  summarize?: (data: SurfaceData<S>) => string;
+  /**
+   * Everything the screen shows, in one line: the agent's view of the screen. Sent in the tool result,
+   * on `opened`, and after every handler, so outcomes (ticket numbers, new dates) reach the agent.
+   */
+  summarize: (data: SurfaceData<S>) => string;
   /** Side effects for domain events. Return updated data to re-render the screen. */
   on?: {
     [K in SurfaceEventName<S>]?: (
@@ -127,7 +130,7 @@ export function createUiCalling(opts: UiCallingOptions) {
 
   const ERROR_TEXT: Record<ErrorSource, string> = {
     load: "The screen couldn't load its data",
-    action: "The user's action failed",
+    action: "The user's action did NOT go through",
     client: "The screen reported an error",
     render: "The screen crashed while rendering",
   };
@@ -145,7 +148,8 @@ export function createUiCalling(opts: UiCallingOptions) {
       kind: "error",
       payload: { source, action, ...info },
       description:
-        `${ERROR_TEXT[source]}${attempted ? ` (${attempted})` : ""}. ` +
+        // `attempted` is the event's describe(): what the user asked for, not something that happened.
+        `${ERROR_TEXT[source]}.${attempted ? ` Attempted: ${attempted}.` : ""} ` +
         `${info.code}${info.retryable ? ", retryable" : ""}: ${info.message}`,
       wake: (opts.wakeOnError ?? true) && !repeat,
     });
@@ -239,7 +243,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       } catch (err) {
         const info = toErrorInfo(err);
         await recordError(session, info, "load");
-        throw new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable);
+        throw new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable, info.code);
       }
       return { surface: session.surface, locale: session.locale, data, expiresAt: session.expiresAt };
     },
@@ -299,7 +303,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         // The intent still matters: the agent learns what the user tried and why it didn't happen.
         const info = toErrorInfo(err);
         await recordError(session, info, "action", type, def.describe(parsed.data));
-        throw new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable);
+        throw new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code);
       }
       const event = await record(session, {
         type,

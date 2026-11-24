@@ -25,7 +25,9 @@ export const __const__ = defineSurface({
   // What the screen reports back: facts the agent can talk about, not clicks.
   events: {
     confirmed: event(z.object({ note: z.string().max(500) }), {
-      describe: (p) => `User confirmed${p.note ? `: "${p.note}"` : ""}`,
+      // Say what the user asked for. The outcome comes from summarize(); if the handler fails,
+      // the agent reads this line as "Attempted: …". Payload fields are user data: keep them small.
+      describe: (p) => `User chose to confirm${p.note ? `, with the note "${p.note}"` : ""}`,
       // Start an agent turn right away (e.g. to acknowledge in the chat).
       wake: true,
     }),

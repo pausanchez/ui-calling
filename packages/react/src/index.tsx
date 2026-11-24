@@ -24,16 +24,21 @@ type ContextValue = {
   /** e.g. "upstream_error" when the data source failed: the agent already knows. */
   errorCode?: string;
   emit: (type: string, payload?: unknown) => Promise<void>;
+  reload: () => Promise<void>;
   reportError: (err: unknown, context?: string) => void;
   returnUrl?: string;
 };
 
-/** Error thrown by `emit` when the server rejects or fails an event. */
+/**
+ * Error thrown by `emit` and `reload`. For `code === "upstream_error"`, `reason` is the server's
+ * `SurfaceError` code (e.g. "shift_full"): map it to a message in the user's language.
+ */
 export class SurfaceActionError extends Error {
   constructor(
     message: string,
     public code?: string,
     public retryable = false,
+    public reason?: string,
   ) {
     super(message);
   }
@@ -66,11 +71,23 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         body: JSON.stringify({ type, payload }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable);
+      if (!res.ok) {
+        throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
+      }
       if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
     },
     [base],
   );
+
+  /** Fetch fresh data, e.g. after a failed action when what's on screen may be stale. */
+  const reload = useCallback(async () => {
+    const res = await fetch(base);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
+    }
+    setState((s) => ({ ...s, data: json.data }));
+  }, [base]);
 
   /**
    * Tell the agent something failed on the screen, e.g. a third-party API called from the browser.
@@ -132,8 +149,8 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
   }, [locale]);
 
   const value = useMemo<ContextValue>(
-    () => ({ ...state, locale, data: state.data, emit, reportError, returnUrl: props.returnUrl }),
-    [state, locale, emit, reportError, props.returnUrl],
+    () => ({ ...state, locale, data: state.data, emit, reload, reportError, returnUrl: props.returnUrl }),
+    [state, locale, emit, reload, reportError, props.returnUrl],
   );
   return (
     <SurfaceContext.Provider value={value}>
@@ -193,6 +210,7 @@ export function useSurface<S extends AnySurface>(surface: S) {
     status: ctx.status,
     error: ctx.error,
     errorCode: ctx.errorCode,
+    reload: ctx.reload,
     reportError: ctx.reportError,
     locale: ctx.locale,
     data: ctx.data as SurfaceData<S> | undefined,

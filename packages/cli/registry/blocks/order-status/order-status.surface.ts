@@ -24,7 +24,8 @@ export const orderStatus = defineSurface({
   }),
   events: {
     reschedule_delivery: event(slot, {
-      describe: (p) => `User rescheduled the delivery to ${p.date}, ${p.window}`,
+      // What the user asked for; the outcome comes from summarize, and on failure this reads as "Attempted: …".
+      describe: (p) => `User asked to move the delivery to ${p.date}, ${p.window}`,
       wake: true,
     }),
     report_problem: event(

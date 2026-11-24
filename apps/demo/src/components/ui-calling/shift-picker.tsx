@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { pickLocalized, type SurfaceData } from "@ui-calling/core";
-import { useSurface } from "@ui-calling/react";
+import { SurfaceActionError, useSurface } from "@ui-calling/react";
 import { shiftPicker } from "./shift-picker.surface";
 
 type Board = SurfaceData<typeof shiftPicker>;
@@ -34,7 +34,9 @@ export const SHIFT_PICKER_MESSAGES = {
     backToChat: "Back to chat",
     pickAnother: "Pick a different shift",
     actionFailed: "That shift couldn't be booked",
-    actionFailedBody: "It may have just filled up. Your assistant already knows. You can try again, pick another one or go back to the chat.",
+    actionFailedBody: "Your assistant already knows. You can try again, pick another one or go back to the chat.",
+    shiftGone: "That shift is no longer available",
+    shiftGoneBody: "It just filled up or changed. The list is updated: pick another one.",
     tryAgain: "Try again",
     unavailable: "Shifts aren't available right now",
     unavailableBody: "Your assistant already knows and will follow up in the chat.",
@@ -67,7 +69,9 @@ export const SHIFT_PICKER_MESSAGES = {
     backToChat: "Volver al chat",
     pickAnother: "Elegir otro turno",
     actionFailed: "No se ha podido reservar el turno",
-    actionFailedBody: "Puede que se acabe de completar. Tu asistente ya lo sabe. Puedes reintentarlo, elegir otro o volver al chat.",
+    actionFailedBody: "Tu asistente ya lo sabe. Puedes reintentarlo, elegir otro o volver al chat.",
+    shiftGone: "Ese turno ya no está disponible",
+    shiftGoneBody: "Se acaba de completar o ha cambiado. La lista está actualizada: elige otro.",
     tryAgain: "Reintentar",
     unavailable: "Los turnos no están disponibles ahora mismo",
     unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
@@ -80,11 +84,12 @@ export const SHIFT_PICKER_MESSAGES = {
 export type ShiftPickerMessages = (typeof SHIFT_PICKER_MESSAGES)["en"];
 
 export function ShiftPicker({ messages }: { messages?: Partial<ShiftPickerMessages> }) {
-  const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(shiftPicker);
+  const { status, data, errorCode, locale, emit, reload, complete, returnUrl } = useSurface(shiftPicker);
   const t: ShiftPickerMessages = { ...pickLocalized(SHIFT_PICKER_MESSAGES, locale)!, ...messages };
   const [selected, setSelected] = useState<OpenShift | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [gone, setGone] = useState(false);
   // Show the booking banner only for a booking made on this screen, not one from an earlier link.
   const [justBooked, setJustBooked] = useState(false);
 
@@ -112,13 +117,22 @@ export function ShiftPicker({ messages }: { messages?: Partial<ShiftPickerMessag
   async function book(s: OpenShift) {
     setBusy(true);
     setFailed(false);
+    setGone(false);
     try {
       await emit("shift_selected", { shift_id: s.id, date: s.date, start: s.start, end: s.end, location: s.location });
       setSelected(null);
       setJustBooked(true);
-    } catch {
+    } catch (err) {
       // The server already recorded the failure for the agent; here we only tell the user.
-      setFailed(true);
+      const reason = err instanceof SurfaceActionError ? err.reason : undefined;
+      if (reason === "shift_full" || reason === "shift_not_found" || reason === "shift_changed") {
+        // Retrying can't help: show what changed and refresh the list.
+        setSelected(null);
+        setGone(true);
+        await reload().catch(() => {});
+      } else {
+        setFailed(true);
+      }
     } finally {
       setBusy(false);
     }
@@ -151,6 +165,13 @@ export function ShiftPicker({ messages }: { messages?: Partial<ShiftPickerMessag
         <p className="text-sm text-muted-foreground">{t.yourShift}</p>
         {data.current ? <ShiftDetails s={data.current} day={day} t={t} large /> : <p className="mt-1 text-sm">{t.noShift}</p>}
       </Card>
+
+      {gone && (
+        <Card className="border-warning/50 bg-warning/10">
+          <p className="font-medium">{t.shiftGone}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t.shiftGoneBody}</p>
+        </Card>
+      )}
 
       {failed && selected && (
         <Card className="border-destructive/40 bg-destructive/10">

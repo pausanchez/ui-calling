@@ -66,6 +66,17 @@ export function snapshot(c: Conversation) {
   return { mode: MODE, chat: c.chat, timeline: c.timeline, typing: c.typing };
 }
 
+/** Resolves once no agent turn is queued or running, including turns that UI events start meanwhile. */
+export async function settled(id: string) {
+  for (;;) {
+    const c = conversations.get(id);
+    if (!c) return;
+    const q = c.queue;
+    await q;
+    if (q === c.queue) return;
+  }
+}
+
 /** Serialize turns per conversation so user messages and UI wake-ups never interleave. */
 function enqueue(c: Conversation, fn: () => Promise<void>) {
   c.queue = c.queue
@@ -252,7 +263,10 @@ function currentShiftText(c: Conversation, workerId: string) {
 }
 
 async function scriptedReply(c: Conversation, text: string) {
-  c.locale = /[¿¡ñ]|\b(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar)\b/i.test(text) ? "es" : "en";
+  // Unicode-aware word edges: \b is ASCII-only, so it fails next to accented letters ("está").
+  c.locale = /[¿¡ñ]|(?<!\p{L})(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar)(?!\p{L})/iu.test(text)
+    ? "es"
+    : "en";
   const s = SCRIPT[c.locale];
   const [orderId] = listOrderIds(c.subject);
   const [workerId] = listWorkerIds(c.subject);

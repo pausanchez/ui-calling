@@ -40,7 +40,7 @@ export const __MESSAGES__ = {
 export type __Component__Messages = (typeof __MESSAGES__)["en"];
 
 export function __Component__({ messages }: { messages?: Partial<__Component__Messages> }) {
-  const { status, data, errorCode, locale, emit, returnUrl } = useSurface(__const__);
+  const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(__const__);
   const t: __Component__Messages = { ...pickLocalized(__MESSAGES__, locale)!, ...messages };
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -90,7 +90,12 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
         <Card className="border-success/40 bg-success/10">
           <p className="font-medium">{t.confirmed}</p>
           <p className="mt-1 text-sm text-muted-foreground">{t.assistantKnows}</p>
-          {returnUrl && <a href={returnUrl} className={btn("primary", "mt-3 w-full")}>{t.backToChat}</a>}
+          {/* complete() tells the agent the user finished here; call it when they're done, not on every action. */}
+          {returnUrl && (
+            <a href={returnUrl} onClick={() => void complete()} className={btn("primary", "mt-3 w-full")}>
+              {t.backToChat}
+            </a>
+          )}
         </Card>
       ) : (
         <Card>

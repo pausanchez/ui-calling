@@ -8,7 +8,8 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @ui-calling/demo",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "npm run typecheck && node scripts/test-cli.mjs && npm run smoke -w @ui-calling/demo"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -32,6 +32,13 @@ Open http://localhost:5173 and ask "¿Dónde está mi pedido?" or "Are there any
 - With `ANTHROPIC_API_KEY` set, the agent is Claude (`claude-opus-5-5`) using the generated tool schemas.
 - Without it, a scripted agent runs the same loop, so the demo works offline. Force either with `AGENT=claude|scripted`.
 - `ABANDON_AFTER_MS` (default 90000) controls when an opened-but-untouched screen wakes the agent.
+- `npm install` may warn about unapproved install scripts (esbuild, fsevents); it still works.
+
+Run the tests: typecheck, the generator in several layouts, and an in-process smoke test of the whole loop. No ports or API key needed:
+
+```bash
+npm test
+```
 
 ## Packages
 
@@ -160,5 +167,6 @@ Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the
 - Persistent store and job queue (the defaults are in-memory, with an in-process abandon timer)
 - Real WhatsApp Cloud API sending (`whatsappCtaMessage` builds the payload; the demo logs it)
 - An MCP server adapter, so any MCP client can call surfaces
-- More blocks: shift picker, payslip viewer, document signing, availability calendar
+- Adapters for the agent SDKs people already use (Vercel AI SDK, Anthropic, OpenAI)
+- More blocks: payslip viewer, document signing, availability calendar (a shift picker exists in the demo)
 - More languages in the blocks (en and es today)

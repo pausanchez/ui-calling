@@ -22,15 +22,21 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 
 ```bash
 npm install
+npm test                   # typecheck + generator test + in-process demo smoke test (no ports, no API key)
 npm run typecheck          # the whole monorepo, including registry blocks and templates
 npm run dev                # demo at http://localhost:5173 (API on 8787); reads ANTHROPIC_API_KEY from .env
 ```
 
 Without an API key the demo runs a scripted agent, which is enough to test the screen-to-agent loop.
 
+`npm install` may warn that install scripts for esbuild and fsevents weren't approved. That's npm's script policy, and everything still works.
+
 ## Conventions
 
-- **Blocks:** `packages/cli/registry` is the source of truth. After editing a block, copy it into the demo with `cd apps/demo && npx ui-calling add <block> --force`. Never edit the demo copy alone.
+- **Blocks vs. demo surfaces:**
+  - A surface goes in `packages/cli/registry` only when it's generic enough that products would use it unchanged apart from their data and tokens.
+  - Everything else is demo-only: create it with `ui-calling new` inside `apps/demo`.
+  - The registry is the source of truth for its blocks. After editing one, copy it into the demo with `cd apps/demo && npx ui-calling add <block> --force`; never edit the demo copy alone.
 - **Templates:** `packages/cli/templates/surface` must stay valid TypeScript. Placeholders (`__name__`, `__surface__`, `__const__`, `__Component__`, `__MESSAGES__`) are real identifiers, so the typecheck covers generated code.
 - **Strings:**
   - Text the user sees goes in en/es message objects.
@@ -38,10 +44,23 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 - **No real company names** anywhere in the repo. Use generic examples, like "Acme Store" or "Rapido Express".
 - **Code style:** match the code around you: short comments that explain why, no new dependencies without a reason.
 
+## Adding a surface to the demo
+
+1. `cd apps/demo && npx ui-calling new <name> --server-dir server`, then follow [GUIDE.md](packages/cli/GUIDE.md).
+2. Put mock data in `server/<topic>.ts` with a `seed…()` function, and add an outage switch to `server/failures.ts` if the surface calls a "third party".
+3. In `server/ui.ts`, register the implementation in `createUiCalling({ surfaces })`.
+4. In `server/app.ts`, call your `seed…()` on reset and reset your outage switch there; accept the switch in `POST /api/demo/failures`.
+5. In `server/agent.ts`:
+   - Put the IDs the agent needs in the system prompt.
+   - Teach the scripted agent: the topic regex, an `SCRIPT` entry in en/es, and the follow-up in `scriptedFollowUp`.
+6. In `src/surface-page.tsx`, add the surface to `SURFACES`.
+7. In `src/chat.tsx`, add a suggestion chip and, if you added one, the outage switch.
+8. In `server/smoke.ts`, add checks: the outcome reaches the agent, failures carry a `reason`, and the locale is right.
+
 ## Verifying changes
 
-1. `npm run typecheck`.
-2. If you touched the runtime, server or demo, drive the loop with the API:
+1. `npm test`. It runs in-process, so it works while someone else has the dev server running.
+2. If you need to poke a running demo, drive the loop with the API:
 
    ```bash
    B=localhost:5173/api

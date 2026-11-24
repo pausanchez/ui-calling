@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"tsx watch --env-file-if-exists=../../.env server/index.ts\" \"vite\"",
     "build": "vite build",
+    "smoke": "tsx server/smoke.ts",
     "start": "NODE_ENV=production PUBLIC_URL=${PUBLIC_URL:-http://localhost:8787} tsx --env-file-if-exists=../../.env server/index.ts",
     "ui-calling": "ui-calling"
   },

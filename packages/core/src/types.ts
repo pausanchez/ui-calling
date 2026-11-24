@@ -52,6 +52,8 @@ export class UiCallingError extends Error {
           ? 502
           : 400,
     public retryable = false,
+    /** For `upstream_error`: the `SurfaceError` code (e.g. "shift_full"), so the screen can explain it in the user's language. */
+    public reason?: string,
   ) {
     super(message);
   }
