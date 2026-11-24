@@ -143,6 +143,32 @@ Tell the agent in its system prompt:
 - **The URL carries only the token.** Never put personal data in `input`; load it in `resolve`.
 - **Strings live in the messages object.** Use `locale` from `useSurface()` for dates and currency (`toLocaleDateString(locale)`, `toLocaleString(locale, { style: "currency" })`).
 
+## Designing the screen
+
+A surface isn't a page of your website. The user is mid-conversation, on a phone, often inside WhatsApp's in-app browser and using one hand. They came from a message and they'll go back to it.
+
+- **Open a screen only when a message can't do the job.** Good reasons: picking from options with details (slots, shifts, seats), seeing something visual (a timeline, a map, a document), entering something private (a code), or reviewing several items before confirming. If one question and one answer in the chat would do, keep it in the chat.
+- **One job per screen.** No navigation, menus or login: the link already says who the user is. Top to bottom:
+  1. What this is: a title the user recognizes from the chat ("Order A-1042") and its state.
+  2. The facts they asked about, formatted with `locale`.
+  3. The one decision, with real options from your data. Don't make people type what you already know.
+  4. One primary action at the bottom, labeled with what it does ("Confirm change", not "Submit").
+- **Design every state.** Each one says what happened and what to do next:
+
+  | State | What the screen shows |
+  |---|---|
+  | `loading` | A skeleton in the final layout |
+  | Failed `emit` | A plain message by `reason`; "Try again" only if it can work |
+  | `errorCode === "upstream_error"` | "Not available right now"; the assistant will follow up in the chat |
+  | After the action | The outcome, "your assistant already knows", and a way back to the chat that calls `complete()` |
+  | `completed` | "All done here" and a way back (`surface-screen.tsx` from `init` handles it) |
+  | `expired` | Ask the assistant for a new link |
+
+- **Write like the conversation.** Short, in the user's language and your brand's voice. Never show error codes or upstream messages: the agent gets those, the user gets a plain sentence.
+- **Fit the phone.** Design at 375px first: one column (`max-w-md`), `min-h-dvh` so the browser's bars don't hide the bottom button, and tap targets of at least 44px (`h-11`).
+- **Use the tokens.** `tokens.css` uses shadcn/ui variable names (`--primary`, `--background`, `--card`, `--muted-foreground`, `--success`, `--destructive`, `--radius`). Change their values to match your brand, and every block and generated screen follows. Dark mode follows the phone's setting.
+- **Start from a block or the template.** `npx ui-calling add order-status` and `npx ui-calling new` already handle every state above.
+
 ## WhatsApp: who is the `subject`?
 
 On WhatsApp, Meta identifies each user with a **BSUID** (business-scoped user ID), unique within your business portfolio. The phone number is only included when you exchanged messages or calls with it in the last 30 days, or it's in your contact book. Users with a WhatsApp username may never share it. So:
@@ -186,6 +212,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 - [ ] Each event's `describe` states what the user asked for; handlers return fresh data; failures throw `SurfaceError`.
 - [ ] The screen handles `loading`, `expired`, `completed`, `error` with `errorCode === "upstream_error"`, and a failed `emit` (by `reason`).
 - [ ] `complete()` is called when the user is done.
+- [ ] The screen does one job, works at 375px with one thumb, and shows the outcome before sending the user back to the chat.
 - [ ] An in-process test covers the outcome, a failure and a foreign `subject`.
 - [ ] Every user-facing string is in the messages object, in en and es.
 - [ ] The implementation is registered, the component is routed, and the typecheck passes.
