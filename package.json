@@ -9,13 +9,15 @@
   "scripts": {
     "dev": "npm run dev -w @ui-calling/demo",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "npm run typecheck && node scripts/test-cli.mjs && tsx scripts/test-adapters.ts && tsx scripts/test-store.ts && npm run smoke -w @ui-calling/demo"
+    "test": "npm run typecheck && node scripts/test-cli.mjs && tsx -C ui-calling-source scripts/test-adapters.ts && tsx -C ui-calling-source scripts/test-store.ts && npm run smoke -w @ui-calling/demo",
+    "build": "npm run build --workspace=packages --if-present"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "concurrently": "^9.2.0",
+    "tsup": "^9.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }

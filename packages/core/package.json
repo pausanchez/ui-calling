@@ -4,8 +4,38 @@
   "description": "Surfaces, handoff sessions and semantic events: let an AI agent call a UI like a function.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./whatsapp": "./src/channels/whatsapp.ts"
+    ".": {
+      "ui-calling-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./whatsapp": {
+      "ui-calling-source": "./src/channels/whatsapp.ts",
+      "types": "./dist/whatsapp.d.ts",
+      "default": "./dist/whatsapp.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts",
+      "whatsapp": "src/channels/whatsapp.ts"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "removeNodeProtocol": false
   },
   "dependencies": {
     "zod": "^4.1.0"

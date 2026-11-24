@@ -33,6 +33,12 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 
 `npm install` may warn that install scripts for esbuild and fsevents weren't approved. That's npm's script policy, and everything still works.
 
+## Packages and builds
+
+- Each package's `exports` lists `ui-calling-source` (→ `src/`) before `types`/`default` (→ `dist/`). The repo turns that condition on in `tsconfig.json` (`customConditions`), in every `tsx` call (`-C ui-calling-source`) and in the demo's Vite config. Never import from `dist/` inside the repo.
+- `npm run build` runs tsup in every package. tsup settings live in each `package.json` (`"tsup"`), including `removeNodeProtocol: false`: without it, `node:sqlite` is emitted as `sqlite` and breaks for users.
+- After changing the `init` templates, verify them in a real app, not only with the typecheck. TypeScript accepted a page that Next.js 16 refused to prerender. Use `create-next-app`, install the packed tarballs, run `init`, `new` and `next build`.
+
 ## Conventions
 
 - **Blocks vs. demo surfaces:**

@@ -3,6 +3,35 @@
   "version": "0.0.1",
   "description": "Use UI_calling surfaces as function tools with OpenAI's Responses or Chat Completions API. No SDK dependency.",
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "dependencies": { "@ui-calling/core": "*" }
+  "exports": {
+    ".": {
+      "ui-calling-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "removeNodeProtocol": false
+  },
+  "dependencies": {
+    "@ui-calling/core": "^0.0.1"
+  }
 }

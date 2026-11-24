@@ -4,10 +4,38 @@
   "description": "React bindings for UI_calling surfaces: typed data, semantic events, automatic lifecycle tracking.",
   "type": "module",
   "exports": {
-    ".": "./src/index.tsx"
+    ".": {
+      "ui-calling-source": "./src/index.tsx",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.tsx"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "banner": {
+      "js": "\"use client\";"
+    },
+    "removeNodeProtocol": false
   },
   "dependencies": {
-    "@ui-calling/core": "*"
+    "@ui-calling/core": "^0.0.1"
   },
   "peerDependencies": {
     "react": ">=18"

@@ -3,7 +3,39 @@
   "version": "0.0.1",
   "description": "Zero-config persistence for UI_calling sessions and events, on Node's built-in SQLite (node:sqlite). No dependencies.",
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "engines": { "node": ">=22.13" },
-  "dependencies": { "@ui-calling/core": "*" }
+  "exports": {
+    ".": {
+      "ui-calling-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "platform": "node",
+    "removeNodeProtocol": false
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@ui-calling/core": "^0.0.1"
+  }
 }

@@ -4,10 +4,35 @@
   "description": "HTTP routes that serve UI_calling surfaces and collect their events (Hono, runs on Node, Bun, Workers).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "ui-calling-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "removeNodeProtocol": false
   },
   "dependencies": {
-    "@ui-calling/core": "*",
+    "@ui-calling/core": "^0.0.1",
     "hono": "^4.9.0"
   }
 }

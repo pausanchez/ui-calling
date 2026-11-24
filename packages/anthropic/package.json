@@ -4,10 +4,35 @@
   "description": "Use UI_calling surfaces as tools with the Anthropic SDK (tool runner or manual loop).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "ui-calling-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "removeNodeProtocol": false
   },
   "dependencies": {
-    "@ui-calling/core": "*"
+    "@ui-calling/core": "^0.0.1"
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=1.0.0"

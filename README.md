@@ -206,6 +206,30 @@ The demo keeps its own state in the same file, so you can restart it mid-convers
 - Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
 - On WhatsApp, sessions are tied to the BSUID from a signed webhook, and surfaces check that it's linked to the customer whose data they show.
 
+## Building and publishing
+
+```bash
+npm run build
+```
+
+This builds every package with tsup into `dist/` (ESM, `.d.ts` and source maps). Published packages ship only `dist/`. Inside this repo, a custom export condition, `ui-calling-source`, makes TypeScript, tsx and Vite read `src/` directly, so development and tests never need a build.
+
+To try a release before publishing, pack the packages and install the tarballs in a fresh app:
+
+```bash
+npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli --pack-destination /tmp/ui-calling
+```
+
+This was verified end to end on a new Next.js 16 app (`create-next-app` defaults), installed from tarballs:
+- `npx ui-calling init` and `npx ui-calling new ticket`;
+- `next build` and `next start`;
+- a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
+
+Before the first publish, decide:
+- **License.** There's none yet.
+- **The npm `@ui-calling` scope.** Create the npm organization, and check that the unscoped `ui-calling` name for the CLI is free.
+- **The first version number.** Every package is `0.0.1`, and internal dependencies use `^0.0.1`.
+
 ## Not done yet
 
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
