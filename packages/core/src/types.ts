@@ -8,6 +8,8 @@ export type UiSession = {
   subject: string;
   surface: string;
   input: Record<string, unknown>;
+  /** BCP 47 language the screen renders in, chosen by the agent from the conversation. */
+  locale: string;
   status: SessionStatus;
   createdAt: string;
   expiresAt: string;

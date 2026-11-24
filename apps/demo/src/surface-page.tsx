@@ -12,8 +12,8 @@ export function SurfacePage({ token }: { token: string }) {
 
 function Router() {
   const { status, surface, error } = useSurfaceName();
-  if (surface === "order_status") return <OrderStatus />;
-  if (status === "loading") return <OrderStatus />;
+  // Until a surface is known (loading, expired, bad link), let the block render its own localized states.
+  if (!surface || surface === "order_status") return <OrderStatus />;
   return (
     <main className="grid min-h-dvh place-items-center bg-background p-6 text-center">
       <div>

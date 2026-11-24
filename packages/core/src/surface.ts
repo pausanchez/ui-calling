@@ -34,6 +34,8 @@ export type SurfaceContract<
   /** What the screen renders. Resolved server-side when the link is opened, never carried in the URL. */
   data: D;
   events: E;
+  /** Button text for the link, per language: { en: "View order", es: "Ver pedido" }. */
+  cta?: Record<string, string>;
 };
 
 export function defineSurface<

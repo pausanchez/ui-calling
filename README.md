@@ -89,6 +89,15 @@ emit("reschedule_delivery", { date, window });   // typed from the contract
 
 Lifecycle events (`opened`, `returned`, `left`, `completed`, `abandoned`) are tracked automatically.
 
+## Language
+
+Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:
+
+- `ui.call()` returns `ctaLabel`, picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
+- `useSurface()` returns `locale` for dates and currency (`Intl`), and the provider sets `<html lang>`.
+- Blocks keep their strings in an exported dictionary (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
+- `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
+
 ## Security model
 
 - The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
@@ -104,4 +113,4 @@ Lifecycle events (`opened`, `returned`, `left`, `completed`, `abandoned`) are tr
 - Real WhatsApp Cloud API sending (`whatsappCtaMessage` builds the payload; the demo logs it)
 - An MCP server adapter, so any MCP client can call surfaces
 - More blocks: shift picker, payslip viewer, document signing, availability calendar
-- i18n for blocks
+- More languages in the blocks (en and es today)

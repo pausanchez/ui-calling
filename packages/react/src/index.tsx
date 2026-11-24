@@ -6,6 +6,8 @@ type Status = "loading" | "ready" | "expired" | "error";
 type ContextValue = {
   status: Status;
   surface?: string;
+  /** The session's language; the browser's until the session has loaded. */
+  locale: string;
   data: unknown;
   error?: string;
   emit: (type: string, payload?: unknown) => Promise<void>;
@@ -21,9 +23,9 @@ const SurfaceContext = createContext<ContextValue | null>(null);
  */
 export function SurfaceProvider(props: { token: string; endpoint?: string; returnUrl?: string; children: ReactNode }) {
   const base = `${props.endpoint ?? "/api/ui"}/sessions/${encodeURIComponent(props.token)}`;
-  const [state, setState] = useState<{ status: Status; surface?: string; data?: unknown; error?: string }>({
-    status: "loading",
-  });
+  const [state, setState] = useState<{ status: Status; surface?: string; locale?: string; data?: unknown; error?: string }>(
+    { status: "loading" },
+  );
   const opened = useRef(false);
 
   const emit = useCallback(
@@ -48,7 +50,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         if (cancelled) return;
         if (res.status === 410) return setState({ status: "expired", error: json.message });
         if (!res.ok) return setState({ status: "error", error: json.message ?? json.error });
-        setState({ status: "ready", surface: json.surface, data: json.data });
+        setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
         if (!opened.current) {
           opened.current = true;
           void emit("opened");
@@ -75,9 +77,14 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [state.status, base, emit]);
 
+  const locale = state.locale ?? (typeof navigator === "undefined" ? "en" : navigator.language);
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   const value = useMemo<ContextValue>(
-    () => ({ ...state, data: state.data, emit, returnUrl: props.returnUrl }),
-    [state, emit, props.returnUrl],
+    () => ({ ...state, locale, data: state.data, emit, returnUrl: props.returnUrl }),
+    [state, locale, emit, props.returnUrl],
   );
   return <SurfaceContext.Provider value={value}>{props.children}</SurfaceContext.Provider>;
 }
@@ -92,6 +99,7 @@ export function useSurface<S extends AnySurface>(surface: S) {
   return {
     status: ctx.status,
     error: ctx.error,
+    locale: ctx.locale,
     data: ctx.data as SurfaceData<S> | undefined,
     returnUrl: ctx.returnUrl,
     emit: ctx.emit as <K extends SurfaceEventName<S>>(type: K, payload: SurfaceEventPayload<S, K>) => Promise<void>,
@@ -102,5 +110,5 @@ export function useSurface<S extends AnySurface>(surface: S) {
 /** Which surface a token points to, for routing between several surfaces on one page. */
 export function useSurfaceName() {
   const ctx = useContext(SurfaceContext);
-  return { status: ctx?.status ?? "loading", surface: ctx?.surface, error: ctx?.error };
+  return { status: ctx?.status ?? "loading", surface: ctx?.surface, locale: ctx?.locale, error: ctx?.error };
 }

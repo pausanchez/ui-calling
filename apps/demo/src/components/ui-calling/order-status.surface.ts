@@ -8,6 +8,7 @@ export const orderStatus = defineSurface({
   description:
     "Live status of a customer's order: tracking steps, delivery date, items and total. Lets the user reschedule the delivery or report a problem. Use it when the user asks where their order is, when it arrives, or wants to change the delivery.",
   input: z.object({ order_id: z.string().describe("The order to show, e.g. A-1042") }),
+  cta: { en: "View order", es: "Ver pedido" },
   data: z.object({
     id: z.string(),
     status: z.enum(["placed", "shipped", "in_transit", "out_for_delivery", "delivered", "issue"]),

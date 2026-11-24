@@ -3,7 +3,13 @@ import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload, Su
 import { MemoryStore, type UiStore } from "./store";
 import { LIFECYCLE_EVENTS, UiCallingError, type LifecycleEvent, type UiEvent, type UiSession } from "./types";
 
-export type SurfaceContext = { session: UiSession; subject: string; conversationId: string };
+export type SurfaceContext = { session: UiSession; subject: string; conversationId: string; locale: string };
+
+/** Added to every surface's tool schema so the screen speaks the conversation's language. */
+const LOCALE = z
+  .string()
+  .regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/)
+  .describe("Language for the screen as a BCP 47 tag, e.g. es, en-GB, pt-BR. Use the language the user is writing in.");
 
 /** Server-side half of a surface: where its data comes from and what its events do. */
 export type SurfaceImpl<S extends AnySurface = AnySurface> = {
@@ -39,6 +45,8 @@ export type UiCallingOptions = {
   /** Called for every recorded event. This is the return path to the agent. */
   onEvent?: (event: UiEvent) => void | Promise<void>;
   toolPrefix?: string;
+  /** Used when a caller doesn't pass `locale`. */
+  defaultLocale?: string;
 };
 
 const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
@@ -55,6 +63,7 @@ export function createUiCalling(opts: UiCallingOptions) {
   const ttl = opts.ttlSeconds ?? 60 * 60;
   const prefix = opts.toolPrefix ?? "show_";
   const pathPrefix = opts.pathPrefix ?? "/s/";
+  const defaultLocale = opts.defaultLocale ?? "en";
   const impls = new Map(opts.surfaces.map((i) => [i.surface.name, i]));
   const byTool = new Map(opts.surfaces.map((i) => [prefix + i.surface.name, i]));
 
@@ -66,7 +75,7 @@ export function createUiCalling(opts: UiCallingOptions) {
   }
 
   function ctxOf(session: UiSession): SurfaceContext {
-    return { session, subject: session.subject, conversationId: session.conversationId };
+    return { session, subject: session.subject, conversationId: session.conversationId, locale: session.locale };
   }
 
   async function record(session: UiSession, e: Omit<UiEvent, "id" | "sessionId" | "conversationId" | "surface" | "at">) {
@@ -109,7 +118,10 @@ export function createUiCalling(opts: UiCallingOptions) {
     /** Tool definitions for any function-calling LLM: one tool per surface. */
     tools(): ToolSpec[] {
       return opts.surfaces.map(({ surface }) => {
-        const { $schema, ...schema } = z.toJSONSchema(surface.input) as Record<string, unknown>;
+        const { $schema, ...schema } = z.toJSONSchema(surface.input.extend({ locale: LOCALE })) as Record<
+          string,
+          unknown
+        >;
         return {
           name: prefix + surface.name,
           description: `Opens a screen for the user. ${surface.description} Returns a secure link for the user plus a summary of what they will see.`,
@@ -126,8 +138,9 @@ export function createUiCalling(opts: UiCallingOptions) {
     async call(toolName: string, rawInput: unknown, who: { conversationId: string; subject: string }) {
       const impl = byTool.get(toolName) ?? impls.get(toolName);
       if (!impl) throw new UiCallingError("unknown_surface", `No surface for tool ${toolName}`);
-      const parsed = impl.surface.input.safeParse(rawInput);
+      const parsed = impl.surface.input.extend({ locale: LOCALE.optional() }).safeParse(rawInput);
       if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
+      const { locale = defaultLocale, ...input } = parsed.data as { locale?: string } & Record<string, unknown>;
 
       const token = randomId(24);
       const now = new Date();
@@ -136,18 +149,22 @@ export function createUiCalling(opts: UiCallingOptions) {
         conversationId: who.conversationId,
         subject: who.subject,
         surface: impl.surface.name,
-        input: parsed.data,
+        input,
+        locale,
         status: "sent",
         createdAt: now.toISOString(),
         expiresAt: new Date(now.getTime() + ttl * 1000).toISOString(),
       };
       // Resolve once now so the agent knows what the user will see (and bad input fails early).
-      const data = await impl.resolve(parsed.data, ctxOf(session));
+      const data = await impl.resolve(input as never, ctxOf(session));
       await store.createSession(session, await sha256(token));
       return {
         url: `${opts.baseUrl}${pathPrefix}${token}`,
         sessionId: session.id,
         surface: impl.surface.name,
+        locale,
+        /** Button text in the session's language, for channels that send the link as a button. */
+        ctaLabel: pickLocalized<string>(impl.surface.cta, locale) ?? "Open",
         expiresAt: session.expiresAt,
         summary: impl.summarize?.(data),
       };
@@ -158,7 +175,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       const session = await sessionFor(token);
       const impl = impls.get(session.surface)!;
       const data = await impl.resolve(session.input as never, ctxOf(session));
-      return { surface: session.surface, data, expiresAt: session.expiresAt };
+      return { surface: session.surface, locale: session.locale, data, expiresAt: session.expiresAt };
     },
 
     /** Record an event coming from the screen, run its handler, return fresh data if any. */
@@ -224,6 +241,17 @@ export function formatEventsForAgent(events: UiEvent[]): string {
     ...lines,
     `</ui_events>`,
   ].join("\n");
+}
+
+/** Best match for a locale: exact tag, then its language ("es-MX" → "es"), then English, then anything. */
+export function pickLocalized<T>(map: Record<string, T> | undefined, locale: string): T | undefined {
+  if (!map) return undefined;
+  const lang = locale.toLowerCase().split("-")[0];
+  const key =
+    Object.keys(map).find((k) => k.toLowerCase() === locale.toLowerCase()) ??
+    Object.keys(map).find((k) => k.toLowerCase() === lang) ??
+    (map.en !== undefined ? "en" : Object.keys(map)[0]);
+  return key === undefined ? undefined : map[key];
 }
 
 function randomId(bytes: number) {
