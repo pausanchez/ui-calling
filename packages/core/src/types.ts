@@ -30,6 +30,12 @@ export type UiEvent = {
   payload: unknown;
   /** Natural-language line, ready to put in the agent's context. */
   description: string;
+  /**
+   * What the screen showed right after this event (via the surface's `summarize`):
+   * what the user saw on `opened`, the outcome of an action (ticket number, new date…).
+   * Lets the agent talk about results it didn't produce itself.
+   */
+  state?: string;
   wake: boolean;
   at: string;
 };

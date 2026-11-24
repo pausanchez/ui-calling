@@ -89,6 +89,25 @@ emit("reschedule_delivery", { date, window });   // typed from the contract
 
 Lifecycle events (`opened`, `returned`, `left`, `completed`, `abandoned`) are tracked automatically.
 
+## Context, not just a callback
+
+The point isn't only that the agent writes again: the conversation continues with everything that happened on the screen, so the user can say "what I reported earlier" and the agent knows. Each event carries three things into the agent's context:
+
+| | Where it comes from | Example |
+|---|---|---|
+| What the user saw | `state` on `opened` (via `summarize`) | items, prices, delivery slot at the moment they opened it |
+| What the user did | `describe(payload)` | "User reported a problem (damaged): …" |
+| What resulted | `state` after the event's handler | "Open issue: damaged, ticket INC-3944" |
+
+```
+<ui_events …>
+- 08:21:04 [order_status] report_problem: User reported a problem (damaged): "…" {…}
+  → screen now shows: Order A-1042: issue … Open issue: damaged, ticket INC-3944.
+</ui_events>
+```
+
+Write `summarize` as "everything the screen shows, in one line": it's the agent's view of the screen.
+
 ## Language
 
 Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:

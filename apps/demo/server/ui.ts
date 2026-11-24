@@ -14,10 +14,14 @@ export const ui = createUiCalling({
   surfaces: [
     implement(orderStatus, {
       resolve: async ({ order_id }, ctx) => getOrder(order_id, ctx.subject),
+      // Everything the screen shows, in one line: this is the agent's view of the screen.
       summarize: (o) =>
-        `Order ${o.id}: ${o.status.replace(/_/g, " ")} with ${o.carrier}, ETA ${o.eta.date} ${o.eta.window}, ` +
-        `${o.items.length} items, delivering to ${o.address}.` +
-        (o.issue ? ` Open issue: ${o.issue.reason} (ticket ${o.issue.ticket}).` : ""),
+        `Order ${o.id}: ${o.status.replace(/_/g, " ")} with ${o.carrier} (${o.trackingCode}), ` +
+        `delivery ${o.eta.date} ${o.eta.window} to ${o.address}. ` +
+        `Items: ${o.items.map((i) => `${i.qty}× ${i.name} at ${i.price} ${o.currency} each`).join(", ")}, ` +
+        `total ${o.items.reduce((s, i) => s + i.qty * i.price, 0).toFixed(2)} ${o.currency}. ` +
+        `Other slots offered: ${o.rescheduleOptions.map((s) => `${s.date} ${s.window}`).join("; ")}.` +
+        (o.issue ? ` Open issue: ${o.issue.reason}, ticket ${o.issue.ticket}.` : ""),
       on: {
         reschedule_delivery: async (slot, ctx) => updateOrder(String(ctx.session.input.order_id), ctx.subject, { eta: slot }),
         report_problem: async (p, ctx) =>

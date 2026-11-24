@@ -141,6 +141,11 @@ export function Chat() {
                         {e.wake && <span className="rounded bg-primary px-1.5 py-0.5 text-[11px] font-medium text-primary-foreground">wake</span>}
                       </div>
                       <p className="mt-1">{e.description}</p>
+                      {e.state && (
+                        <p className="mt-1 border-l-2 border-primary/40 pl-2 text-xs text-muted-foreground">
+                          Screen now shows: {e.state}
+                        </p>
+                      )}
                     </div>
                   </li>
                 ))}
