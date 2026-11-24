@@ -40,7 +40,15 @@ Open http://localhost:5173 and ask "¿Dónde está mi pedido?". It's a simulated
 | `@ui-calling/core` | `defineSurface`, `implement`, `createUiCalling` (tools, sessions, events), `formatEventsForAgent`, WhatsApp CTA adapter |
 | `@ui-calling/server` | Hono routes the screen talks to (`GET /sessions/:token`, `POST /sessions/:token/events`) |
 | `@ui-calling/react` | `<SurfaceProvider>`, `useSurface(contract)`: typed data, typed `emit`, automatic lifecycle tracking |
-| `ui-calling` (CLI) | `init` copies design tokens; `add <block>` copies surfaces into your app, shadcn style |
+| `ui-calling` (CLI) | `new <name>` scaffolds a surface (contract, screen, server); `add <block>` copies ready-made ones; `init` copies design tokens; `guide` prints the building guide |
+
+## Build your own surface
+
+```bash
+npx ui-calling new shift-picker
+```
+
+This generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
 
 ## The primitives
 

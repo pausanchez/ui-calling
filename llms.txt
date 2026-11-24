@@ -1,0 +1,18 @@
+# UI_calling
+
+> Function calling, but the function is a screen. An AI agent opens a prebuilt UI for a user (e.g. from WhatsApp) through a secure link, and what the user sees, does, and what fails there flows back into the agent's context.
+
+Packages: `@ui-calling/core` (contracts, runtime), `@ui-calling/server` (Hono routes), `@ui-calling/react` (provider and hooks), `ui-calling` (CLI: `new`, `add`, `init`, `guide`).
+
+## Docs
+
+- [Building surfaces](packages/cli/GUIDE.md): mental model, `ui-calling new`, setup, agent wiring, rules, done checklist
+- [README](README.md): concepts, context model, errors, language, security
+- [AGENTS.md](AGENTS.md): working on this repository
+
+## Examples
+
+- [order-status contract](packages/cli/registry/blocks/order-status/order-status.surface.ts): a complete surface contract
+- [order-status screen](packages/cli/registry/blocks/order-status/order-status.tsx): screen with en/es strings and error states
+- [Demo server](apps/demo/server/ui.ts): implementation with resolve, summarize, handlers and SurfaceError
+- [Demo agent](apps/demo/server/agent.ts): Claude agent loop that sends links and reacts to events

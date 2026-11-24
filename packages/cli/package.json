@@ -8,6 +8,8 @@
   },
   "files": [
     "bin",
-    "registry"
+    "registry",
+    "templates",
+    "GUIDE.md"
   ]
 }

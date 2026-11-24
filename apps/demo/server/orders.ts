@@ -13,7 +13,7 @@ export function seedOrders() {
     owner: "+34600000000",
     status: "in_transit",
     carrier: "Rapido Express",
-    trackingCode: "SR8842107",
+    trackingCode: "RX8842107",
     eta: { date: "2026-11-26", window: "10:00–14:00" },
     address: "Carrer de Pallars 193, 08005 Barcelona",
     currency: "EUR",
