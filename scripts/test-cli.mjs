@@ -1,30 +1,69 @@
-// Generates surfaces with `ui-calling new` in several folder layouts and typechecks the result.
-// Layouts deliberately use different depths: an import path that's only right by accident fails here.
+// Runs the CLI the way a developer (or coding agent) would, in throwaway projects, and typechecks the result.
+// Layouts deliberately differ in depth: an import path that's only right by accident fails here.
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const tmp = join(root, ".tmp-cli-test");
 const cli = join(root, "packages/cli/bin/ui-calling.mjs");
+const run = (cwd, ...args) => execFileSync("node", [cli, ...args], { cwd, stdio: "pipe" }).toString();
+const read = (...p) => readFileSync(join(tmp, ...p), "utf8");
 
-const layouts = [
-  ["same-dir", ["--dir", "components"]],
-  ["server-shallower", ["--dir", "src/components/ui-calling", "--server-dir", "server"]],
-  ["server-deeper", ["--dir", "ui", "--server-dir", "server/api/surfaces"]],
-];
+function project(name, pkg, dirs = [], files = {}) {
+  const dir = join(tmp, name);
+  for (const d of ["", ...dirs]) mkdirSync(join(dir, d), { recursive: true });
+  writeFileSync(join(dir, "package.json"), JSON.stringify(pkg));
+  for (const [f, s] of Object.entries(files)) writeFileSync(join(dir, f), s);
+  return dir;
+}
 
 rmSync(tmp, { recursive: true, force: true });
 try {
-  for (const [name, args] of layouts) {
-    const dir = join(tmp, name);
-    mkdirSync(dir, { recursive: true });
-    execFileSync("node", [cli, "new", "shift-picker", ...args], { cwd: dir, stdio: "pipe" });
+  // `new` on its own, in three layouts (no ui-calling.json).
+  for (const [name, args] of [
+    ["new-same-dir", ["--dir", "components"]],
+    ["new-server-shallower", ["--dir", "src/components/ui-calling", "--server-dir", "server"]],
+    ["new-server-deeper", ["--dir", "ui", "--server-dir", "server/api/surfaces"]],
+  ]) {
+    run(project(name, {}), "new", "shift-picker", ...args);
     console.log(`generated  ${name}`);
   }
+
+  // `init` then `new`, in the project shapes people have.
+  const next = project("init-next-src", { dependencies: { next: "15" } }, ["src/app"], { "AGENTS.md": "# Agents\n" });
+  const out = run(next, "init");
+  assert.match(out, /Next\.js/);
+  run(next, "new", "shift-picker");
+  run(next, "new", "link-account");
+  run(next, "new", "shift-picker"); // again: files are skipped, registration stays single
+  const runtime = read("init-next-src", "src/ui-calling/ui.ts");
+  assert.equal(runtime.match(/shiftPickerImpl,/g)?.length, 1, "registered once");
+  assert.match(runtime, /linkAccountImpl,/);
+  const screen = read("init-next-src", "src/ui-calling/surface-screen.tsx");
+  assert.match(screen, /shift_picker: \(\) => <ShiftPicker \/>/);
+  assert.match(read("init-next-src", "src/app/api/ui/[...path]/route.ts"), /from "\.\.\/\.\.\/\.\.\/\.\.\/ui-calling\/ui"/);
+  assert.equal(read("init-next-src", "AGENTS.md").match(/<!-- ui-calling -->/g)?.length, 1);
+  run(next, "init"); // re-running init doesn't clobber or duplicate
+  assert.equal(read("init-next-src", "AGENTS.md").match(/<!-- ui-calling -->/g)?.length, 1);
+  assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /shiftPickerImpl,/, "init without --force keeps registrations");
+  console.log("generated  init-next-src (+2 surfaces)");
+
+  const nextRoot = project("init-next-app", { dependencies: { next: "15" } }, ["app"]);
+  run(nextRoot, "init", "--deliver", "message");
+  run(nextRoot, "new", "payslip");
+  assert.match(read("init-next-app", "ui-calling/ui.ts"), /deliverLinks: "message"/);
+  console.log("generated  init-next-app (+1 surface)");
+
+  const vite = project("init-vite", { devDependencies: { vite: "7" } });
+  assert.match(run(vite, "init"), /uiCallingHandler/);
+  run(vite, "new", "order-tracker");
+  console.log("generated  init-vite (+1 surface)");
+
   writeFileSync(join(tmp, "tsconfig.json"), JSON.stringify({ extends: "../tsconfig.json", include: ["./**/*.ts", "./**/*.tsx"] }));
   execFileSync("npx", ["tsc", "-p", join(tmp, "tsconfig.json")], { cwd: root, stdio: "inherit" });
-  console.log("ok         generated code typechecks in every layout");
+  console.log("ok         init and new produce code that typechecks in every layout");
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

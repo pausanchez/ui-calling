@@ -53,15 +53,19 @@ npm test
 | `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
-| `ui-calling` (CLI) | `new <name>` scaffolds a surface (contract, screen, server); `add <block>` copies ready-made ones; `init` copies design tokens; `guide` prints the building guide |
+| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it; `add <block>` copies ready-made ones; `guide` prints the building guide |
 
-## Build your own surface
+## Add it to your project
+
+```bash
+npx ui-calling init
+```
 
 ```bash
 npx ui-calling new shift-picker
 ```
 
-This generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
+`init` detects Next.js or Vite and writes the runtime, the API route, the `/s/[token]` page and the tokens. It also leaves a `ui-calling.json` so that `new` registers each surface by itself. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
 
 ## The primitives
 

@@ -38,3 +38,17 @@ export function uiCallingRoutes(ui: UiCalling) {
 
   return app;
 }
+
+/**
+ * The same routes as a plain `(Request) => Response` handler, for frameworks that take one:
+ * Next.js route handlers, Remix/React Router actions, Bun.serve, Deno, Workers…
+ *
+ *   // app/api/ui/[...path]/route.ts
+ *   const handler = uiCallingHandler(ui);
+ *   export { handler as GET, handler as POST };
+ */
+export function uiCallingHandler(ui: UiCalling, opts: { basePath?: string } = {}) {
+  const app = new Hono().basePath(opts.basePath ?? "/api/ui");
+  app.route("/", uiCallingRoutes(ui));
+  return (request: Request) => app.fetch(request);
+}

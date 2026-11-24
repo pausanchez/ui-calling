@@ -30,6 +30,26 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 
 ## One-time setup in a product
 
+```bash
+npx ui-calling init
+```
+
+Run it in your project's root. It detects Next.js or Vite and writes:
+- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
+- `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
+- `ui-calling/tokens.css`: design tokens, with shadcn variable names.
+- **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`) and the landing page (`app/s/[token]/page.tsx`).
+- `ui-calling.json`: where things live. With it, `ui-calling new` registers each new surface in `ui.ts` and `surface-screen.tsx` by itself.
+- **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
+
+Without Next.js, mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
+- **`uiCallingHandler(ui)`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like.
+- **`uiCallingRoutes(ui)`** is a Hono app.
+
+Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`.
+
+What the generated files amount to, if you'd rather write it by hand:
+
 ```ts
 // server
 import { createUiCalling, formatEventsForAgent } from "@ui-calling/core";
@@ -51,10 +71,6 @@ app.route("/api/ui", uiCallingRoutes(ui));    // Hono; works on Node, Bun, Worke
 <SurfaceProvider token={token} returnUrl="https://wa.me/<business-number>">
   <ShiftPicker />
 </SurfaceProvider>
-```
-
-```bash
-npx ui-calling init    # design tokens (shadcn variable names); import after Tailwind
 ```
 
 ## Wiring the agent

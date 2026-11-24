@@ -9,6 +9,7 @@ import { anthropicRunnableTools, anthropicToolResult, anthropicTools } from "@ui
 import { aiSdkTools } from "@ui-calling/ai-sdk";
 import { openaiChatTools, openaiResponsesTools, runChatToolCall, runResponsesFunctionCall } from "@ui-calling/openai";
 import { createUiCallingMcpServer } from "@ui-calling/mcp";
+import { uiCallingHandler } from "@ui-calling/server";
 
 const ticket = defineSurface({
   name: "ticket",
@@ -117,6 +118,19 @@ await check("mcp: a client lists the surfaces and calls one through the protocol
   const missing = await client.callTool({ name: "show_ticket", arguments: { ticket_id: "missing" } });
   assert.equal(missing.isError, true);
   await client.close();
+});
+
+await check("server: uiCallingHandler serves the routes as a plain fetch handler, errors included", async () => {
+  const handler = uiCallingHandler(ui);
+  const run = await ui.runTool("show_ticket", input, who);
+  assert.ok(run.ok);
+  const token = run.link.url.split("/s/")[1];
+  const open = await handler(new Request(`https://app.example.com/api/ui/sessions/${token}`));
+  assert.equal(open.status, 200);
+  assert.equal(((await open.json()) as { surface: string }).surface, "ticket");
+  const missing = await handler(new Request("https://app.example.com/api/ui/sessions/nope"));
+  assert.equal(missing.status, 404, "UiCallingError status survives the basePath mount");
+  assert.equal(((await missing.json()) as { error: string }).error, "not_found");
 });
 
 console.log(`\n${passed} checks passed`);
