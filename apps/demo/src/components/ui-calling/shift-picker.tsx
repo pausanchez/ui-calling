@@ -7,8 +7,9 @@ type Board = SurfaceData<typeof shiftPicker>;
 type Shift = NonNullable<Board["current"]>;
 type OpenShift = Board["open"][number];
 
-/** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop. */
-export const SHIFT_PICKER_MESSAGES = {
+/** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop.
+ * Not exported: a file that only exports components keeps Fast Refresh working. */
+const SHIFT_PICKER_MESSAGES = {
   en: {
     hello: (name: string) => `Hi ${name}`,
     title: "Pick a shift",

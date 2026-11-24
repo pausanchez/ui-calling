@@ -3,8 +3,9 @@ import { pickLocalized } from "@ui-calling/core";
 import { SurfaceActionError, useSurface } from "@ui-calling/react";
 import { linkAccount } from "./link-account.surface";
 
-/** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop. */
-export const LINK_ACCOUNT_MESSAGES = {
+/** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop.
+ * Not exported: a file that only exports components keeps Fast Refresh working. */
+const LINK_ACCOUNT_MESSAGES = {
   en: {
     title: "Verify it's you",
     intro: "To show you personal details in this chat, we need to link it to your account once.",

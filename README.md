@@ -161,7 +161,7 @@ Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the
 
 - `ui.call()` returns `ctaLabel`, picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
 - `useSurface()` returns `locale` for dates and currency (`Intl`), and the provider sets `<html lang>`.
-- Blocks keep their strings in an exported dictionary (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
+- Blocks keep their strings in a dictionary at the top of the component file (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
 - `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
 
 ## WhatsApp identity (BSUIDs)
