@@ -5,8 +5,12 @@ import { ShiftPicker } from "./components/ui-calling/shift-picker";
 
 /** One route serves every surface; the token decides which one renders. */
 export function SurfacePage({ token }: { token: string }) {
+  // Links sent to a real WhatsApp chat carry the business number (?wa=<digits>), so "Back to chat"
+  // reopens that chat in the app. Digits only, so the link can't be turned into a redirect elsewhere.
+  const wa = new URLSearchParams(location.search).get("wa");
+  const returnUrl = wa && /^\d{6,15}$/.test(wa) ? `https://wa.me/${wa}` : "/";
   return (
-    <SurfaceProvider token={token} returnUrl="/">
+    <SurfaceProvider token={token} returnUrl={returnUrl}>
       <Router />
     </SurfaceProvider>
   );

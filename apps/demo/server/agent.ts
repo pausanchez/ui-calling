@@ -53,7 +53,7 @@ type Conversation = {
   /** `wa:<portfolio>:<bsuid>`: who this chat is with, as UI_calling sessions see it. */
   subject: string;
   /** Where replies go: the BSUID always, the phone only when Meta shared it. */
-  whatsapp?: { bsuid: string; phone?: string; username?: string; phoneNumberId?: string };
+  whatsapp?: { bsuid: string; phone?: string; username?: string; phoneNumberId?: string; businessPhone?: string };
   inbound?: InboundTrace;
   /** Scripted agent only: what the user asked before they had to link their account. */
   pendingAsk?: string;
@@ -168,16 +168,19 @@ function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   if (!c.whatsapp) return;
   // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
   const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
+  // Only chats that came in through Meta's webhook to our number get real sends; the simulated phone doesn't.
+  const live = WHATSAPP_TOKEN && c.whatsapp.phoneNumberId === WHATSAPP_PHONE_NUMBER_ID;
+  // There, "Back to chat" on the screen should reopen the WhatsApp chat, not the demo's web chat (see surface-page.tsx).
+  const back = live && c.whatsapp.businessPhone?.replace(/\D/g, "");
+  const url = cta && back ? `${cta.url}?wa=${back}` : cta?.url;
   // The agent's text, plus the link as a button when there is one.
   const payload = cta
-    ? whatsappCtaMessage({ ...to, body: text, url: cta.url, buttonText: cta.label })
+    ? whatsappCtaMessage({ ...to, body: text, url: url!, buttonText: cta.label })
     : { messaging_product: "whatsapp", recipient_type: "individual", ...to, type: "text", text: { body: text } };
   if (cta) {
     const trace = c.calls.findLast((t) => t.result?.url === cta.url);
     if (trace) trace.whatsapp = payload as ReturnType<typeof whatsappCtaMessage>;
   }
-  // Only chats that came in through Meta's webhook to our number get real sends; the simulated phone doesn't.
-  const live = WHATSAPP_TOKEN && c.whatsapp.phoneNumberId === WHATSAPP_PHONE_NUMBER_ID;
   if (!live) {
     if (cta) console.log("[whatsapp] would send", JSON.stringify(payload));
     return;
@@ -247,7 +250,13 @@ export function receiveWebhook(payload: unknown, conversationId?: string) {
       match = "not_linked";
     }
     c.subject = subject;
-    c.whatsapp = { bsuid: m.bsuid, phone: m.phone, username: m.username, phoneNumberId: m.phoneNumberId };
+    c.whatsapp = {
+      bsuid: m.bsuid,
+      phone: m.phone,
+      username: m.username,
+      phoneNumberId: m.phoneNumberId,
+      businessPhone: m.businessPhone,
+    };
     const customer = customerFor(subject);
     c.inbound = {
       at: new Date().toISOString(),

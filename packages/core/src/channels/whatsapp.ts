@@ -58,6 +58,8 @@ export type WhatsAppInbound = {
   /** WhatsApp Business Account that received it (`entry[].id`). */
   wabaId: string;
   phoneNumberId?: string;
+  /** The business number the user wrote to, as Meta displays it. Handy for a `https://wa.me/<digits>` return link. */
+  businessPhone?: string;
   messageId: string;
   type: string;
   text?: string;
@@ -96,6 +98,7 @@ export function parseWhatsAppWebhook(body: unknown): WhatsAppInbound[] {
         out.push({
           wabaId: String(entry.id),
           phoneNumberId: value.metadata?.phone_number_id,
+          businessPhone: value.metadata?.display_phone_number,
           messageId: m.id,
           type: m.type,
           text: m.text?.body,
