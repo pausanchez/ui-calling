@@ -16,7 +16,7 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/server` | Hono routes for the screen (`GET /sessions/:token`, `POST /sessions/:token/events`) |
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
 | `packages/cli` | `ui-calling` CLI, `registry/` (ready-made blocks + tokens), `templates/` (`ui-calling new`), `GUIDE.md` |
-| `apps/demo` | Simulated WhatsApp chat + order-status surface + Claude or scripted agent |
+| `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
 
 ## Commands
 
@@ -54,4 +54,4 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 
 3. For UI changes, open the link at a 375px width and check both locales.
 
-`POST /api/demo/failures` with `{"ordersApi":true}` or `{"carrierApi":true}` simulates outages.
+`POST /api/demo/failures` with `{"ordersApi":true}`, `{"carrierApi":true}` or `{"schedulingApi":true}` simulates outages.

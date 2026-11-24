@@ -53,9 +53,12 @@ function newSurface(name) {
   if (!contractImport.startsWith(".")) contractImport = `./${contractImport}`;
 
   for (const file of readdirSync(templatesDir)) {
-    let content = readFileSync(join(templatesDir, file), "utf8").replaceAll('"./__name__.surface"', `"${contractImport}"`);
+    const isServer = file.endsWith(".server.ts");
+    let content = readFileSync(join(templatesDir, file), "utf8");
+    // Only the server file moves; the screen sits next to its contract.
+    if (isServer) content = content.replaceAll('"./__name__.surface"', `"${contractImport}"`);
     for (const [key, value] of Object.entries(vars)) content = content.replaceAll(key, value);
-    const dir = file.endsWith(".server.ts") ? serverDir : outDir;
+    const dir = isServer ? serverDir : outDir;
     write(join(dir, file.replace("__name__", name)), content);
   }
 

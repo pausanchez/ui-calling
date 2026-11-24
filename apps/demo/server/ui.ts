@@ -1,14 +1,15 @@
 import { SurfaceError, createUiCalling, implement, type UiEvent } from "@ui-calling/core";
 import { orderStatus } from "../src/components/ui-calling/order-status.surface";
+import { failures } from "./failures";
 import { getOrder, updateOrder } from "./orders";
+import { shiftPickerImpl } from "./shift-picker.server";
+
+export { failures };
 
 export const PUBLIC_URL = process.env.PUBLIC_URL ?? "http://localhost:5173";
 
 const listeners = new Set<(e: UiEvent) => void>();
 export const onUiEvent = (fn: (e: UiEvent) => void) => listeners.add(fn);
-
-/** Demo switches to simulate third-party outages. */
-export const failures = { ordersApi: false, carrierApi: false };
 
 export const ui = createUiCalling({
   baseUrl: PUBLIC_URL,
@@ -48,5 +49,6 @@ export const ui = createUiCalling({
           }),
       },
     }),
+    shiftPickerImpl,
   ],
 });

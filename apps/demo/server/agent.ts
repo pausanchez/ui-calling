@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { formatEventsForAgent, type UiEvent } from "@ui-calling/core";
 import { whatsappCtaMessage } from "@ui-calling/core/whatsapp";
 import { listOrderIds, getOrder } from "./orders";
+import { getShiftBoard, listWorkerIds } from "./shifts";
 import { ui } from "./ui";
 
 export type ChatMessage = {
@@ -128,12 +129,13 @@ export function handleUiEvent(e: UiEvent) {
 const client = MODE === "claude" ? new Anthropic() : null;
 
 function systemPrompt(c: Conversation) {
-  return `You are the customer service assistant of Acme Store, chatting with a customer on WhatsApp.
-Customer phone: ${c.subject}. Their orders: ${listOrderIds(c.subject).join(", ")}.
+  const workerIds = listWorkerIds(c.subject);
+  return `You are the assistant of Acme Store, chatting on WhatsApp with a customer who may also be one of Acme's shift workers.
+Phone: ${c.subject}. Their orders: ${listOrderIds(c.subject).join(", ") || "none"}. Their worker ID: ${workerIds.join(", ") || "none (not a worker)"}.
 
 Write like WhatsApp: 1–3 short sentences, friendly, no headings or markdown. Reply in the customer's language.
 
-You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem. Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
+You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, or, for workers, seeing open shifts and booking or changing their shift. Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
 
 Messages wrapped in <ui_events> are reported by the screens the customer opened, not written by the customer. Use them to know what they did and follow up naturally: confirm changes, mention ticket numbers, offer next steps. Lines starting with "→ screen now shows" are what the customer saw after that event; rely on them for outcomes (ticket numbers, new dates, totals) and for later questions about the screen.
 
@@ -204,29 +206,66 @@ async function runClaude(c: Conversation) {
 const SCRIPT = {
   en: {
     status: (id: string) => `Here's the live status of your order ${id}. You can also change the delivery from there 👇`,
-    hello: "Hi! I'm the Acme assistant. Ask me about your order and I'll show you everything.",
+    hello: "Hi! I'm the Acme assistant. Ask me about your order or your shifts and I'll show you everything.",
     rescheduled: (date: string, window: string) => `Done ✅ Your delivery is now on ${date}, ${window}. I'll remind you the day before.`,
     problem: (ticket?: string) => `Sorry about that 😕 I've opened ticket ${ticket} and a teammate will get back to you today.`,
     abandoned: "Did you manage to check your order? If you'd rather, I can summarise it here.",
     loadFailed: "Sorry, the order page isn't loading right now because our system is down. Want me to tell you the status here instead?",
     actionFailed: "Sorry, that change didn't go through because the carrier's system isn't responding. I can try again in a few minutes, or you can pick another slot.",
+    shifts: "Here are the open shifts for the coming days. Pick one and it replaces your current shift 👇",
+    shiftBooked: (when: string, where: string, code?: string) =>
+      `Done ✅ You're booked on ${when} at ${where}${code ? ` (confirmation ${code})` : ""}. Your previous shift is released.`,
+    yourShift: (when: string, where: string, code?: string) =>
+      `Your shift is on ${when} at ${where}${code ? `, confirmation ${code}` : ""}.`,
+    shiftsAbandoned: "Did you find a shift that works for you? If not, tell me which days suit you and I'll check.",
+    shiftsLoadFailed: "Sorry, the shifts page isn't loading because our scheduling system is down. I'll let you know as soon as it's back.",
+    shiftFailed: "Sorry, that shift couldn't be booked, so your current shift stays as it was. It may have just filled up: you can try again or pick another one.",
   },
   es: {
     status: (id: string) => `Aquí tienes el estado de tu pedido ${id} en directo. Desde ahí también puedes cambiar la entrega 👇`,
-    hello: "¡Hola! Soy el asistente de Acme. Pregúntame por tu pedido y te lo enseño todo.",
+    hello: "¡Hola! Soy el asistente de Acme. Pregúntame por tu pedido o por tus turnos y te lo enseño todo.",
     rescheduled: (date: string, window: string) => `Hecho ✅ Tu entrega queda para el ${date}, ${window}. Te lo recordaré el día antes.`,
     problem: (ticket?: string) => `Lo siento 😕 He abierto la incidencia ${ticket} y alguien del equipo te escribirá hoy.`,
     abandoned: "¿Has podido ver tu pedido? Si prefieres, te lo resumo por aquí.",
     loadFailed: "Perdona, la página del pedido no carga ahora mismo porque nuestro sistema está caído. ¿Quieres que te cuente el estado por aquí?",
     actionFailed: "Perdona, el cambio no se ha podido hacer porque el sistema de la empresa de transporte no responde. Puedo reintentarlo en unos minutos, o puedes elegir otra franja.",
+    shifts: "Aquí tienes los turnos libres de los próximos días. Elige uno y sustituirá a tu turno actual 👇",
+    shiftBooked: (when: string, where: string, code?: string) =>
+      `Hecho ✅ Tienes turno el ${when} en ${where}${code ? ` (confirmación ${code})` : ""}. Tu turno anterior queda libre.`,
+    yourShift: (when: string, where: string, code?: string) =>
+      `Tu turno es el ${when} en ${where}${code ? `, confirmación ${code}` : ""}.`,
+    shiftsAbandoned: "¿Has encontrado algún turno que te vaya bien? Si no, dime qué días te vienen mejor y lo miro.",
+    shiftsLoadFailed: "Perdona, la página de turnos no carga porque el sistema de planificación está caído. Te aviso en cuanto vuelva.",
+    shiftFailed: "Perdona, no se ha podido reservar ese turno, así que tu turno actual sigue igual. Puede que se acabe de completar: puedes reintentarlo o elegir otro.",
   },
 };
 
+const SHIFT_TOPIC = /\b(shifts?|rota|turnos?|horarios?)\b/i;
+// No \b next to accented letters: JS word boundaries are ASCII-only.
+const ASKS_WHAT_BOOKED = /(what|which|when|qu[eé]|cu[aá]l|cu[aá]ndo)\s.*(booked|have|got|reserv|tengo|me toca)/i;
+
+function currentShiftText(c: Conversation, workerId: string) {
+  const b = getShiftBoard(workerId, c.subject);
+  if (!b.current) return null;
+  const code = b.booking?.shiftId === b.current.id ? b.booking.confirmation : undefined;
+  return [`${b.current.date}, ${b.current.start}–${b.current.end}`, b.current.location, code] as const;
+}
+
 async function scriptedReply(c: Conversation, text: string) {
-  c.locale = /[¿¡ñ]|\b(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo)\b/i.test(text) ? "es" : "en";
+  c.locale = /[¿¡ñ]|\b(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar)\b/i.test(text) ? "es" : "en";
   const s = SCRIPT[c.locale];
   const [orderId] = listOrderIds(c.subject);
-  if (orderId && /pedido|order|paquete|package|env[ií]o|where|d[oó]nde|llega|deliver|entrega/i.test(text)) {
+  const [workerId] = listWorkerIds(c.subject);
+  if (workerId && SHIFT_TOPIC.test(text)) {
+    const current = ASKS_WHAT_BOOKED.test(text) ? currentShiftText(c, workerId) : null;
+    if (current) return post(c, s.yourShift(...current));
+    const r = await ui.call(
+      "show_shift_picker",
+      { worker_id: workerId, locale: c.locale },
+      { conversationId: c.id, subject: c.subject },
+    );
+    post(c, s.shifts, { label: r.ctaLabel, url: r.url });
+  } else if (orderId && /pedido|order|paquete|package|env[ií]o|where|d[oó]nde|llega|deliver|entrega/i.test(text)) {
     const r = await ui.call(
       "show_order_status",
       { order_id: orderId, locale: c.locale },
@@ -243,7 +282,17 @@ async function scriptedFollowUp(c: Conversation, e: UiEvent) {
   const session = await ui.store.getSession(e.sessionId);
   const orderId = String(session?.input.order_id ?? "");
   const p = e.payload as Record<string, string>;
-  if (e.type === "reschedule_delivery") {
+  if (e.surface === "shift_picker") {
+    const workerId = String(session?.input.worker_id ?? "");
+    if (e.type === "shift_selected") {
+      const current = currentShiftText(c, workerId);
+      if (current) post(c, s.shiftBooked(...current));
+    } else if (e.type === "abandoned") {
+      post(c, s.shiftsAbandoned);
+    } else if (e.type === "error") {
+      post(c, p.source === "load" ? s.shiftsLoadFailed : s.shiftFailed);
+    }
+  } else if (e.type === "reschedule_delivery") {
     post(c, s.rescheduled(p.date, p.window));
   } else if (e.type === "report_problem") {
     post(c, s.problem(getOrder(orderId, c.subject).issue?.ticket));

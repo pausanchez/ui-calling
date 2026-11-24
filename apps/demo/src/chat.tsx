@@ -4,12 +4,13 @@ import type { ChatMessage } from "../server/agent";
 
 type State = { mode: "claude" | "scripted"; chat: ChatMessage[]; timeline: UiEvent[]; typing: boolean };
 
-const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day?"];
+const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day?", "¿Hay turnos libres esta semana?"];
+const NO_FAILURES = { ordersApi: false, carrierApi: false, schedulingApi: false };
 
 export function Chat() {
   const [state, setState] = useState<State | null>(null);
   const [text, setText] = useState("");
-  const [failures, setFailures] = useState({ ordersApi: false, carrierApi: false });
+  const [failures, setFailures] = useState(NO_FAILURES);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -61,7 +62,7 @@ export function Chat() {
 
   async function reset() {
     setState(await (await fetch("/api/chat/reset", { method: "POST" })).json());
-    setFailures({ ordersApi: false, carrierApi: false });
+    setFailures(NO_FAILURES);
   }
 
   return (
@@ -80,7 +81,7 @@ export function Chat() {
           <div ref={scroller} className="flex-1 space-y-2 overflow-y-auto px-3 py-4">
             {state?.chat.length === 0 && (
               <p className="mx-auto max-w-[85%] rounded-lg bg-[#fff5c4] px-3 py-2 text-center text-xs text-neutral-700 dark:bg-[#182229] dark:text-neutral-300">
-                You're the customer. Ask about your order to see the agent hand you a UI.
+                You're a customer who also works shifts at Acme. Ask about your order or about open shifts to see the agent hand you a UI.
               </p>
             )}
             {state?.chat.map((m) => <Bubble key={m.id} m={m} />)}
@@ -151,6 +152,10 @@ export function Chat() {
             <label className="flex cursor-pointer items-center gap-2">
               <input type="checkbox" checked={failures.carrierApi} onChange={() => toggleFailure("carrierApi")} />
               Carrier API timeout (reschedule fails)
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={failures.schedulingApi} onChange={() => toggleFailure("schedulingApi")} />
+              Scheduling system down (shifts won't load or book)
             </label>
           </div>
 
