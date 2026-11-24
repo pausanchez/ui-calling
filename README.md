@@ -27,7 +27,9 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and ask "¿Dónde está mi pedido?" or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to a live view of what the agent knows.
+Open http://localhost:5173 and ask "¿Dónde está mi pedido?" or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to an "Under the hood" panel with two tabs:
+- **Tool calls** (agent → screen): the tool definitions the model gets, then for each call the params the model passed, what `ui.call()` returned, the `tool_result` sent back, and the WhatsApp Cloud API request that would deliver the link.
+- **Agent context** (screen → agent): the events coming back from the screen, with what it showed after each one.
 
 - With `ANTHROPIC_API_KEY` set, the agent is Claude (`claude-opus-5-5`) using the generated tool schemas.
 - Without it, a scripted agent runs the same loop, so the demo works offline. Force either with `AGENT=claude|scripted`.

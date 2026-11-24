@@ -13,10 +13,28 @@ export type ChatMessage = {
   cta?: { label: string; url: string };
 };
 
+/** One tool call end to end, for the demo's "Tool calls" panel. */
+export type ToolTrace = {
+  id: string;
+  at: string;
+  agent: "claude" | "scripted";
+  tool: string;
+  /** Exactly what the model (or the scripted agent) passed. */
+  input: unknown;
+  /** What ui.call() returned. */
+  result?: Awaited<ReturnType<typeof ui.call>>;
+  error?: string;
+  /** What went back to the model as the tool_result (Claude only). */
+  toolResult?: string;
+  /** The WhatsApp Cloud API request that would deliver the link. */
+  whatsapp?: ReturnType<typeof whatsappCtaMessage>;
+};
+
 type Conversation = {
   id: string;
   subject: string;
   chat: ChatMessage[];
+  calls: ToolTrace[];
   /** Claude transcript (append-only). */
   messages: Anthropic.Beta.BetaMessageParam[];
   /** Quiet events not yet shown to the agent; they ride along with the next turn. */
@@ -46,6 +64,7 @@ export function getConversation(id: string, subject = "+34600000000") {
       id,
       subject,
       chat: [],
+      calls: [],
       messages: [],
       pending: [],
       timeline: [],
@@ -63,7 +82,7 @@ export function resetConversation(id: string) {
 }
 
 export function snapshot(c: Conversation) {
-  return { mode: MODE, chat: c.chat, timeline: c.timeline, typing: c.typing };
+  return { mode: MODE, chat: c.chat, calls: c.calls, timeline: c.timeline, typing: c.typing };
 }
 
 /** Resolves once no agent turn is queued or running, including turns that UI events start meanwhile. */
@@ -97,8 +116,24 @@ function enqueue(c: Conversation, fn: () => Promise<void>) {
 function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   c.chat.push({ id: crypto.randomUUID(), from: "agent", text, at: new Date().toISOString(), cta });
   if (cta) {
-    // What a real WhatsApp Cloud API send would look like.
-    console.log("[whatsapp] would send", JSON.stringify(whatsappCtaMessage({ to: c.subject, body: text, url: cta.url, buttonText: cta.label })));
+    // What a real WhatsApp Cloud API send would look like: the agent's text plus the link as a button.
+    const payload = whatsappCtaMessage({ to: c.subject, body: text, url: cta.url, buttonText: cta.label });
+    const trace = c.calls.findLast((t) => t.result?.url === cta.url);
+    if (trace) trace.whatsapp = payload;
+    console.log("[whatsapp] would send", JSON.stringify(payload));
+  }
+}
+
+/** Run a surface tool call and keep its trace for the demo panel. */
+async function callSurface(c: Conversation, tool: string, input: unknown, id: string = crypto.randomUUID()) {
+  const trace: ToolTrace = { id, at: new Date().toISOString(), agent: MODE, tool, input };
+  c.calls.push(trace);
+  try {
+    trace.result = await ui.call(tool, input, { conversationId: c.id, subject: c.subject });
+    return trace;
+  } catch (err) {
+    trace.error = String(err);
+    throw err;
   }
 }
 
@@ -192,18 +227,16 @@ async function runClaude(c: Conversation) {
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const tu of toolUses) {
       try {
-        const r = await ui.call(tu.name, tu.input, { conversationId: c.id, subject: c.subject });
+        const trace = await callSurface(c, tu.name, tu.input, tu.id);
+        const r = trace.result!;
         cta = { label: r.ctaLabel, url: r.url };
-        results.push({
-          type: "tool_result",
-          tool_use_id: tu.id,
-          content: JSON.stringify({
-            status: "link_ready",
-            what_they_will_see: r.summary,
-            expires_at: r.expiresAt,
-            note: "The link is attached to your next message as a button.",
-          }),
+        trace.toolResult = JSON.stringify({
+          status: "link_ready",
+          what_they_will_see: r.summary,
+          expires_at: r.expiresAt,
+          note: "The link is attached to your next message as a button.",
         });
+        results.push({ type: "tool_result", tool_use_id: tu.id, content: trace.toolResult });
       } catch (err) {
         results.push({ type: "tool_result", tool_use_id: tu.id, is_error: true, content: String(err) });
       }
@@ -273,18 +306,10 @@ async function scriptedReply(c: Conversation, text: string) {
   if (workerId && SHIFT_TOPIC.test(text)) {
     const current = ASKS_WHAT_BOOKED.test(text) ? currentShiftText(c, workerId) : null;
     if (current) return post(c, s.yourShift(...current));
-    const r = await ui.call(
-      "show_shift_picker",
-      { worker_id: workerId, locale: c.locale },
-      { conversationId: c.id, subject: c.subject },
-    );
+    const r = (await callSurface(c, "show_shift_picker", { worker_id: workerId, locale: c.locale })).result!;
     post(c, s.shifts, { label: r.ctaLabel, url: r.url });
   } else if (orderId && /pedido|order|paquete|package|env[ií]o|where|d[oó]nde|llega|deliver|entrega/i.test(text)) {
-    const r = await ui.call(
-      "show_order_status",
-      { order_id: orderId, locale: c.locale },
-      { conversationId: c.id, subject: c.subject },
-    );
+    const r = (await callSurface(c, "show_order_status", { order_id: orderId, locale: c.locale })).result!;
     post(c, s.status(orderId), { label: r.ctaLabel, url: r.url });
   } else {
     post(c, s.hello);

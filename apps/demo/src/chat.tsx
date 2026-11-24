@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { UiEvent } from "@ui-calling/core";
-import type { ChatMessage } from "../server/agent";
+import type { ToolSpec } from "@ui-calling/core";
+import type { ChatMessage, ToolTrace } from "../server/agent";
 
-type State = { mode: "claude" | "scripted"; chat: ChatMessage[]; timeline: UiEvent[]; typing: boolean };
+type State = { mode: "claude" | "scripted"; chat: ChatMessage[]; calls: ToolTrace[]; timeline: UiEvent[]; typing: boolean };
+type ToolsInfo = { agent: string; model: string | null; tools: ToolSpec[]; whatsappEndpoint: string };
 
 const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day?", "¿Hay turnos libres esta semana?"];
 const NO_FAILURES = { ordersApi: false, carrierApi: false, schedulingApi: false };
@@ -11,12 +13,18 @@ export function Chat() {
   const [state, setState] = useState<State | null>(null);
   const [text, setText] = useState("");
   const [failures, setFailures] = useState(NO_FAILURES);
+  const [tools, setTools] = useState<ToolsInfo | null>(null);
+  const [tab, setTab] = useState<"calls" | "context">("calls");
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch("/api/demo/failures")
       .then((r) => r.json())
       .then(setFailures)
+      .catch(() => {});
+    fetch("/api/demo/tools")
+      .then((r) => r.json())
+      .then(setTools)
       .catch(() => {});
   }, []);
 
@@ -128,9 +136,9 @@ export function Chat() {
         <section className="flex min-w-0 flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">What the agent knows</h1>
+              <h1 className="text-xl font-semibold tracking-tight">Under the hood</h1>
               <p className="text-sm text-muted-foreground">
-                Semantic events reported by the screens. <b>Wake</b> events start an agent turn on their own.
+                How the agent opens a screen, and what comes back from it.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -159,7 +167,33 @@ export function Chat() {
             </label>
           </div>
 
+          <div role="tablist" className="flex gap-1 rounded-lg border border-border bg-card p-1 text-sm">
+            {(
+              [
+                ["calls", `Tool calls (${state?.calls.length ?? 0})`, "Agent → screen"],
+                ["context", `Agent context (${state?.timeline.length ?? 0})`, "Screen → agent"],
+              ] as const
+            ).map(([key, label, hint]) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={tab === key}
+                onClick={() => setTab(key)}
+                className={`flex-1 rounded-md px-3 py-2 text-left ${tab === key ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/60"}`}
+              >
+                {label}
+                <span className="block text-xs font-normal text-muted-foreground">{hint}</span>
+              </button>
+            ))}
+          </div>
+
+          {tab === "calls" && <ToolCalls tools={tools} calls={state?.calls ?? []} />}
+
+          {tab === "context" && (
           <div className="rounded-lg border border-border bg-card">
+            <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+              Semantic events reported by the screens. <b>Wake</b> events start an agent turn on their own.
+            </p>
             {!state?.timeline.length ? (
               <p className="p-6 text-sm text-muted-foreground">No events yet. Open a link from the chat and interact with it.</p>
             ) : (
@@ -193,10 +227,128 @@ export function Chat() {
               </ol>
             )}
           </div>
+          )}
         </section>
       </div>
     </div>
   );
+}
+
+/** Agent → screen: the tool definitions the model gets, then every call with what it produced. */
+function ToolCalls({ tools, calls }: { tools: ToolsInfo | null; calls: ToolTrace[] }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <details className="rounded-lg border border-border bg-card">
+        <summary className="cursor-pointer px-4 py-3 text-sm">
+          <span className="font-medium">Tool definitions given to the model</span>{" "}
+          <span className="text-muted-foreground">
+            ({tools?.tools.length ?? 0}, generated from the surface contracts by <code>ui.tools()</code>
+            {tools?.model ? ` · model ${tools.model}` : " · scripted agent"})
+          </span>
+        </summary>
+        <div className="space-y-4 border-t border-border p-4">
+          {tools?.tools.map((t) => (
+            <div key={t.name}>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">{t.name}</code>
+              <p className="mt-1.5 text-sm text-muted-foreground">{t.description}</p>
+              <Json label="input_schema" value={t.input_schema} />
+            </div>
+          ))}
+        </div>
+      </details>
+
+      {calls.length === 0 ? (
+        <p className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
+          No tool calls yet. Ask the chat about your order or your shifts.
+        </p>
+      ) : (
+        [...calls].reverse().map((t) => <CallCard key={t.id} t={t} endpoint={tools?.whatsappEndpoint} />)
+      )}
+    </div>
+  );
+}
+
+function CallCard({ t, endpoint }: { t: ToolTrace; endpoint?: string }) {
+  const time = new Date(t.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return (
+    <article className="rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 text-sm">
+        <time className="font-mono text-xs text-muted-foreground">{time}</time>
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium">{t.tool}</code>
+        <span className="text-xs text-muted-foreground">called by {t.agent === "claude" ? "Claude" : "the scripted agent"}</span>
+      </header>
+      <ol className="space-y-4 p-4">
+        <Step n={1} title="The model calls the tool with these params">
+          <Json value={t.input} />
+        </Step>
+        {t.error ? (
+          <Step n={2} title="ui.call() failed">
+            <p className="rounded-md bg-destructive/10 p-3 text-xs text-destructive">{t.error}</p>
+          </Step>
+        ) : (
+          <Step n={2} title="ui.call() validates them, creates a session and returns a link">
+            <Json value={t.result ?? "running…"} />
+          </Step>
+        )}
+        {t.toolResult ? (
+          <Step n={3} title="tool_result sent back to the model">
+            <Json value={safeParse(t.toolResult)} />
+          </Step>
+        ) : (
+          !t.error && (
+            <Step n={3} title="tool_result sent back to the model">
+              <p className="text-xs text-muted-foreground">None: the scripted agent doesn't use a model.</p>
+            </Step>
+          )
+        )}
+        {!t.error && (
+          <Step n={4} title="WhatsApp Cloud API request: the agent's reply with the link as a button">
+            {t.whatsapp ? (
+              <>
+                <p className="mb-1.5 font-mono text-xs text-muted-foreground">{endpoint}</p>
+                <Json value={t.whatsapp} />
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Waiting for the agent to write its reply…</p>
+            )}
+          </Step>
+        )}
+      </ol>
+    </article>
+  );
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+        {n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="mb-1.5 text-sm font-medium">{title}</p>
+        {children}
+      </div>
+    </li>
+  );
+}
+
+function Json({ value, label }: { value: unknown; label?: string }) {
+  return (
+    <div className="mt-1.5">
+      {label && <p className="mb-1 font-mono text-[11px] text-muted-foreground">{label}</p>}
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 font-mono text-xs leading-relaxed [overflow-wrap:anywhere]">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
+function safeParse(s: string) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }
 
 function Bubble({ m }: { m: ChatMessage }) {

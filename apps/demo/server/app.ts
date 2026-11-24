@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { uiCallingRoutes } from "@ui-calling/server";
-import { getConversation, handleUiEvent, handleUserMessage, resetConversation, snapshot } from "./agent";
+import { MODE, getConversation, handleUiEvent, handleUserMessage, resetConversation, snapshot } from "./agent";
 import { seedOrders } from "./orders";
 import { seedShifts } from "./shifts";
 import { failures, onUiEvent, ui } from "./ui";
@@ -33,6 +33,16 @@ app.post("/api/chat/reset", (c) => {
   failures.ordersApi = failures.carrierApi = failures.schedulingApi = false;
   return c.json(snapshot(getConversation(CONVERSATION)));
 });
+
+/** What the model is given: the tool definitions generated from the surface contracts. */
+app.get("/api/demo/tools", (c) =>
+  c.json({
+    agent: MODE,
+    model: MODE === "claude" ? "claude-opus-5-5" : null,
+    tools: ui.tools(),
+    whatsappEndpoint: "POST https://graph.facebook.com/<version>/<phone-number-id>/messages",
+  }),
+);
 
 app.get("/api/demo/failures", (c) => c.json(failures));
 app.post("/api/demo/failures", async (c) => {
