@@ -32,6 +32,17 @@ const ROTA: [day: number, start: string, end: string, where: keyof typeof STORES
 const slots = new Map<string, Slot>();
 const workers = new Map<string, Worker>();
 
+/** For the demo's persistence (app.ts). */
+export const shiftsState = {
+  save: () => ({ slots: [...slots], workers: [...workers] }),
+  load: (s: { slots: [string, Slot][]; workers: [string, Worker][] }) => {
+    slots.clear();
+    workers.clear();
+    s.slots.forEach(([k, v]) => slots.set(k, v));
+    s.workers.forEach(([k, v]) => workers.set(k, v));
+  },
+};
+
 /** YYYY-MM-DD in Madrid time, `days` from today: the rota always covers the coming days. */
 function dayFromToday(days: number) {
   return new Date(Date.now() + days * 86_400_000).toLocaleDateString("en-CA", { timeZone: "Europe/Madrid" });

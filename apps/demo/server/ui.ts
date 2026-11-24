@@ -1,4 +1,5 @@
 import { SurfaceError, createUiCalling, implement, type UiEvent } from "@ui-calling/core";
+import { sqliteStore } from "@ui-calling/sqlite";
 import { orderStatus } from "../src/components/ui-calling/order-status.surface";
 import { failures } from "./failures";
 import { getOrder, updateOrder } from "./orders";
@@ -12,8 +13,12 @@ export const PUBLIC_URL = process.env.PUBLIC_URL ?? "http://localhost:5173";
 const listeners = new Set<(e: UiEvent) => void>();
 export const onUiEvent = (fn: (e: UiEvent) => void) => listeners.add(fn);
 
+/** Sessions and events survive restarts. The demo keeps its own state in the same file (see app.ts). */
+export const store = sqliteStore(process.env.UI_CALLING_DB ?? ".ui-calling/demo.db");
+
 export const ui = createUiCalling({
   baseUrl: PUBLIC_URL,
+  store,
   abandonAfterMs: Number(process.env.ABANDON_AFTER_MS ?? 90_000),
   onEvent: (e) => listeners.forEach((fn) => fn(e)),
   surfaces: [

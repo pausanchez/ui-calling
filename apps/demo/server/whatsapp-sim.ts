@@ -14,6 +14,12 @@ export const demoUser = {
   phoneShared: true,
 };
 
+/** For the demo's persistence (app.ts). */
+export const demoUserState = {
+  save: () => ({ ...demoUser }),
+  load: (u: typeof demoUser) => void Object.assign(demoUser, u),
+};
+
 export function seedDemoUser() {
   demoUser.bsuid = newBsuid();
   demoUser.phone = "34600000000";

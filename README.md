@@ -52,6 +52,7 @@ npm test
 | `@ui-calling/anthropic` | Surfaces as Anthropic SDK tools: tool runner (`anthropicRunnableTools`) or manual loop (`anthropicTools`, `anthropicToolResult`) |
 | `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
+| `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
 | `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it; `add <block>` copies ready-made ones; `guide` prints the building guide |
 
@@ -181,6 +182,21 @@ Your product keeps the BSUID → customer link. The demo shows the whole flow:
 
 See [GUIDE.md](packages/cli/GUIDE.md#whatsapp-who-is-the-subject).
 
+## Persistence
+
+Sessions and events are what keep links working and the agent's context intact, so keep them across restarts:
+
+```ts
+createUiCalling({ store: sqliteStore(), ... })   // .ui-calling/ui-calling.db, from @ui-calling/sqlite
+```
+
+- **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
+- **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
+- **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
+- **On serverless hosts without a lasting disk,** implement `UiStore` for your database.
+
+The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
+
 ## Security model
 
 - The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
@@ -193,7 +209,7 @@ See [GUIDE.md](packages/cli/GUIDE.md#whatsapp-who-is-the-subject).
 ## Not done yet
 
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
-- Persistent store and job queue (the defaults are in-memory, with an in-process abandon timer)
+- A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - Real WhatsApp Cloud API sending (`whatsappCtaMessage` builds the payload; the demo logs it)
 - Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
 - More blocks: payslip viewer, document signing, availability calendar (a shift picker exists in the demo)

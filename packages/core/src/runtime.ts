@@ -180,9 +180,9 @@ export function createUiCalling(opts: UiCallingOptions) {
     });
   }
 
-  function watchAbandon(sessionId: string) {
+  function watchAbandon(sessionId: string, delayMs = opts.abandonAfterMs) {
     if (!opts.abandonAfterMs) return;
-    // In-process timer keeps the MVP dependency-free; production should use a job queue.
+    // In-process timers stay dependency-free; `restored` below re-arms them after a restart.
     const t = setTimeout(async () => {
       const session = await store.getSession(sessionId);
       if (!session || session.status !== "opened") return;
@@ -196,12 +196,26 @@ export function createUiCalling(opts: UiCallingOptions) {
         description: LIFECYCLE_TEXT.abandoned,
         wake: true,
       });
-    }, opts.abandonAfterMs);
+    }, delayMs);
     (t as { unref?: () => void }).unref?.();
   }
 
+  // With a persistent store, screens opened before a restart still get their abandon check,
+  // after whatever time they had left.
+  const restored: Promise<void> =
+    opts.abandonAfterMs && store.listSessions
+      ? store.listSessions({ status: "opened" }).then((sessions) => {
+          for (const s of sessions) {
+            if (!s.openedAt || Date.parse(s.expiresAt) < Date.now()) continue;
+            watchAbandon(s.id, Math.max(0, Date.parse(s.openedAt) + opts.abandonAfterMs! - Date.now()));
+          }
+        })
+      : Promise.resolve();
+
   const api = {
     store,
+    /** Resolves once state from a previous run (abandon timers) has been restored. */
+    ready: restored,
 
     /** Tool definitions for any function-calling LLM: one tool per surface. */
     tools(): ToolSpec[] {

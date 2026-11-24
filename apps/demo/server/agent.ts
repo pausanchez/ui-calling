@@ -81,6 +81,21 @@ const NO_REPLY = "NO_REPLY";
 
 const conversations = new Map<string, Conversation>();
 
+/** For the demo's persistence (app.ts). The turn queue and typing flag aren't worth keeping. */
+export const conversationsState = {
+  save: () => [...conversations].map(([k, { queue, typing, ...c }]) => [k, c] as const),
+  load: (rows: [string, Omit<Conversation, "queue" | "typing">][]) => {
+    conversations.clear();
+    for (const [k, c] of rows) conversations.set(k, { ...c, typing: false, queue: Promise.resolve() });
+  },
+};
+
+let turnEnded = () => {};
+/** Called after every agent turn, e.g. to persist the demo's state. */
+export function onTurnEnd(fn: () => void) {
+  turnEnded = fn;
+}
+
 export function getConversation(id: string, subject = "") {
   let c = conversations.get(id);
   if (!c) {
@@ -142,6 +157,7 @@ function enqueue(c: Conversation, fn: () => Promise<void>) {
     })
     .finally(() => {
       c.typing = false;
+      turnEnded();
     });
   return c.queue;
 }

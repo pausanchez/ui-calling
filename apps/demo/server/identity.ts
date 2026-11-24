@@ -16,6 +16,15 @@ const CUSTOMERS: Customer[] = [
 /** BSUID links: session subject (wa:<portfolio>:<bsuid>) → customer id. A real product keeps these in its database. */
 const links = new Map<string, string>();
 
+/** For the demo's persistence (app.ts). */
+export const linksState = {
+  save: () => [...links],
+  load: (rows: [string, string][]) => {
+    links.clear();
+    rows.forEach(([k, v]) => links.set(k, v));
+  },
+};
+
 export function seedIdentity() {
   links.clear();
 }

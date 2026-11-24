@@ -3,19 +3,50 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { verifyWhatsAppSignature } from "@ui-calling/core/whatsapp";
 import { uiCallingRoutes } from "@ui-calling/server";
-import { MODE, getConversation, handleUiEvent, receiveWebhook, resetConversation, snapshot } from "./agent";
-import { seedIdentity } from "./identity";
-import { seedOrders } from "./orders";
-import { seedShifts } from "./shifts";
-import { failures, onUiEvent, ui } from "./ui";
-import { demoUser, inboundNumberChange, inboundText, seedDemoUser } from "./whatsapp-sim";
+import {
+  MODE,
+  conversationsState,
+  getConversation,
+  handleUiEvent,
+  onTurnEnd,
+  receiveWebhook,
+  resetConversation,
+  snapshot,
+} from "./agent";
+import { linksState, seedIdentity } from "./identity";
+import { ordersState, seedOrders } from "./orders";
+import { seedShifts, shiftsState } from "./shifts";
+import { failures, onUiEvent, store, ui } from "./ui";
+import { demoUser, demoUserState, inboundNumberChange, inboundText, seedDemoUser } from "./whatsapp-sim";
 
 /** The demo has one conversation. */
 export const CONVERSATION = "demo";
 onUiEvent(handleUiEvent);
 
+// The demo's own state (chat, links, mock data) lives next to UI_calling's sessions and events, in the
+// same SQLite file, so a restart loses nothing. A real product keeps these in its own database.
+store.db.exec("CREATE TABLE IF NOT EXISTS demo_state (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
+const STATE = { orders: ordersState, shifts: shiftsState, links: linksState, user: demoUserState, conversations: conversationsState };
+const getState = store.db.prepare("SELECT json FROM demo_state WHERE key = ?");
+const putState = store.db.prepare(
+  "INSERT INTO demo_state (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json",
+);
+function saveState() {
+  for (const [key, s] of Object.entries(STATE)) putState.run(key, JSON.stringify(s.save()));
+}
+for (const [key, s] of Object.entries(STATE)) {
+  const row = getState.get(key) as { json: string } | undefined;
+  if (row) (s.load as (v: unknown) => void)(JSON.parse(row.json));
+}
+onTurnEnd(saveState);
+
 /** The whole demo API, without a listener: `app.request(...)` drives it in-process (see smoke.ts). */
 export const app = new Hono();
+
+app.use("*", async (_c, next) => {
+  await next();
+  saveState();
+});
 
 app.route("/api/ui", uiCallingRoutes(ui));
 

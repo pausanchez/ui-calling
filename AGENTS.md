@@ -16,6 +16,7 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/server` | Hono routes for the screen (`GET /sessions/:token`, `POST /sessions/:token/events`) |
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
 | `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
+| `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |
 | `packages/cli` | `ui-calling` CLI, `registry/` (ready-made blocks + tokens), `templates/` (`ui-calling new`), `GUIDE.md` |
 | `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
 
@@ -51,6 +52,16 @@ Each chat message becomes the webhook Meta would send (`server/whatsapp-sim.ts`)
 - The session subject is `wa:<portfolio>:<bsuid>`.
 - `server/identity.ts` links it to a customer: by phone when Meta shares it, otherwise through the `link_account` surface.
 - Until it's linked, the agent only gets the `show_link_account` tool.
+
+## Demo state
+
+The demo keeps UI_calling's sessions and events, and its own state, in `apps/demo/.ui-calling/demo.db`. Its own state is:
+- chat;
+- links;
+- mock orders and shifts;
+- the simulated user.
+
+Restarting the dev server keeps all of it. **Reset** in the UI (or `POST /api/chat/reset`) clears it. Module state that should survive exposes a `{ save, load }` object, registered in `STATE` in `server/app.ts`. The smoke test runs on `:memory:`.
 
 ## Adding a surface to the demo
 

@@ -151,7 +151,8 @@ function init() {
 
   const pm = existsSync("pnpm-lock.yaml") ? "pnpm add" : existsSync("yarn.lock") ? "yarn add" : existsSync("bun.lockb") || existsSync("bun.lock") ? "bun add" : "npm install";
   const steps = [
-    `${pm} @ui-calling/core @ui-calling/server @ui-calling/react zod`,
+    `${pm} @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite zod`,
+    `Add .ui-calling/ to your .gitignore: it holds the SQLite database.`,
     `Import the design tokens after Tailwind in your global CSS: @import "<path to>/${join(lib, "tokens.css")}";`,
   ];
   if (framework !== "next") {

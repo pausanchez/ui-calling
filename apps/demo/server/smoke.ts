@@ -5,6 +5,7 @@ import type { UiEvent } from "@ui-calling/core";
 
 process.env.AGENT = "scripted";
 process.env.ABANDON_AFTER_MS = "0";
+process.env.UI_CALLING_DB = ":memory:";
 const { app, CONVERSATION } = await import("./app");
 const { settled } = await import("./agent");
 const { ui } = await import("./ui");

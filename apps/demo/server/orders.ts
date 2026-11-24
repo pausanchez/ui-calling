@@ -7,6 +7,15 @@ type Order = SurfaceData<typeof orderStatus> & { owner: string };
 // Stand-in for the product's real order system.
 const orders = new Map<string, Order>();
 
+/** For the demo's persistence (app.ts). */
+export const ordersState = {
+  save: () => [...orders],
+  load: (rows: [string, Order][]) => {
+    orders.clear();
+    rows.forEach(([k, v]) => orders.set(k, v));
+  },
+};
+
 export function seedOrders() {
   orders.clear();
   orders.set("A-1042", {

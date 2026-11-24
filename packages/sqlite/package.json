@@ -1,0 +1,9 @@
+{
+  "name": "@ui-calling/sqlite",
+  "version": "0.0.1",
+  "description": "Zero-config persistence for UI_calling sessions and events, on Node's built-in SQLite (node:sqlite). No dependencies.",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "engines": { "node": ">=22.13" },
+  "dependencies": { "@ui-calling/core": "*" }
+}

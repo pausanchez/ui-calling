@@ -35,7 +35,7 @@ npx ui-calling init
 ```
 
 Run it in your project's root. It detects Next.js or Vite and writes:
-- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
+- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and a SQLite store so links and context survive restarts.
 - `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
 - `ui-calling/tokens.css`: design tokens, with shadcn variable names.
 - **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`) and the landing page (`app/s/[token]/page.tsx`).
