@@ -1,0 +1,9 @@
+@import "tailwindcss";
+@import "./components/ui-calling/tokens.css";
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

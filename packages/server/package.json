@@ -1,0 +1,13 @@
+{
+  "name": "@ui-calling/server",
+  "version": "0.0.1",
+  "description": "HTTP routes that serve UI_calling surfaces and collect their events (Hono, runs on Node, Bun, Workers).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ui-calling/core": "*",
+    "hono": "^4.9.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "tokens": "tokens.css",
+  "blocks": {
+    "order-status": {
+      "description": "Order tracking with delivery rescheduling and problem reporting.",
+      "files": [
+        "blocks/order-status/order-status.surface.ts",
+        "blocks/order-status/order-status.tsx"
+      ],
+      "dependencies": ["@ui-calling/core", "@ui-calling/react", "zod"]
+    }
+  }
+}

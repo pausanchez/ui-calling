@@ -1,0 +1,13 @@
+{
+  "name": "@ui-calling/core",
+  "version": "0.0.1",
+  "description": "Surfaces, handoff sessions and semantic events: let an AI agent call a UI like a function.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./whatsapp": "./src/channels/whatsapp.ts"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "ui-calling",
+  "version": "0.0.1",
+  "description": "Copy UI_calling surfaces and design tokens into your project, shadcn style.",
+  "type": "module",
+  "bin": {
+    "ui-calling": "./bin/ui-calling.mjs"
+  },
+  "files": [
+    "bin",
+    "registry"
+  ]
+}
