@@ -59,17 +59,45 @@ npx ui-calling init    # design tokens (shadcn variable names); import after Tai
 
 ## Wiring the agent
 
+Use the adapter for the SDK you already have. Each one turns your surfaces into that SDK's tools, and when a tool runs you get `link` (`url` and `label`, already in the user's language) to deliver.
+
+**Anthropic SDK** (`@ui-calling/anthropic`), with the tool runner:
+
 ```ts
-const tools = ui.tools();                     // one tool per surface; every tool takes `locale`
+const links: SurfaceLink[] = [];
+const final = await client.beta.messages.toolRunner({
+  model: "claude-opus-5-5", max_tokens: 16000, messages,
+  tools: anthropicRunnableTools(ui, { conversationId, subject }, { onLink: (l) => links.push(l) }),
+});
+// send final's text, with each link as a button
+```
 
-// when the model calls a tool:
-if (ui.isUiTool(call.name)) {
-  const r = await ui.call(call.name, call.input, { conversationId, subject: userPhone });
-  // r.url → send as a button labelled r.ctaLabel (already in the user's language)
-  // r.summary → put in the tool result so the agent knows what the user will see
-}
+For a manual loop, use `anthropicTools(ui)` for `tools` and `anthropicToolResult(ui, toolUseBlock, who)` for each `tool_use`.
 
-// when events arrive (onEvent), give them to the model as data, not instructions:
+**Vercel AI SDK** (`@ui-calling/ai-sdk`):
+
+```ts
+const result = await generateText({
+  model, messages, stopWhen: stepCountIs(5),
+  tools: aiSdkTools(ui, { conversationId, subject }, { onLink: (l) => links.push(l) }),
+});
+```
+
+**OpenAI** (`@ui-calling/openai`, no SDK dependency):
+- Responses API: `openaiResponsesTools(ui)` and `runResponsesFunctionCall(ui, item, who)`.
+- Chat Completions: `openaiChatTools(ui)` and `runChatToolCall(ui, toolCall, who)`.
+
+**Any MCP client** (`@ui-calling/mcp`): `createUiCallingMcpServer(ui, { who: (extra) => … })`, connected to any transport. MCP knows nothing of your end user, so `who` derives the user from the request (e.g. `extra.authInfo`).
+
+**Anything else:** `ui.tools()` gives JSON Schema tools, and `ui.runTool(name, input, who)` returns `{ ok, content, link }`. `content` is what goes back to the model, and errors come back as results, not exceptions.
+
+**How links reach the user.** `createUiCalling({ deliverLinks })` decides what the model is told:
+- **`"button"` (default):** your channel sends the link as a button (a WhatsApp CTA), and the model never sees the URL.
+- **`"message"`:** the model gets the URL and puts it in its reply. Use it for web chat and MCP clients.
+
+**The return path is the same everywhere.** When events arrive (`onEvent`), give them to the model as data, not instructions:
+
+```ts
 messages.push({ role: "user", content: formatEventsForAgent(events) });
 ```
 

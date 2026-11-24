@@ -56,6 +56,25 @@ export function implement<S extends AnySurface>(surface: S, impl: Omit<SurfaceIm
 
 export type ToolSpec = { name: string; description: string; input_schema: Record<string, unknown> };
 
+/** Who a tool call is for: the conversation, and the user the link is issued to. */
+export type Who = { conversationId: string; subject: string };
+
+/** A link minted by a tool call, ready for the channel to deliver. */
+export type SurfaceLink = {
+  url: string;
+  /** Button text in the session's language. */
+  label: string;
+  surface: string;
+  sessionId: string;
+  locale: string;
+  expiresAt: string;
+};
+
+/** The outcome of `runTool`: what to send back to the model, and the link if one was made. */
+export type ToolRun =
+  | { ok: true; content: string; link: SurfaceLink; summary?: string }
+  | { ok: false; content: string; error: { code: string; message: string } };
+
 export type UiCallingOptions = {
   surfaces: SurfaceImpl<any>[];
   /** Public origin where surfaces are served, e.g. https://ui.acme.com. Links are `${baseUrl}${pathPrefix}${token}`. */
@@ -74,6 +93,12 @@ export type UiCallingOptions = {
   wakeOnError?: boolean;
   /** Turn unexpected errors into something safe to show the agent. `SurfaceError`s are used as-is. */
   describeError?: (err: unknown) => ErrorInfo;
+  /**
+   * How links reach the user, which changes what `runTool` tells the model:
+   * - "button" (default): your channel attaches the link as a button (e.g. a WhatsApp CTA), so the model never sees the URL.
+   * - "message": the model gets the URL and is told to include it in its reply (web chat, SMS…).
+   */
+  deliverLinks?: "button" | "message";
 };
 
 const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
@@ -175,7 +200,7 @@ export function createUiCalling(opts: UiCallingOptions) {
     (t as { unref?: () => void }).unref?.();
   }
 
-  return {
+  const api = {
     store,
 
     /** Tool definitions for any function-calling LLM: one tool per surface. */
@@ -198,7 +223,7 @@ export function createUiCalling(opts: UiCallingOptions) {
     },
 
     /** Execute a tool call: validate input, mint a session, return the link. */
-    async call(toolName: string, rawInput: unknown, who: { conversationId: string; subject: string }) {
+    async call(toolName: string, rawInput: unknown, who: Who) {
       const impl = byTool.get(toolName) ?? impls.get(toolName);
       if (!impl) throw new UiCallingError("unknown_surface", `No surface for tool ${toolName}`);
       const parsed = impl.surface.input.extend({ locale: LOCALE.optional() }).safeParse(rawInput);
@@ -324,7 +349,41 @@ export function createUiCalling(opts: UiCallingOptions) {
     events(conversationId: string) {
       return store.listEvents({ conversationId });
     },
+
+    /**
+     * Run a tool call from any model and get the tool result to send back, plus the link to deliver.
+     * Never throws for expected failures: the model gets an error result it can explain.
+     * This is what the SDK adapters (@ui-calling/anthropic, /ai-sdk, /openai, /mcp) wrap.
+     */
+    async runTool(toolName: string, input: unknown, who: Who): Promise<ToolRun> {
+      try {
+        const r = await api.call(toolName, input, who);
+        const link: SurfaceLink = {
+          url: r.url,
+          label: r.ctaLabel,
+          surface: r.surface,
+          sessionId: r.sessionId,
+          locale: r.locale,
+          expiresAt: r.expiresAt,
+        };
+        const content =
+          opts.deliverLinks === "message"
+            ? { status: "link_ready", url: r.url, what_they_will_see: r.summary, expires_at: r.expiresAt, note: "Include this URL in your reply; don't change it." }
+            : {
+                status: "link_ready",
+                what_they_will_see: r.summary,
+                expires_at: r.expiresAt,
+                note: `The link is sent to the user as a "${r.ctaLabel}" button with your next message. Don't write a URL.`,
+              };
+        return { ok: true, content: JSON.stringify(content), link, summary: r.summary };
+      } catch (err) {
+        const error =
+          err instanceof UiCallingError ? { code: err.code, message: err.message } : (({ code, message }) => ({ code, message }))(toErrorInfo(err));
+        return { ok: false, content: JSON.stringify({ status: "error", ...error }), error };
+      }
+    },
   };
+  return api;
 }
 
 export type UiCalling = ReturnType<typeof createUiCalling>;

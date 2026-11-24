@@ -1,0 +1,62 @@
+import type Anthropic from "@anthropic-ai/sdk";
+import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema";
+import type { SurfaceLink, ToolRun, UiCalling, Who } from "@ui-calling/core";
+
+export type AnthropicAdapterOptions = {
+  /** Called with every link a tool call creates: deliver it on your channel (e.g. as a WhatsApp button). */
+  onLink?: (link: SurfaceLink) => void;
+  /** Offer only some surfaces, e.g. hide everything but an account-linking screen until the user is known. */
+  filter?: (toolName: string) => boolean;
+};
+
+/** Tool definitions for a manual loop with `client.messages.create({ tools })`. */
+export function anthropicTools(ui: UiCalling, filter?: (toolName: string) => boolean): Anthropic.Tool[] {
+  return ui
+    .tools()
+    .filter((t) => !filter || filter(t.name))
+    .map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema as Anthropic.Tool.InputSchema }));
+}
+
+/**
+ * Run one `tool_use` block from a manual loop. Returns the `tool_result` block to send back and the
+ * run (with `run.link` to deliver when `run.ok`). Failures come back as `is_error` results, never throws.
+ */
+export async function anthropicToolResult(
+  ui: UiCalling,
+  block: { id: string; name: string; input: unknown },
+  who: Who,
+): Promise<{ result: Anthropic.ToolResultBlockParam; run: ToolRun }> {
+  const run = await ui.runTool(block.name, block.input, who);
+  return {
+    result: { type: "tool_result", tool_use_id: block.id, content: run.content, ...(run.ok ? {} : { is_error: true }) },
+    run,
+  };
+}
+
+/**
+ * Runnable tools for the SDK's tool runner, which loops for you:
+ *
+ *   const links: SurfaceLink[] = [];
+ *   const final = await client.beta.messages.toolRunner({
+ *     model, max_tokens, messages,
+ *     tools: anthropicRunnableTools(ui, { conversationId, subject }, { onLink: (l) => links.push(l) }),
+ *   });
+ *   // send the final text, with links[] as buttons
+ */
+export function anthropicRunnableTools(ui: UiCalling, who: Who | (() => Who), opts: AnthropicAdapterOptions = {}) {
+  return ui
+    .tools()
+    .filter((t) => !opts.filter || opts.filter(t.name))
+    .map((t) =>
+      betaTool({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.input_schema as { type: "object" },
+        run: async (input) => {
+          const run = await ui.runTool(t.name, input, typeof who === "function" ? who() : who);
+          if (run.ok) opts.onLink?.(run.link);
+          return run.content;
+        },
+      }),
+    );
+}

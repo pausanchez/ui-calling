@@ -2,7 +2,7 @@
 
 > Function calling, but the function is a screen. An AI agent opens a prebuilt UI for a user (e.g. from WhatsApp) through a secure link, and what the user sees, does, and what fails there flows back into the agent's context.
 
-Packages: `@ui-calling/core` (contracts, runtime), `@ui-calling/server` (Hono routes), `@ui-calling/react` (provider and hooks), `ui-calling` (CLI: `new`, `add`, `init`, `guide`).
+Packages: `@ui-calling/core` (contracts, runtime), `@ui-calling/server` (Hono routes), `@ui-calling/react` (provider and hooks), `ui-calling` (CLI: `new`, `add`, `init`, `guide`). Adapters: `@ui-calling/anthropic`, `@ui-calling/ai-sdk`, `@ui-calling/openai`, `@ui-calling/mcp`.
 
 ## Docs
 

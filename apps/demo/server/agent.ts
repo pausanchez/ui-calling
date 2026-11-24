@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { formatEventsForAgent, type UiEvent } from "@ui-calling/core";
+import { anthropicToolResult, anthropicTools } from "@ui-calling/anthropic";
+import { formatEventsForAgent, type SurfaceLink, type ToolRun, type UiEvent } from "@ui-calling/core";
 import {
   parseWhatsAppWebhook,
   whatsappCtaMessage,
@@ -27,8 +28,8 @@ export type ToolTrace = {
   tool: string;
   /** Exactly what the model (or the scripted agent) passed. */
   input: unknown;
-  /** What ui.call() returned. */
-  result?: Awaited<ReturnType<typeof ui.call>>;
+  /** The link ui.runTool() made. */
+  result?: SurfaceLink & { summary?: string };
   error?: string;
   /** What went back to the model as the tool_result (Claude only). */
   toolResult?: string;
@@ -158,17 +159,28 @@ function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   }
 }
 
-/** Run a surface tool call and keep its trace for the demo panel. */
-async function callSurface(c: Conversation, tool: string, input: unknown, id: string = crypto.randomUUID()) {
+const whoIs = (c: Conversation) => ({ conversationId: c.id, subject: c.subject });
+
+/** Record a tool call for the demo panel; `finishTrace` fills in what happened. */
+function startTrace(c: Conversation, tool: string, input: unknown, id: string = crypto.randomUUID()) {
   const trace: ToolTrace = { id, at: new Date().toISOString(), agent: MODE, tool, input };
   c.calls.push(trace);
-  try {
-    trace.result = await ui.call(tool, input, { conversationId: c.id, subject: c.subject });
-    return trace;
-  } catch (err) {
-    trace.error = String(err);
-    throw err;
-  }
+  return trace;
+}
+
+function finishTrace(trace: ToolTrace, run: ToolRun, sentToModel: boolean) {
+  if (run.ok) trace.result = { ...run.link, summary: run.summary };
+  else trace.error = `${run.error.code}: ${run.error.message}`;
+  if (sentToModel) trace.toolResult = run.content;
+}
+
+/** Scripted agent: run a surface tool and get its link. Throws on failure, like any other bug in a script. */
+async function callSurface(c: Conversation, tool: string, input: unknown): Promise<SurfaceLink> {
+  const trace = startTrace(c, tool, input);
+  const run = await ui.runTool(tool, input, whoIs(c));
+  finishTrace(trace, run, false);
+  if (!run.ok) throw new Error(`${run.error.code}: ${run.error.message}`);
+  return run.link;
 }
 
 /**
@@ -270,10 +282,7 @@ async function runClaude(c: Conversation) {
     // Until the user is linked, the only screen on offer is the one that links them. Recomputed every
     // step, so the other tools appear as soon as linking succeeds.
     const linked = Boolean(customerFor(c.subject));
-    const tools = ui
-      .tools()
-      .filter((t) => (t.name === "show_link_account") !== linked)
-      .map((t): Anthropic.Beta.BetaTool => ({ ...t, input_schema: t.input_schema as Anthropic.Beta.BetaTool.InputSchema }));
+    const tools = anthropicTools(ui, (name) => (name === "show_link_account") !== linked);
     const res = await client!.beta.messages.create({
       model: "claude-opus-5-5",
       max_tokens: 16000,
@@ -305,20 +314,12 @@ async function runClaude(c: Conversation) {
 
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const tu of toolUses) {
-      try {
-        const trace = await callSurface(c, tu.name, tu.input, tu.id);
-        const r = trace.result!;
-        cta = { label: r.ctaLabel, url: r.url };
-        trace.toolResult = JSON.stringify({
-          status: "link_ready",
-          what_they_will_see: r.summary,
-          expires_at: r.expiresAt,
-          note: "The link is attached to your next message as a button.",
-        });
-        results.push({ type: "tool_result", tool_use_id: tu.id, content: trace.toolResult });
-      } catch (err) {
-        results.push({ type: "tool_result", tool_use_id: tu.id, is_error: true, content: String(err) });
-      }
+      // The adapter runs the surface and builds the tool_result (an is_error one if it fails).
+      const trace = startTrace(c, tu.name, tu.input, tu.id);
+      const { result, run } = await anthropicToolResult(ui, tu, whoIs(c));
+      finishTrace(trace, run, true);
+      if (run.ok) cta = { label: run.link.label, url: run.link.url };
+      results.push(result);
     }
     c.messages.push({ role: "user", content: results });
   }
@@ -389,19 +390,19 @@ async function scriptedReply(c: Conversation, text: string) {
   if (!customerFor(c.subject)) {
     // Unknown WhatsApp user: link first, then pick up the question in scriptedFollowUp.
     c.pendingAsk = text;
-    const r = (await callSurface(c, "show_link_account", { continue_with: text.slice(0, 200), locale: c.locale })).result!;
-    return post(c, s.verifyFirst, { label: r.ctaLabel, url: r.url });
+    const r = await callSurface(c, "show_link_account", { continue_with: text.slice(0, 200), locale: c.locale });
+    return post(c, s.verifyFirst, { label: r.label, url: r.url });
   }
   const [orderId] = listOrderIds(c.subject);
   const [workerId] = listWorkerIds(c.subject);
   if (workerId && SHIFT_TOPIC.test(text)) {
     const current = ASKS_WHAT_BOOKED.test(text) ? currentShiftText(c, workerId) : null;
     if (current) return post(c, s.yourShift(...current));
-    const r = (await callSurface(c, "show_shift_picker", { worker_id: workerId, locale: c.locale })).result!;
-    post(c, s.shifts, { label: r.ctaLabel, url: r.url });
+    const r = await callSurface(c, "show_shift_picker", { worker_id: workerId, locale: c.locale });
+    post(c, s.shifts, { label: r.label, url: r.url });
   } else if (orderId && /pedido|order|paquete|package|env[ií]o|where|d[oó]nde|llega|deliver|entrega/i.test(text)) {
-    const r = (await callSurface(c, "show_order_status", { order_id: orderId, locale: c.locale })).result!;
-    post(c, s.status(orderId), { label: r.ctaLabel, url: r.url });
+    const r = await callSurface(c, "show_order_status", { order_id: orderId, locale: c.locale });
+    post(c, s.status(orderId), { label: r.label, url: r.url });
   } else {
     post(c, s.hello);
   }

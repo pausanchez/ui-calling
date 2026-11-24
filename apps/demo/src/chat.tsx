@@ -398,11 +398,11 @@ function CallCard({ t, endpoint }: { t: ToolTrace; endpoint?: string }) {
           <Json value={t.input} />
         </Step>
         {t.error ? (
-          <Step n={2} title="ui.call() failed">
+          <Step n={2} title="ui.runTool() failed">
             <p className="rounded-md bg-destructive/10 p-3 text-xs text-destructive">{t.error}</p>
           </Step>
         ) : (
-          <Step n={2} title="ui.call() validates them, creates a session and returns a link">
+          <Step n={2} title="ui.runTool() validates them, creates a session and returns a link">
             <Json value={t.result ?? "running…"} />
           </Step>
         )}

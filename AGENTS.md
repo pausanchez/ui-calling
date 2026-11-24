@@ -15,6 +15,7 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/core` | Contracts (`defineSurface`, `event`), runtime (`createUiCalling`, sessions, events, errors), store interface, WhatsApp helper |
 | `packages/server` | Hono routes for the screen (`GET /sessions/:token`, `POST /sessions/:token/events`) |
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
+| `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
 | `packages/cli` | `ui-calling` CLI, `registry/` (ready-made blocks + tokens), `templates/` (`ui-calling new`), `GUIDE.md` |
 | `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
 

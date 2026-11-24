@@ -28,7 +28,7 @@ npm run dev
 ```
 
 Open http://localhost:5173 and ask "¿Dónde está mi pedido?" or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to an "Under the hood" panel with two tabs:
-- **Tool calls** (agent → screen): the tool definitions the model gets, then for each call the params the model passed, what `ui.call()` returned, the `tool_result` sent back, and the WhatsApp Cloud API request that would deliver the link.
+- **Tool calls** (agent → screen): the tool definitions the model gets, then for each call the params the model passed, what `ui.runTool()` returned, the `tool_result` sent back, and the WhatsApp Cloud API request that would deliver the link.
 - **Agent context** (screen → agent): the events coming back from the screen, with what it showed after each one.
 
 - With `ANTHROPIC_API_KEY` set, the agent is Claude (`claude-opus-5-5`) using the generated tool schemas.
@@ -49,6 +49,10 @@ npm test
 | `@ui-calling/core` | `defineSurface`, `implement`, `createUiCalling` (tools, sessions, events), `formatEventsForAgent`, WhatsApp CTA adapter |
 | `@ui-calling/server` | Hono routes the screen talks to (`GET /sessions/:token`, `POST /sessions/:token/events`) |
 | `@ui-calling/react` | `<SurfaceProvider>`, `useSurface(contract)`: typed data, typed `emit`, automatic lifecycle tracking |
+| `@ui-calling/anthropic` | Surfaces as Anthropic SDK tools: tool runner (`anthropicRunnableTools`) or manual loop (`anthropicTools`, `anthropicToolResult`) |
+| `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
+| `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
+| `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
 | `ui-calling` (CLI) | `new <name>` scaffolds a surface (contract, screen, server); `add <block>` copies ready-made ones; `init` copies design tokens; `guide` prints the building guide |
 
 ## Build your own surface
@@ -187,7 +191,6 @@ See [GUIDE.md](packages/cli/GUIDE.md#whatsapp-who-is-the-subject).
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - Persistent store and job queue (the defaults are in-memory, with an in-process abandon timer)
 - Real WhatsApp Cloud API sending (`whatsappCtaMessage` builds the payload; the demo logs it)
-- An MCP server adapter, so any MCP client can call surfaces
-- Adapters for the agent SDKs people already use (Vercel AI SDK, Anthropic, OpenAI)
+- Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
 - More blocks: payslip viewer, document signing, availability calendar (a shift picker exists in the demo)
 - More languages in the blocks (en and es today)

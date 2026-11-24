@@ -16,6 +16,7 @@
     "packages/*/src",
     "packages/cli/registry",
     "packages/cli/templates",
+    "scripts",
     "apps/demo/server",
     "apps/demo/src"
   ]
