@@ -1,5 +1,6 @@
 import type { SurfaceData } from "@ui-calling/core";
 import type { shiftPicker } from "../src/components/ui-calling/shift-picker.surface";
+import { customerFor, requireCustomer } from "./identity";
 
 type Board = SurfaceData<typeof shiftPicker>;
 type Shift = NonNullable<Board["current"]>;
@@ -46,7 +47,7 @@ export function seedShifts() {
   });
   workers.set("W-207", {
     id: "W-207",
-    owner: "+34600000000",
+    owner: "C-1001",
     name: "Lucía Romero",
     currentShiftId: [...slots.keys()][1],
     booking: null,
@@ -57,9 +58,10 @@ seedShifts();
 const plain = ({ spotsTotal, spotsLeft, ...s }: Slot): Shift => s;
 
 function workerFor(id: string, subject: string) {
+  const customer = requireCustomer(subject);
   const w = workers.get(id);
-  // Only the worker themself can see or change their shifts: the session's subject is the access check.
-  if (!w || w.owner !== subject) throw new Error(`Worker ${id} not found for this phone number`);
+  // Only the worker themself can see or change their shifts: the session's subject must be linked to them.
+  if (!w || w.owner !== customer.id) throw new Error(`Worker ${id} not found for this person`);
   return w;
 }
 
@@ -80,7 +82,8 @@ export function getShiftBoard(workerId: string, subject: string): Board {
 }
 
 export function listWorkerIds(subject: string) {
-  return [...workers.values()].filter((w) => w.owner === subject).map((w) => w.id);
+  const customer = customerFor(subject);
+  return customer ? [...workers.values()].filter((w) => w.owner === customer.id).map((w) => w.id) : [];
 }
 
 export class ShiftUnavailable extends Error {

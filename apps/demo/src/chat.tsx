@@ -1,9 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import type { UiEvent } from "@ui-calling/core";
 import type { ToolSpec } from "@ui-calling/core";
-import type { ChatMessage, ToolTrace } from "../server/agent";
+import type { ChatMessage, InboundTrace, ToolTrace } from "../server/agent";
 
-type State = { mode: "claude" | "scripted"; chat: ChatMessage[]; calls: ToolTrace[]; timeline: UiEvent[]; typing: boolean };
+type Identity = {
+  subject: string;
+  bsuid?: string;
+  phone?: string;
+  username?: string;
+  customer: { id: string; name: string } | null;
+};
+type State = {
+  mode: "claude" | "scripted";
+  chat: ChatMessage[];
+  calls: ToolTrace[];
+  timeline: UiEvent[];
+  typing: boolean;
+  inbound: InboundTrace | null;
+  identity: Identity;
+};
 type ToolsInfo = { agent: string; model: string | null; tools: ToolSpec[]; whatsappEndpoint: string };
 
 const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day?", "¿Hay turnos libres esta semana?"];
@@ -14,13 +29,18 @@ export function Chat() {
   const [text, setText] = useState("");
   const [failures, setFailures] = useState(NO_FAILURES);
   const [tools, setTools] = useState<ToolsInfo | null>(null);
-  const [tab, setTab] = useState<"calls" | "context">("calls");
+  const [tab, setTab] = useState<"inbound" | "calls" | "context">("inbound");
+  const [phoneShared, setPhoneShared] = useState(true);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch("/api/demo/failures")
       .then((r) => r.json())
       .then(setFailures)
+      .catch(() => {});
+    fetch("/api/demo/identity")
+      .then((r) => r.json())
+      .then((u) => setPhoneShared(u.phoneShared))
       .catch(() => {});
     fetch("/api/demo/tools")
       .then((r) => r.json())
@@ -35,6 +55,20 @@ export function Chat() {
       body: JSON.stringify({ [key]: !failures[key] }),
     });
     setFailures(await res.json());
+  }
+
+  async function togglePhoneShared() {
+    const res = await fetch("/api/demo/identity", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phoneShared: !phoneShared }),
+    });
+    setPhoneShared((await res.json()).phoneShared);
+  }
+
+  async function changeNumber() {
+    await fetch("/api/demo/identity/change-number", { method: "POST" });
+    setTab("inbound");
   }
 
   useEffect(() => {
@@ -71,6 +105,7 @@ export function Chat() {
   async function reset() {
     setState(await (await fetch("/api/chat/reset", { method: "POST" })).json());
     setFailures(NO_FAILURES);
+    setPhoneShared(true);
   }
 
   return (
@@ -152,6 +187,21 @@ export function Chat() {
           </div>
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border bg-card px-4 py-3 text-sm">
+            <span className="text-muted-foreground">Simulate WhatsApp identity:</span>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={!phoneShared} onChange={togglePhoneShared} />
+              User hides their number (username only)
+            </label>
+            <button
+              onClick={changeNumber}
+              disabled={!state?.identity.bsuid}
+              className="rounded-md border border-border px-2.5 py-1 hover:bg-muted disabled:opacity-50"
+            >
+              User changes phone number (new BSUID)
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border bg-card px-4 py-3 text-sm">
             <span className="text-muted-foreground">Simulate failures:</span>
             <label className="flex cursor-pointer items-center gap-2">
               <input type="checkbox" checked={failures.ordersApi} onChange={() => toggleFailure("ordersApi")} />
@@ -170,6 +220,7 @@ export function Chat() {
           <div role="tablist" className="flex gap-1 rounded-lg border border-border bg-card p-1 text-sm">
             {(
               [
+                ["inbound", "Inbound", "Meta → you: who is writing"],
                 ["calls", `Tool calls (${state?.calls.length ?? 0})`, "Agent → screen"],
                 ["context", `Agent context (${state?.timeline.length ?? 0})`, "Screen → agent"],
               ] as const
@@ -186,6 +237,8 @@ export function Chat() {
               </button>
             ))}
           </div>
+
+          {tab === "inbound" && <Inbound inbound={state?.inbound ?? null} identity={state?.identity} />}
 
           {tab === "calls" && <ToolCalls tools={tools} calls={state?.calls ?? []} />}
 
@@ -229,6 +282,69 @@ export function Chat() {
           </div>
           )}
         </section>
+      </div>
+    </div>
+  );
+}
+
+const MATCH_TEXT: Record<InboundTrace["match"], string> = {
+  already_linked: "This BSUID was already linked to a customer.",
+  linked_by_phone: "Meta shared the phone number, and it matched a customer in the CRM: BSUID linked.",
+  not_linked: "No phone number and no link: the agent doesn't know who this is, so it can only offer to verify.",
+  relinked_after_id_change: "Meta reported a new BSUID: the customer link moved over to it.",
+};
+
+/** Meta → you: the last webhook, and how its BSUID resolved to a session subject and a customer. */
+function Inbound({ inbound, identity }: { inbound: InboundTrace | null; identity?: Identity }) {
+  if (!inbound || !identity) {
+    return (
+      <p className="rounded-lg border border-border bg-card p-6 text-sm text-muted-foreground">
+        Nothing yet. Each chat message arrives here first, as the webhook Meta would send.
+      </p>
+    );
+  }
+  const p = inbound.parsed;
+  const rows: [string, string | undefined, string][] = [
+    ["BSUID", p.bsuid, "messages[].from_user_id: always present, unique within your business portfolio"],
+    ["Phone", p.phone ?? "not shared", "messages[].from: only after a recent conversation or if they're in your contact book"],
+    ["Username", p.username ? `@${p.username}` : undefined, "contacts[].profile.username"],
+    ["Session subject", inbound.subject, "whatsappSubject(portfolio, bsuid): what UI_calling ties links to"],
+    ["Customer", identity.customer ? `${identity.customer.name} (${identity.customer.id})` : "not linked", "your BSUID → customer links"],
+  ];
+  return (
+    <div className="flex flex-col gap-4">
+      <article className="rounded-lg border border-border bg-card">
+        <header className="border-b border-border px-4 py-2.5 text-sm font-medium">Who is writing</header>
+        <dl className="divide-y divide-border text-sm">
+          {rows.map(([k, v, hint]) => (
+            <div key={k} className="grid gap-1 px-4 py-2.5 sm:grid-cols-[140px_1fr]">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="min-w-0">
+                <code className="text-xs [overflow-wrap:anywhere]">{v ?? "—"}</code>
+                <p className="text-xs text-muted-foreground">{hint}</p>
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p
+          className={`border-t border-border px-4 py-2.5 text-sm ${
+            identity.customer ? "bg-success/10" : "bg-warning/10"
+          }`}
+        >
+          <span className="text-muted-foreground">When the last message arrived: </span>
+          {MATCH_TEXT[inbound.match]}
+          {p.identityChange && (
+            <span className="block text-xs text-muted-foreground">
+              System message <code>{p.identityChange.kind}</code>, previous BSUID{" "}
+              <code>{p.identityChange.previousBsuid}</code>
+            </span>
+          )}
+        </p>
+      </article>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <p className="text-sm font-medium">Webhook from Meta</p>
+        <p className="mt-0.5 font-mono text-xs text-muted-foreground">POST /api/whatsapp/webhook (signature checked with your app secret)</p>
+        <Json value={inbound.payload} />
       </div>
     </div>
   );

@@ -7,8 +7,17 @@ process.env.AGENT = "scripted";
 process.env.ABANDON_AFTER_MS = "0";
 const { app, CONVERSATION } = await import("./app");
 const { settled } = await import("./agent");
+const { ui } = await import("./ui");
+const { DEMO_CODE } = await import("./identity");
+const { createHmac } = await import("node:crypto");
 
-type Chat = { chat: { from: string; text: string; cta?: { label: string; url: string } }[]; timeline: UiEvent[] };
+type Chat = {
+  chat: { from: string; text: string; cta?: { label: string; url: string } }[];
+  timeline: UiEvent[];
+  calls: { tool: string; whatsapp?: Json }[];
+  inbound: { match: string; subject: string } | null;
+  identity: { bsuid?: string; customer: { id: string } | null };
+};
 type Json = Record<string, any>;
 
 async function call(method: string, path: string, body?: unknown) {
@@ -101,6 +110,83 @@ await check("shifts: a full shift fails with a reason; a free one books and the 
   const code = ok.json.data.booking.confirmation;
   assert.match((await lastEvent("shift_selected")).state ?? "", new RegExp(code));
   assert.match((await say("¿Qué turno tengo reservado?")).text, new RegExp(code));
+});
+
+await check("identity: a shared phone number links the BSUID, and replies go to the phone", async () => {
+  await call("POST", "/api/chat/reset");
+  await say("Where is my order?");
+  const c = await chat();
+  assert.equal(c.inbound?.match, "linked_by_phone");
+  assert.match(c.inbound!.subject, /^wa:PF-1000000001:demo-bsuid-/);
+  assert.equal(c.calls.at(-1)?.whatsapp?.to, "34600000000");
+});
+
+await check("identity: with the number hidden, only the linking screen is offered and replies go to the BSUID", async () => {
+  await call("POST", "/api/chat/reset");
+  await call("POST", "/api/demo/identity", { phoneShared: false });
+  const reply = await say("¿Dónde está mi pedido?");
+  const c = await chat();
+  assert.equal(c.inbound?.match, "not_linked");
+  assert.equal(c.calls.at(-1)?.tool, "show_link_account");
+  assert.equal(reply.cta?.label, "Verificar identidad");
+  const wa = c.calls.at(-1)!.whatsapp!;
+  assert.equal(wa.recipient, c.identity.bsuid);
+  assert.equal(wa.to, undefined);
+});
+
+await check("identity: surfaces refuse a WhatsApp user who isn't linked", async () => {
+  await assert.rejects(
+    ui.call("show_order_status", { order_id: "A-1042" }, { conversationId: "x", subject: "wa:PF-1000000001:stranger" }),
+    (err: Json) => err.code === "account_not_linked",
+  );
+});
+
+await check("identity: a wrong code fails with a reason and is never stored", async () => {
+  const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
+  await event(t, "opened");
+  const r = await event(t, "verify_identity", { email: "lucia.romero@example.com", code: "999999" });
+  assert.equal(r.status, 502);
+  assert.equal(r.json.reason, "invalid_code");
+  assert.doesNotMatch(JSON.stringify((await chat()).timeline), /999999/);
+});
+
+await check("identity: the right code links the chat, redacted, and the agent picks up the question", async () => {
+  const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
+  const r = await event(t, "verify_identity", { email: "lucia.romero@example.com", code: DEMO_CODE });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.data.linked, true);
+  const e = await lastEvent("verify_identity");
+  assert.equal((e.payload as Json).code, "[redacted]");
+  assert.doesNotMatch(JSON.stringify(await chat()), new RegExp(DEMO_CODE + "(?!\\d)"), "the code never reaches the agent's context");
+  const c = await chat();
+  assert.match(c.chat.at(-2)!.text, /Lucía/);
+  assert.equal(c.chat.at(-1)!.cta?.label, "Ver pedido");
+});
+
+await check("identity: a phone-number change moves the link to the new BSUID", async () => {
+  const before = (await chat()).identity.bsuid;
+  await call("POST", "/api/demo/identity/change-number");
+  const c = await chat();
+  assert.notEqual(c.identity.bsuid, before);
+  assert.equal(c.inbound?.match, "relinked_after_id_change");
+  assert.equal(c.identity.customer?.id, "C-1001");
+  assert.equal((await say("¿Hay turnos libres?")).cta?.label, "Elegir turno", "no need to verify again");
+});
+
+await check("webhook: requests without a valid signature are rejected", async () => {
+  process.env.WHATSAPP_APP_SECRET = "test-secret";
+  const body = JSON.stringify({ object: "whatsapp_business_account", entry: [] });
+  const post = (sig?: string) =>
+    app.request("/api/whatsapp/webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(sig ? { "X-Hub-Signature-256": sig } : {}) },
+      body,
+    });
+  assert.equal((await post()).status, 401);
+  assert.equal((await post("sha256=" + "0".repeat(64))).status, 401);
+  const good = "sha256=" + createHmac("sha256", "test-secret").update(body).digest("hex");
+  assert.equal((await post(good)).status, 200);
+  delete process.env.WHATSAPP_APP_SECRET;
 });
 
 await check("security: an unknown token is rejected", async () => {

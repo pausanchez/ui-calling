@@ -90,12 +90,28 @@ Tell the agent in its system prompt:
 
 - **Every action returns fresh data.** The outcome (a ticket number, a new date) reaches the agent through `summarize`, so an action that changes something must return the new data.
 - **`describe` says what the user asked for, not the outcome.** Write "User asked to move the delivery to…" or "Worker picked shift S-12", never "Delivery was moved". The outcome comes from `summarize`. If the handler fails, the agent reads your line as "did NOT go through. Attempted: …", so it must read right in both cases. Set `wake: true` only when the agent should react right away.
+- **Secrets never reach the agent.** Add `redact: ["code"]` to an event that carries a one-time code, password or similar. The handler still gets the value, but the event log, `describe` and the agent see `"[redacted]"`.
 - **Keep payloads small and don't trust them.** The payload comes from the browser. Send IDs and the user's choices; let `summarize` give the agent the readable detail (dates, places, prices) from your own data. If the payload repeats what the user saw (e.g. a time), check it against your data in the handler and throw `SurfaceError` if it changed.
 - **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
 - **The screen can explain failures.** A failed `emit` throws `SurfaceActionError`, and its `reason` is your `SurfaceError` code. Map known reasons to messages in the user's language ("that shift just filled up"), call `reload()` when the screen may be stale, and only offer "try again" for retryable failures.
 - **`complete()` means "the user is done here".** Call it on the "back to chat" link or a final button, not after every action. It records a `completed` event, and stops the screen counting as abandoned.
 - **The URL carries only the token.** Never put personal data in `input`; load it in `resolve`.
 - **Strings live in the messages object.** Use `locale` from `useSurface()` for dates and currency (`toLocaleDateString(locale)`, `toLocaleString(locale, { style: "currency" })`).
+
+## WhatsApp: who is the `subject`?
+
+On WhatsApp, Meta identifies each user with a **BSUID** (business-scoped user ID), unique within your business portfolio. The phone number is only included when you exchanged messages or calls with it in the last 30 days, or it's in your contact book. Users with a WhatsApp username may never share it. So:
+
+1. **Trust only signed webhooks.** `verifyWhatsAppSignature(rawBody, header, appSecret)` checks `X-Hub-Signature-256`.
+2. **Use the BSUID, with your portfolio, as the subject.** `parseWhatsAppWebhook(body)` flattens Meta's payload (`bsuid`, `phone?`, `username?`, `identityChange?`), and `whatsappSubject(portfolioId, bsuid)` builds `wa:<portfolio>:<bsuid>`. The portfolio is part of the key because a BSUID is only unique within one.
+3. **Keep a BSUID → customer link in your database.**
+   - **If the webhook has the phone:** match it against your CRM and save the link. Meta sends digits only, so normalize both sides.
+   - **If not:** don't show anything personal. Offer only a linking surface (the demo's `link_account`): the user verifies by logging in or with an emailed code, and the handler saves the link. WhatsApp authentication templates (one-tap, zero-tap, copy code) can't be sent to a BSUID, so verify outside WhatsApp.
+4. **In every `resolve`, map the subject to a customer** and throw `SurfaceError("account_not_linked", …)` when there's no link.
+5. **Handle ID changes.** A BSUID is regenerated when the user changes phone number, and it arrives as a system message (`identityChange`: `user_changed_number` or `user_changed_user_id`, with `previousBsuid`). Copy the link to the new subject. Keep the old one too, so links already sent keep working until they expire.
+6. **Send to the BSUID.** `whatsappCtaMessage({ recipient: bsuid, … })`. Use `to: phone` instead when you have it; if both are set, Meta uses `to`.
+
+The demo implements all of this (`apps/demo/server/identity.ts`, `agent.ts` → `receiveWebhook`), and its panel lets you hide the number or change it.
 
 ## Testing without servers
 

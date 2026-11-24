@@ -295,6 +295,10 @@ export function createUiCalling(opts: UiCallingOptions) {
       const parsed = def.payload.safeParse(rawPayload);
       if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
 
+      // Redacted fields go to the handler only: never to storage, describe() or the agent.
+      const visible = def.redact?.length
+        ? { ...(parsed.data as object), ...Object.fromEntries(def.redact.map((k: string) => [k, "[redacted]"])) }
+        : parsed.data;
       const handler = impl.on?.[type as never] as ((p: unknown, c: SurfaceContext) => Promise<unknown>) | undefined;
       let data: unknown;
       try {
@@ -302,14 +306,14 @@ export function createUiCalling(opts: UiCallingOptions) {
       } catch (err) {
         // The intent still matters: the agent learns what the user tried and why it didn't happen.
         const info = toErrorInfo(err);
-        await recordError(session, info, "action", type, def.describe(parsed.data));
+        await recordError(session, info, "action", type, def.describe(visible));
         throw new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code);
       }
       const event = await record(session, {
         type,
         kind: "domain",
-        payload: parsed.data,
-        description: def.describe(parsed.data),
+        payload: visible,
+        description: def.describe(visible),
         // The outcome of the action, so the agent knows what the user now sees (e.g. the new ticket number).
         state: data && impl.summarize ? impl.summarize(data) : undefined,
         wake: def.wake ?? false,

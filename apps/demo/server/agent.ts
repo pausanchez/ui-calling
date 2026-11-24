@@ -1,6 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { formatEventsForAgent, type UiEvent } from "@ui-calling/core";
-import { whatsappCtaMessage } from "@ui-calling/core/whatsapp";
+import {
+  parseWhatsAppWebhook,
+  whatsappCtaMessage,
+  whatsappSubject,
+  type WhatsAppInbound,
+} from "@ui-calling/core/whatsapp";
+import { PORTFOLIO_ID, customerFor, linkByPhone, relink } from "./identity";
 import { listOrderIds, getOrder } from "./orders";
 import { getShiftBoard, listWorkerIds } from "./shifts";
 import { ui } from "./ui";
@@ -30,9 +36,26 @@ export type ToolTrace = {
   whatsapp?: ReturnType<typeof whatsappCtaMessage>;
 };
 
+/** The last webhook from Meta and who it resolved to, for the demo's "Inbound" panel. */
+export type InboundTrace = {
+  at: string;
+  payload: unknown;
+  parsed: WhatsAppInbound;
+  subject: string;
+  customer: { id: string; name: string } | null;
+  /** How the WhatsApp user was matched to a customer on this message. */
+  match: "already_linked" | "linked_by_phone" | "not_linked" | "relinked_after_id_change";
+};
+
 type Conversation = {
   id: string;
+  /** `wa:<portfolio>:<bsuid>`: who this chat is with, as UI_calling sessions see it. */
   subject: string;
+  /** Where replies go: the BSUID always, the phone only when Meta shared it. */
+  whatsapp?: { bsuid: string; phone?: string; username?: string };
+  inbound?: InboundTrace;
+  /** Scripted agent only: what the user asked before they had to link their account. */
+  pendingAsk?: string;
   chat: ChatMessage[];
   calls: ToolTrace[];
   /** Claude transcript (append-only). */
@@ -57,7 +80,7 @@ const NO_REPLY = "NO_REPLY";
 
 const conversations = new Map<string, Conversation>();
 
-export function getConversation(id: string, subject = "+34600000000") {
+export function getConversation(id: string, subject = "") {
   let c = conversations.get(id);
   if (!c) {
     c = {
@@ -82,7 +105,16 @@ export function resetConversation(id: string) {
 }
 
 export function snapshot(c: Conversation) {
-  return { mode: MODE, chat: c.chat, calls: c.calls, timeline: c.timeline, typing: c.typing };
+  const customer = c.subject ? customerFor(c.subject) : undefined;
+  return {
+    mode: MODE,
+    chat: c.chat,
+    calls: c.calls,
+    timeline: c.timeline,
+    typing: c.typing,
+    inbound: c.inbound ?? null,
+    identity: { subject: c.subject, ...c.whatsapp, customer: customer ? { id: customer.id, name: customer.name } : null },
+  };
 }
 
 /** Resolves once no agent turn is queued or running, including turns that UI events start meanwhile. */
@@ -115,9 +147,11 @@ function enqueue(c: Conversation, fn: () => Promise<void>) {
 
 function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   c.chat.push({ id: crypto.randomUUID(), from: "agent", text, at: new Date().toISOString(), cta });
-  if (cta) {
+  if (cta && c.whatsapp) {
     // What a real WhatsApp Cloud API send would look like: the agent's text plus the link as a button.
-    const payload = whatsappCtaMessage({ to: c.subject, body: text, url: cta.url, buttonText: cta.label });
+    // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
+    const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
+    const payload = whatsappCtaMessage({ ...to, body: text, url: cta.url, buttonText: cta.label });
     const trace = c.calls.findLast((t) => t.result?.url === cta.url);
     if (trace) trace.whatsapp = payload;
     console.log("[whatsapp] would send", JSON.stringify(payload));
@@ -135,6 +169,44 @@ async function callSurface(c: Conversation, tool: string, input: unknown, id: st
     trace.error = String(err);
     throw err;
   }
+}
+
+/**
+ * Entry point for a (signature-checked) WhatsApp webhook: work out who wrote, keep the BSUID links
+ * up to date, then hand text messages to the agent. The demo has one conversation.
+ */
+export function receiveWebhook(conversationId: string, payload: unknown) {
+  let turn: Promise<void> | undefined;
+  for (const m of parseWhatsAppWebhook(payload)) {
+    if (!m.bsuid) continue;
+    const c = getConversation(conversationId);
+    const subject = whatsappSubject(PORTFOLIO_ID, m.bsuid);
+    let match: InboundTrace["match"];
+    if (m.identityChange) {
+      // The BSUID changes when the user changes phone number: carry the customer link over.
+      const previous = m.identityChange.previousBsuid && whatsappSubject(PORTFOLIO_ID, m.identityChange.previousBsuid);
+      match = previous && relink(previous, subject) ? "relinked_after_id_change" : "not_linked";
+    } else if (customerFor(subject)) {
+      match = "already_linked";
+    } else if (m.phone && linkByPhone(subject, m.phone)) {
+      match = "linked_by_phone";
+    } else {
+      match = "not_linked";
+    }
+    c.subject = subject;
+    c.whatsapp = { bsuid: m.bsuid, phone: m.phone, username: m.username };
+    const customer = customerFor(subject);
+    c.inbound = {
+      at: new Date().toISOString(),
+      payload,
+      parsed: m,
+      subject,
+      customer: customer ? { id: customer.id, name: customer.name } : null,
+      match,
+    };
+    if (m.type === "text" && m.text) turn = handleUserMessage(c, m.text);
+  }
+  return turn;
 }
 
 export function handleUserMessage(c: Conversation, text: string) {
@@ -175,9 +247,12 @@ export function handleUiEvent(e: UiEvent) {
 const client = MODE === "claude" ? new Anthropic() : null;
 
 function systemPrompt(c: Conversation) {
-  const workerIds = listWorkerIds(c.subject);
+  const customer = customerFor(c.subject);
+  const who = customer
+    ? `This WhatsApp user is linked to customer ${customer.name} (${customer.id}). Their orders: ${listOrderIds(c.subject).join(", ") || "none"}. Their worker ID: ${listWorkerIds(c.subject).join(", ") || "none (not a worker)"}.`
+    : `This WhatsApp user${c.whatsapp?.username ? ` (@${c.whatsapp.username})` : ""} isn't linked to a customer account yet: WhatsApp didn't share their phone number, so you don't know who they are. Don't share, confirm or guess any personal details. If they ask about anything personal, open show_link_account (passing what they asked for) and say they need to verify once. When a <ui_events> block shows the chat is now linked, carry on with what they asked for.`;
   return `You are the assistant of Acme Store, chatting on WhatsApp with a customer who may also be one of Acme's shift workers.
-Phone: ${c.subject}. Their orders: ${listOrderIds(c.subject).join(", ") || "none"}. Their worker ID: ${workerIds.join(", ") || "none (not a worker)"}.
+${who}
 
 Write like WhatsApp: 1–3 short sentences, friendly, no headings or markdown. Reply in the customer's language.
 
@@ -189,12 +264,16 @@ Events of type "error" mean something failed on the screen, usually a system beh
 }
 
 async function runClaude(c: Conversation) {
-  const tools = ui.tools().map(
-    (t): Anthropic.Beta.BetaTool => ({ ...t, input_schema: t.input_schema as Anthropic.Beta.BetaTool.InputSchema }),
-  );
   let cta: ChatMessage["cta"];
 
   for (let step = 0; step < 5; step++) {
+    // Until the user is linked, the only screen on offer is the one that links them. Recomputed every
+    // step, so the other tools appear as soon as linking succeeds.
+    const linked = Boolean(customerFor(c.subject));
+    const tools = ui
+      .tools()
+      .filter((t) => (t.name === "show_link_account") !== linked)
+      .map((t): Anthropic.Beta.BetaTool => ({ ...t, input_schema: t.input_schema as Anthropic.Beta.BetaTool.InputSchema }));
     const res = await client!.beta.messages.create({
       model: "claude-opus-5-5",
       max_tokens: 16000,
@@ -264,6 +343,9 @@ const SCRIPT = {
     shiftsAbandoned: "Did you find a shift that works for you? If not, tell me which days suit you and I'll check.",
     shiftsLoadFailed: "Sorry, the shifts page isn't loading because our scheduling system is down. I'll let you know as soon as it's back.",
     shiftFailed: "Sorry, that shift couldn't be booked, so your current shift stays as it was. It may have just filled up: you can try again or pick another one.",
+    verifyFirst: "I can help with that, but first I need to know it's you: WhatsApp didn't share your number with us. Verify once here 👇",
+    linked: (name: string) => `Thanks, ${name} ✅ Your chat is linked now.`,
+    verifyFailed: "That email and code didn't match. You can try again on the same page.",
   },
   es: {
     status: (id: string) => `Aquí tienes el estado de tu pedido ${id} en directo. Desde ahí también puedes cambiar la entrega 👇`,
@@ -281,6 +363,9 @@ const SCRIPT = {
     shiftsAbandoned: "¿Has encontrado algún turno que te vaya bien? Si no, dime qué días te vienen mejor y lo miro.",
     shiftsLoadFailed: "Perdona, la página de turnos no carga porque el sistema de planificación está caído. Te aviso en cuanto vuelva.",
     shiftFailed: "Perdona, no se ha podido reservar ese turno, así que tu turno actual sigue igual. Puede que se acabe de completar: puedes reintentarlo o elegir otro.",
+    verifyFirst: "Te ayudo con eso, pero antes necesito saber que eres tú: WhatsApp no nos ha compartido tu número. Verifícalo una vez aquí 👇",
+    linked: (name: string) => `Gracias, ${name} ✅ Tu chat ya está vinculado.`,
+    verifyFailed: "El email y el código no coinciden. Puedes volver a intentarlo en la misma página.",
   },
 };
 
@@ -301,6 +386,12 @@ async function scriptedReply(c: Conversation, text: string) {
     ? "es"
     : "en";
   const s = SCRIPT[c.locale];
+  if (!customerFor(c.subject)) {
+    // Unknown WhatsApp user: link first, then pick up the question in scriptedFollowUp.
+    c.pendingAsk = text;
+    const r = (await callSurface(c, "show_link_account", { continue_with: text.slice(0, 200), locale: c.locale })).result!;
+    return post(c, s.verifyFirst, { label: r.ctaLabel, url: r.url });
+  }
   const [orderId] = listOrderIds(c.subject);
   const [workerId] = listWorkerIds(c.subject);
   if (workerId && SHIFT_TOPIC.test(text)) {
@@ -321,6 +412,18 @@ async function scriptedFollowUp(c: Conversation, e: UiEvent) {
   const session = await ui.store.getSession(e.sessionId);
   const orderId = String(session?.input.order_id ?? "");
   const p = e.payload as Record<string, string>;
+  if (e.surface === "link_account") {
+    const customer = customerFor(c.subject);
+    if (e.type === "verify_identity" && customer) {
+      post(c, s.linked(customer.name.split(" ")[0]));
+      const ask = c.pendingAsk;
+      c.pendingAsk = undefined;
+      if (ask) await scriptedReply(c, ask);
+    } else if (e.type === "error") {
+      post(c, s.verifyFailed);
+    }
+    return;
+  }
   if (e.surface === "shift_picker") {
     const workerId = String(session?.input.worker_id ?? "");
     if (e.type === "shift_selected") {

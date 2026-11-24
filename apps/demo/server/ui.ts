@@ -3,6 +3,7 @@ import { orderStatus } from "../src/components/ui-calling/order-status.surface";
 import { failures } from "./failures";
 import { getOrder, updateOrder } from "./orders";
 import { shiftPickerImpl } from "./shift-picker.server";
+import { linkAccountImpl } from "./link-account.server";
 
 export { failures };
 
@@ -50,5 +51,6 @@ export const ui = createUiCalling({
       },
     }),
     shiftPickerImpl,
+    linkAccountImpl,
   ],
 });

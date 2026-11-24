@@ -155,17 +155,36 @@ Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the
 - Blocks keep their strings in an exported dictionary (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
 - `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
 
+## WhatsApp identity (BSUIDs)
+
+WhatsApp identifies users by a **business-scoped user ID** (BSUID), unique within your business portfolio. The phone number only comes along under Meta's conditions, and users with a WhatsApp username may never share it. `@ui-calling/core/whatsapp` covers the plumbing:
+
+| Helper | What it does |
+|---|---|
+| `verifyWhatsAppSignature(raw, header, secret)` | Checks `X-Hub-Signature-256`, so you only trust signed webhooks |
+| `parseWhatsAppWebhook(body)` | Flattens Meta's payload: `bsuid`, `parentBsuid?`, `phone?`, `username?`, and `identityChange?` for BSUID changes |
+| `whatsappSubject(portfolioId, bsuid)` | The session `subject`: `wa:<portfolio>:<bsuid>` |
+| `whatsappCtaMessage({ recipient \| to, … })` | The link button, addressed to a BSUID or a phone number |
+
+Your product keeps the BSUID → customer link. The demo shows the whole flow:
+- **Number shared:** match it in the CRM.
+- **No number:** the agent only gets a `link_account` screen, where the user verifies with an email code (redacted from the agent's context). Then it carries on with the question.
+- **The user changes number:** the link moves to the new BSUID.
+
+See [GUIDE.md](packages/cli/GUIDE.md#whatsapp-who-is-the-subject).
+
 ## Security model
 
 - The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
 - Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
 - Links expire (`ttlSeconds`, default 1h). Responses are `no-store` and the page sets `Referrer-Policy: no-referrer`.
 - Link-preview crawlers don't run JavaScript, so they never fetch data or trigger `opened`.
-- Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions.
+- Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
+- On WhatsApp, sessions are tied to the BSUID from a signed webhook, and surfaces check that it's linked to the customer whose data they show.
 
 ## Not done yet
 
-- Step-up verification (OTP over WhatsApp) for sensitive surfaces
+- Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - Persistent store and job queue (the defaults are in-memory, with an in-process abandon timer)
 - Real WhatsApp Cloud API sending (`whatsappCtaMessage` builds the payload; the demo logs it)
 - An MCP server adapter, so any MCP client can call surfaces

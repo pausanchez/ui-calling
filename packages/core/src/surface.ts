@@ -10,6 +10,11 @@ export type EventDef<P extends z.ZodType = z.ZodType> = {
   describe: (payload: z.infer<P>) => string;
   /** Wake the agent as soon as this happens, instead of waiting for the user's next message. */
   wake?: boolean;
+  /**
+   * Payload fields that must never be stored or reach the agent, e.g. a verification code.
+   * The event handler still receives them; `describe` and the event log see "[redacted]".
+   */
+  redact?: (keyof z.infer<P> & string)[];
 };
 
 export function event<P extends z.ZodType>(payload: P, opts: Omit<EventDef<P>, "payload">): EventDef<P> {

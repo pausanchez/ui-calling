@@ -1,5 +1,6 @@
 import type { SurfaceData } from "@ui-calling/core";
 import type { orderStatus } from "../src/components/ui-calling/order-status.surface";
+import { customerFor, requireCustomer } from "./identity";
 
 type Order = SurfaceData<typeof orderStatus> & { owner: string };
 
@@ -10,7 +11,7 @@ export function seedOrders() {
   orders.clear();
   orders.set("A-1042", {
     id: "A-1042",
-    owner: "+34600000000",
+    owner: "C-1001",
     status: "in_transit",
     carrier: "Rapido Express",
     trackingCode: "RX8842107",
@@ -38,16 +39,18 @@ export function seedOrders() {
 }
 seedOrders();
 
-/** Only the owner can see an order: the session's subject is the access check. */
+/** Only the owner can see an order: the session's subject must be linked to the owning customer. */
 export function getOrder(id: string, subject: string) {
+  const customer = requireCustomer(subject);
   const o = orders.get(id);
-  if (!o || o.owner !== subject) throw new Error(`Order ${id} not found for this customer`);
+  if (!o || o.owner !== customer.id) throw new Error(`Order ${id} not found for this customer`);
   const { owner, ...data } = o;
   return data;
 }
 
 export function listOrderIds(subject: string) {
-  return [...orders.values()].filter((o) => o.owner === subject).map((o) => o.id);
+  const customer = customerFor(subject);
+  return customer ? [...orders.values()].filter((o) => o.owner === customer.id).map((o) => o.id) : [];
 }
 
 export function updateOrder(id: string, subject: string, patch: Partial<Order>) {

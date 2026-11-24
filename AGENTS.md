@@ -44,10 +44,17 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 - **No real company names** anywhere in the repo. Use generic examples, like "Acme Store" or "Rapido Express".
 - **Code style:** match the code around you: short comments that explain why, no new dependencies without a reason.
 
+## How the demo identifies people
+
+Each chat message becomes the webhook Meta would send (`server/whatsapp-sim.ts`), handled by `receiveWebhook` in `server/agent.ts` exactly like `POST /api/whatsapp/webhook`. The flow from there:
+- The session subject is `wa:<portfolio>:<bsuid>`.
+- `server/identity.ts` links it to a customer: by phone when Meta shares it, otherwise through the `link_account` surface.
+- Until it's linked, the agent only gets the `show_link_account` tool.
+
 ## Adding a surface to the demo
 
 1. `cd apps/demo && npx ui-calling new <name> --server-dir server`, then follow [GUIDE.md](packages/cli/GUIDE.md).
-2. Put mock data in `server/<topic>.ts` with a `seed…()` function, and add an outage switch to `server/failures.ts` if the surface calls a "third party".
+2. Put mock data in `server/<topic>.ts` with a `seed…()` function, and add an outage switch to `server/failures.ts` if the surface calls a "third party". Owners are customer IDs: check access with `requireCustomer(subject)` from `server/identity.ts`, never by comparing phone numbers.
 3. In `server/ui.ts`, register the implementation in `createUiCalling({ surfaces })`.
 4. In `server/app.ts`, call your `seed…()` on reset and reset your outage switch there; accept the switch in `POST /api/demo/failures`.
 5. In `server/agent.ts`:
