@@ -12,7 +12,8 @@ import {
 } from "react";
 import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload } from "@ui-calling/core";
 
-type Status = "loading" | "ready" | "expired" | "error";
+/** `completed`: the user already finished on this screen, so its link no longer works. */
+type Status = "loading" | "ready" | "expired" | "completed" | "error";
 
 type ContextValue = {
   status: Status;
@@ -49,7 +50,8 @@ const SurfaceContext = createContext<ContextValue | null>(null);
 /**
  * Loads the session behind `token` and tracks lifecycle automatically:
  * `opened` on load, `left` when the tab is hidden or closed, `opened` again on return
- * (recorded server-side as `returned`).
+ * (recorded server-side as `returned`). After `complete()` the link is closed: a tab left open
+ * switches to `status: "completed"` as soon as it's used again.
  */
 export function SurfaceProvider(props: { token: string; endpoint?: string; returnUrl?: string; children: ReactNode }) {
   const base = `${props.endpoint ?? "/api/ui"}/sessions/${encodeURIComponent(props.token)}`;
@@ -69,9 +71,12 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type, payload }),
+        // `complete()` usually runs as the user follows "Back to chat": let it finish after the page goes.
+        keepalive: true,
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (json.error === "completed") setState((s) => ({ status: "completed", locale: s.locale }));
         throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
       }
       if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
@@ -84,6 +89,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     const res = await fetch(base);
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (json.error === "completed") setState((s) => ({ status: "completed", locale: s.locale }));
       throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
     }
     setState((s) => ({ ...s, data: json.data }));
@@ -114,12 +120,13 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
       .then(async (res) => {
         const json = await res.json();
         if (cancelled) return;
+        if (json.error === "completed") return setState({ status: "completed" });
         if (res.status === 410) return setState({ status: "expired", error: json.message });
         if (!res.ok) return setState({ status: "error", error: json.message ?? json.error, errorCode: json.error });
         setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
         if (!opened.current) {
           opened.current = true;
-          void emit("opened");
+          void emit("opened").catch(() => {});
         }
       })
       .catch((e) => !cancelled && setState({ status: "error", error: String(e) }));
@@ -136,7 +143,8 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         const blob = new Blob([JSON.stringify({ type: "left", payload: {} })], { type: "application/json" });
         navigator.sendBeacon(`${base}/events`, blob);
       } else {
-        void emit("opened");
+        // Fails once the session is completed; emit has already switched the screen.
+        void emit("opened").catch(() => {});
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
@@ -223,5 +231,11 @@ export function useSurface<S extends AnySurface>(surface: S) {
 /** Which surface a token points to, for routing between several surfaces on one page. */
 export function useSurfaceName() {
   const ctx = useContext(SurfaceContext);
-  return { status: ctx?.status ?? "loading", surface: ctx?.surface, locale: ctx?.locale, error: ctx?.error };
+  return {
+    status: ctx?.status ?? "loading",
+    surface: ctx?.surface,
+    locale: ctx?.locale,
+    error: ctx?.error,
+    returnUrl: ctx?.returnUrl,
+  };
 }

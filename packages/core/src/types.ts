@@ -42,11 +42,11 @@ export type UiEvent = {
 
 export class UiCallingError extends Error {
   constructor(
-    public code: "not_found" | "expired" | "unknown_surface" | "unknown_event" | "invalid_payload" | "upstream_error",
+    public code: "not_found" | "expired" | "completed" | "unknown_surface" | "unknown_event" | "invalid_payload" | "upstream_error",
     message: string,
     public status: 400 | 404 | 410 | 502 = code === "not_found"
       ? 404
-      : code === "expired"
+      : code === "expired" || code === "completed"
         ? 410
         : code === "upstream_error"
           ? 502

@@ -41,6 +41,8 @@ export type SurfaceContract<
   events: E;
   /** Button text for the link, per language: { en: "View order", es: "Ver pedido" }. */
   cta?: Record<string, string>;
+  /** How long its links stay valid, in seconds. Keep it short for sensitive screens. Default: `createUiCalling`'s (1 hour). */
+  ttlSeconds?: number;
 };
 
 export function defineSurface<
