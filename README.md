@@ -27,7 +27,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and ask "¿Dónde está mi pedido?". It's a simulated WhatsApp chat next to a live view of what the agent knows.
+Open http://localhost:5173 and ask "¿Dónde está mi pedido?" or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to a live view of what the agent knows.
 
 - With `ANTHROPIC_API_KEY` set, the agent is Claude (`claude-opus-5-5`) using the generated tool schemas.
 - Without it, a scripted agent runs the same loop, so the demo works offline. Force either with `AGENT=claude|scripted`.

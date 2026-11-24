@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { uiCallingRoutes } from "@ui-calling/server";
 import { MODE, getConversation, handleUiEvent, handleUserMessage, resetConversation, snapshot } from "./agent";
 import { seedOrders } from "./orders";
+import { seedShifts } from "./shifts";
 import { PUBLIC_URL, failures, onUiEvent, ui } from "./ui";
 
 const CONVERSATION = "demo";
@@ -27,7 +28,8 @@ app.post("/api/chat", async (c) => {
 app.post("/api/chat/reset", (c) => {
   resetConversation(CONVERSATION);
   seedOrders();
-  failures.ordersApi = failures.carrierApi = false;
+  seedShifts();
+  failures.ordersApi = failures.carrierApi = failures.schedulingApi = false;
   return c.json(snapshot(getConversation(CONVERSATION)));
 });
 
@@ -36,6 +38,7 @@ app.post("/api/demo/failures", async (c) => {
   const body = await c.req.json<Partial<typeof failures>>();
   if (typeof body.ordersApi === "boolean") failures.ordersApi = body.ordersApi;
   if (typeof body.carrierApi === "boolean") failures.carrierApi = body.carrierApi;
+  if (typeof body.schedulingApi === "boolean") failures.schedulingApi = body.schedulingApi;
   return c.json(failures);
 });
 

@@ -1,5 +1,6 @@
 import { SurfaceProvider, useSurfaceName } from "@ui-calling/react";
 import { OrderStatus } from "./components/ui-calling/order-status";
+import { ShiftPicker } from "./components/ui-calling/shift-picker";
 
 /** One route serves every surface; the token decides which one renders. */
 export function SurfacePage({ token }: { token: string }) {
@@ -14,6 +15,7 @@ function Router() {
   const { status, surface, error } = useSurfaceName();
   // Until a surface is known (loading, expired, bad link), let the block render its own localized states.
   if (!surface || surface === "order_status") return <OrderStatus />;
+  if (surface === "shift_picker") return <ShiftPicker />;
   return (
     <main className="grid min-h-dvh place-items-center bg-background p-6 text-center">
       <div>
