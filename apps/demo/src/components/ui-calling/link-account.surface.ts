@@ -19,6 +19,8 @@ export const linkAccount = defineSurface({
       .describe("What the user asked for, in a few words, so you can pick it up after linking"),
   }),
   cta: { en: "Verify it's you", es: "Verificar identidad" },
+  // Whoever holds this link can link the chat to an account: keep it short-lived.
+  ttlSeconds: 10 * 60,
   data: z.object({
     linked: z.boolean(),
     customerId: z.string().nullable(),

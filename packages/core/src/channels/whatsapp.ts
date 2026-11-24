@@ -58,6 +58,8 @@ export type WhatsAppInbound = {
   /** WhatsApp Business Account that received it (`entry[].id`). */
   wabaId: string;
   phoneNumberId?: string;
+  /** The business number the user wrote to, as Meta displays it. Handy for a `https://wa.me/<digits>` return link. */
+  businessPhone?: string;
   messageId: string;
   type: string;
   text?: string;
@@ -96,6 +98,7 @@ export function parseWhatsAppWebhook(body: unknown): WhatsAppInbound[] {
         out.push({
           wabaId: String(entry.id),
           phoneNumberId: value.metadata?.phone_number_id,
+          businessPhone: value.metadata?.display_phone_number,
           messageId: m.id,
           type: m.type,
           text: m.text?.body,
@@ -109,6 +112,47 @@ export function parseWhatsAppWebhook(body: unknown): WhatsAppInbound[] {
             sys && (sys.type === "user_changed_user_id" || sys.type === "user_changed_number")
               ? { kind: sys.type, previousBsuid: sys.previous_user_id, previousParentBsuid: sys.previous_parent_user_id }
               : undefined,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** What Meta reports about a message you sent, after the send call itself succeeded. */
+export type WhatsAppStatus = {
+  wabaId: string;
+  phoneNumberId?: string;
+  /** The `messages[0].id` (wamid) the send call returned. */
+  messageId: string;
+  status: "sent" | "delivered" | "read" | "failed" | (string & {});
+  timestamp?: string;
+  /** Only on `failed`, e.g. 131047 when the 24h service window has closed. */
+  errors?: { code: number; title?: string; details?: string }[];
+};
+
+/**
+ * Flatten the `statuses` in a WhatsApp `messages` webhook. A message can still fail here after the
+ * send call returned 200, so this is the only place some delivery failures show up.
+ */
+export function parseWhatsAppStatuses(body: unknown): WhatsAppStatus[] {
+  const out: WhatsAppStatus[] = [];
+  for (const entry of ((body as Json)?.entry ?? []) as Json[]) {
+    for (const change of (entry.changes ?? []) as Json[]) {
+      if (change.field !== "messages") continue;
+      const value: Json = change.value ?? {};
+      for (const s of (value.statuses ?? []) as Json[]) {
+        out.push({
+          wabaId: String(entry.id),
+          phoneNumberId: value.metadata?.phone_number_id,
+          messageId: s.id,
+          status: s.status,
+          timestamp: s.timestamp,
+          errors: (s.errors as Json[] | undefined)?.map((e) => ({
+            code: e.code,
+            title: e.title ?? e.message,
+            details: e.error_data?.details,
+          })),
         });
       }
     }

@@ -138,7 +138,8 @@ Tell the agent in its system prompt:
 - **Keep payloads small and don't trust them.** The payload comes from the browser. Send IDs and the user's choices; let `summarize` give the agent the readable detail (dates, places, prices) from your own data. If the payload repeats what the user saw (e.g. a time), check it against your data in the handler and throw `SurfaceError` if it changed.
 - **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
 - **The screen can explain failures.** A failed `emit` throws `SurfaceActionError`, and its `reason` is your `SurfaceError` code. Map known reasons to messages in the user's language ("that shift just filled up"), call `reload()` when the screen may be stale, and only offer "try again" for retryable failures.
-- **`complete()` means "the user is done here".** Call it on the "back to chat" link or a final button, not after every action. It records a `completed` event, and stops the screen counting as abandoned.
+- **`complete()` means "the user is done here", and it closes the link.** Call it on the "back to chat" link or a final button, not after every action. It records a `completed` event and stops the screen counting as abandoned. From then on the link refuses everything (410, `error: "completed"`), so a tab left open or a forwarded link can't act again. The screen gets `status: "completed"`: show "all done" and a way back to the chat. `surface-screen.tsx` from `init` already does. If the user needs the screen again, the agent opens a new link.
+- **Short-lived links for sensitive screens.** Set `ttlSeconds` on the contract (e.g. `10 * 60` for identity checks or payments). It overrides `createUiCalling`'s default of 1 hour, and the agent is told the real expiry.
 - **The URL carries only the token.** Never put personal data in `input`; load it in `resolve`.
 - **Strings live in the messages object.** Use `locale` from `useSurface()` for dates and currency (`toLocaleDateString(locale)`, `toLocaleString(locale, { style: "currency" })`).
 
@@ -183,7 +184,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 - [ ] `resolve` checks `ctx.subject` may see the data.
 - [ ] `summarize` covers everything the screen shows, including outcomes like ticket numbers.
 - [ ] Each event's `describe` states what the user asked for; handlers return fresh data; failures throw `SurfaceError`.
-- [ ] The screen handles `loading`, `expired`, `error` with `errorCode === "upstream_error"`, and a failed `emit` (by `reason`).
+- [ ] The screen handles `loading`, `expired`, `completed`, `error` with `errorCode === "upstream_error"`, and a failed `emit` (by `reason`).
 - [ ] `complete()` is called when the user is done.
 - [ ] An in-process test covers the outcome, a failure and a foreign `subject`.
 - [ ] Every user-facing string is in the messages object, in en and es.

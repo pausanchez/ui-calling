@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { anthropicToolResult, anthropicTools } from "@ui-calling/anthropic";
 import { formatEventsForAgent, type SurfaceLink, type ToolRun, type UiEvent } from "@ui-calling/core";
 import {
+  parseWhatsAppStatuses,
   parseWhatsAppWebhook,
   whatsappCtaMessage,
   whatsappSubject,
@@ -18,7 +19,10 @@ export type ChatMessage = {
   text: string;
   at: string;
   cta?: { label: string; url: string };
+  /** Real WhatsApp chats only: how far Meta got delivering it. */
+  delivery?: Delivery;
 };
+type Delivery = { status: "sending" | "sent" | "delivered" | "read" | "failed"; wamid?: string; error?: string };
 
 /** One tool call end to end, for the demo's "Tool calls" panel. */
 export type ToolTrace = {
@@ -33,7 +37,7 @@ export type ToolTrace = {
   error?: string;
   /** What went back to the model as the tool_result (Claude only). */
   toolResult?: string;
-  /** The WhatsApp Cloud API request that would deliver the link. */
+  /** The WhatsApp Cloud API request that delivers (or would deliver) the link. */
   whatsapp?: ReturnType<typeof whatsappCtaMessage>;
 };
 
@@ -53,7 +57,7 @@ type Conversation = {
   /** `wa:<portfolio>:<bsuid>`: who this chat is with, as UI_calling sessions see it. */
   subject: string;
   /** Where replies go: the BSUID always, the phone only when Meta shared it. */
-  whatsapp?: { bsuid: string; phone?: string; username?: string };
+  whatsapp?: { bsuid: string; phone?: string; username?: string; phoneNumberId?: string; businessPhone?: string };
   inbound?: InboundTrace;
   /** Scripted agent only: what the user asked before they had to link their account. */
   pendingAsk?: string;
@@ -116,8 +120,9 @@ export function getConversation(id: string, subject = "") {
   return c;
 }
 
-export function resetConversation(id: string) {
-  conversations.delete(id);
+/** Every conversation: the simulated phone's and the real WhatsApp users'. */
+export function resetConversations() {
+  conversations.clear();
 }
 
 export function snapshot(c: Conversation) {
@@ -164,14 +169,81 @@ function enqueue(c: Conversation, fn: () => Promise<void>) {
 
 function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   c.chat.push({ id: crypto.randomUUID(), from: "agent", text, at: new Date().toISOString(), cta });
-  if (cta && c.whatsapp) {
-    // What a real WhatsApp Cloud API send would look like: the agent's text plus the link as a button.
-    // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
-    const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
-    const payload = whatsappCtaMessage({ ...to, body: text, url: cta.url, buttonText: cta.label });
+  if (!c.whatsapp) return;
+  // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
+  const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
+  // Only chats that came in through Meta's webhook to our number get real sends; the simulated phone doesn't.
+  const live = WHATSAPP_TOKEN && c.whatsapp.phoneNumberId === WHATSAPP_PHONE_NUMBER_ID;
+  // There, "Back to chat" on the screen should reopen the WhatsApp chat, not the demo's web chat (see surface-page.tsx).
+  const back = live && c.whatsapp.businessPhone?.replace(/\D/g, "");
+  const url = cta && back ? `${cta.url}?wa=${back}` : cta?.url;
+  // The agent's text, plus the link as a button when there is one.
+  const payload = cta
+    ? whatsappCtaMessage({ ...to, body: text, url: url!, buttonText: cta.label })
+    : { messaging_product: "whatsapp", recipient_type: "individual", ...to, type: "text", text: { body: text } };
+  if (cta) {
     const trace = c.calls.findLast((t) => t.result?.url === cta.url);
-    if (trace) trace.whatsapp = payload;
-    console.log("[whatsapp] would send", JSON.stringify(payload));
+    if (trace) trace.whatsapp = payload as ReturnType<typeof whatsappCtaMessage>;
+  }
+  if (!live) {
+    if (cta) log(c, `would send cta "${cta.label}" ${url}`);
+    return;
+  }
+  const msg = c.chat.at(-1)!;
+  msg.delivery = { status: "sending" };
+  void sendWhatsApp(c, msg, payload);
+}
+
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const STATUS_ORDER = ["sending", "sent", "delivered", "read", "failed"];
+
+/** `[whatsapp] 15:20:01 …a1b2c3 <what>`: enough to tell real users apart without printing who they are. */
+function log(c: Conversation, what: string, error = false) {
+  const time = new Date().toLocaleTimeString("en-GB");
+  (error ? console.error : console.log)(`[whatsapp] ${time} …${c.whatsapp?.bsuid.slice(-6) ?? c.id} ${what}`);
+}
+
+async function sendWhatsApp(c: Conversation, msg: ChatMessage, payload: { type?: string }) {
+  const res = await fetch(`https://graph.facebook.com/v25.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${WHATSAPP_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch((err: unknown) => err as Error);
+  if (res instanceof Error) {
+    msg.delivery = { status: "failed", error: res.message };
+  } else {
+    const body = (await res.json().catch(() => ({}))) as {
+      messages?: { id: string }[];
+      error?: { code?: number; message?: string; error_data?: { details?: string } };
+    };
+    msg.delivery = res.ok
+      ? { status: "sent", wamid: body.messages?.[0]?.id }
+      : {
+          status: "failed",
+          error: `${res.status} (#${body.error?.code}) ${body.error?.error_data?.details ?? body.error?.message ?? ""}`.trim(),
+        };
+  }
+  if (msg.delivery.status === "failed") log(c, `send ${payload.type} failed: ${msg.delivery.error}`, true);
+  else log(c, `sent ${payload.type}`);
+  // The send often finishes after the turn was saved.
+  turnEnded();
+}
+
+/** Meta's later word on a sent message: delivered, read, or failed after all (e.g. the 24h window closed). */
+function applyStatuses(payload: unknown) {
+  for (const s of parseWhatsAppStatuses(payload)) {
+    for (const c of conversations.values()) {
+      const msg = c.chat.find((m) => m.delivery?.wamid === s.messageId);
+      if (!msg?.delivery) continue;
+      // Statuses can arrive out of order; never go back from "read" to "delivered".
+      if (STATUS_ORDER.indexOf(s.status) <= STATUS_ORDER.indexOf(msg.delivery.status)) break;
+      const e = s.errors?.[0];
+      msg.delivery = { ...msg.delivery, status: s.status as Delivery["status"], error: e && `(#${e.code}) ${e.details ?? e.title ?? ""}`.trim() };
+      if (s.status === "failed") log(c, `delivery failed: ${msg.delivery.error}`, true);
+      turnEnded();
+      break;
+    }
   }
 }
 
@@ -201,14 +273,17 @@ async function callSurface(c: Conversation, tool: string, input: unknown): Promi
 
 /**
  * Entry point for a (signature-checked) WhatsApp webhook: work out who wrote, keep the BSUID links
- * up to date, then hand text messages to the agent. The demo has one conversation.
+ * up to date, then hand text messages to the agent. Each sender gets their own conversation, keyed
+ * by subject; the simulated phone passes its fixed `conversationId` instead.
  */
-export function receiveWebhook(conversationId: string, payload: unknown) {
+export function receiveWebhook(payload: unknown, conversationId?: string) {
+  applyStatuses(payload);
   let turn: Promise<void> | undefined;
   for (const m of parseWhatsAppWebhook(payload)) {
     if (!m.bsuid) continue;
-    const c = getConversation(conversationId);
     const subject = whatsappSubject(PORTFOLIO_ID, m.bsuid);
+    const isNew = !conversations.has(conversationId ?? subject);
+    const c = getConversation(conversationId ?? subject, subject);
     let match: InboundTrace["match"];
     if (m.identityChange) {
       // The BSUID changes when the user changes phone number: carry the customer link over.
@@ -222,7 +297,14 @@ export function receiveWebhook(conversationId: string, payload: unknown) {
       match = "not_linked";
     }
     c.subject = subject;
-    c.whatsapp = { bsuid: m.bsuid, phone: m.phone, username: m.username };
+    c.whatsapp = {
+      bsuid: m.bsuid,
+      phone: m.phone,
+      username: m.username,
+      phoneNumberId: m.phoneNumberId,
+      businessPhone: m.businessPhone,
+    };
+    if (isNew && !conversationId) log(c, `new chat, watch it at http://localhost:5173/?conversation=${encodeURIComponent(c.id)}`);
     const customer = customerFor(subject);
     c.inbound = {
       at: new Date().toISOString(),

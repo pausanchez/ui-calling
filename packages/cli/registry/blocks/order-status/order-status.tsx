@@ -3,8 +3,9 @@ import { pickLocalized } from "@ui-calling/core";
 import { useSurface } from "@ui-calling/react";
 import { orderStatus } from "./order-status.surface";
 
-/** Every string the screen shows. Add a language by adding a key; override single strings with the `messages` prop. */
-export const ORDER_STATUS_MESSAGES = {
+/** Every string the screen shows. Add a language by adding a key; override single strings with the `messages` prop.
+ * Not exported: a file that only exports components keeps Fast Refresh working. */
+const ORDER_STATUS_MESSAGES = {
   en: {
     order: "Order",
     arriving: "Arriving",

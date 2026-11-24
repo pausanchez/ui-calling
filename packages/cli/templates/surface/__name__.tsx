@@ -3,8 +3,9 @@ import { pickLocalized } from "@ui-calling/core";
 import { useSurface } from "@ui-calling/react";
 import { __const__ } from "./__name__.surface";
 
-/** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop. */
-export const __MESSAGES__ = {
+/** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop.
+ * Not exported: a file that only exports components keeps Fast Refresh working. */
+const __MESSAGES__ = {
   en: {
     confirm: "Confirm",
     notePlaceholder: "Anything to add? (optional)",

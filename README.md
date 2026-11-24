@@ -161,7 +161,7 @@ Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the
 
 - `ui.call()` returns `ctaLabel`, picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
 - `useSurface()` returns `locale` for dates and currency (`Intl`), and the provider sets `<html lang>`.
-- Blocks keep their strings in an exported dictionary (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
+- Blocks keep their strings in a dictionary at the top of the component file (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
 - `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
 
 ## WhatsApp identity (BSUIDs)
@@ -201,7 +201,8 @@ The demo keeps its own state in the same file, so you can restart it mid-convers
 
 - The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
 - Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
-- Links expire (`ttlSeconds`, default 1h). Responses are `no-store` and the page sets `Referrer-Policy: no-referrer`.
+- Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks). Responses are `no-store` and the page sets `Referrer-Policy: no-referrer`.
+- Once the user finishes (`complete()`), the link is closed: reads and actions are refused, so a tab left open or a forwarded link can't act again.
 - Link-preview crawlers don't run JavaScript, so they never fetch data or trigger `opened`.
 - Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
 - On WhatsApp, sessions are tied to the BSUID from a signed webhook, and surfaces check that it's linked to the customer whose data they show.

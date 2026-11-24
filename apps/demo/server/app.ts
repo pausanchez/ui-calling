@@ -10,7 +10,7 @@ import {
   handleUiEvent,
   onTurnEnd,
   receiveWebhook,
-  resetConversation,
+  resetConversations,
   snapshot,
 } from "./agent";
 import { linksState, seedIdentity } from "./identity";
@@ -19,7 +19,7 @@ import { seedShifts, shiftsState } from "./shifts";
 import { failures, onUiEvent, store, ui } from "./ui";
 import { demoUser, demoUserState, inboundNumberChange, inboundText, seedDemoUser } from "./whatsapp-sim";
 
-/** The demo has one conversation. */
+/** The simulated phone's conversation. Real WhatsApp users each get their own, keyed by subject. */
 export const CONVERSATION = "demo";
 onUiEvent(handleUiEvent);
 
@@ -48,6 +48,18 @@ app.use("*", async (_c, next) => {
   saveState();
 });
 
+// Only the screens (/api/ui) and Meta's webhook have to be public. The chat console and its demo
+// switches can read real users' chats and wipe everything, so through a tunnel they answer 403.
+// A tunnel keeps its own hostname in the Host header (Vite's proxy is set to pass it on), so checking it is enough.
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+app.use("/api/*", async (c, next) => {
+  const operatorOnly = c.req.path.startsWith("/api/chat") || c.req.path.startsWith("/api/demo/");
+  if (operatorOnly && !LOCAL_HOSTS.has(new URL(c.req.url).hostname)) {
+    return c.json({ error: "forbidden", message: "The demo console only answers on localhost" }, 403);
+  }
+  await next();
+});
+
 app.route("/api/ui", uiCallingRoutes(ui));
 
 /**
@@ -68,22 +80,23 @@ app.post("/api/whatsapp/webhook", async (c) => {
   if (secret && !(await verifyWhatsAppSignature(raw, c.req.header("x-hub-signature-256"), secret))) {
     return c.text("Invalid signature", 401);
   }
-  void receiveWebhook(CONVERSATION, JSON.parse(raw));
+  void receiveWebhook(JSON.parse(raw));
   return c.text("OK");
 });
 
-app.get("/api/chat", (c) => c.json(snapshot(getConversation(CONVERSATION))));
+// `?conversation=wa:…` shows a real WhatsApp user's chat; without it, the simulated phone's.
+app.get("/api/chat", (c) => c.json(snapshot(getConversation(c.req.query("conversation") ?? CONVERSATION))));
 
 /** The simulated phone: the text becomes the webhook Meta would send, and goes the same way as a real one. */
 app.post("/api/chat", async (c) => {
   const { text } = await c.req.json<{ text: string }>();
   if (!text?.trim()) return c.json({ error: "empty" }, 400);
-  void receiveWebhook(CONVERSATION, inboundText(text.trim().slice(0, 2000)));
+  void receiveWebhook(inboundText(text.trim().slice(0, 2000)), CONVERSATION);
   return c.json(snapshot(getConversation(CONVERSATION)));
 });
 
 app.post("/api/chat/reset", (c) => {
-  resetConversation(CONVERSATION);
+  resetConversations();
   seedOrders();
   seedShifts();
   seedIdentity();
@@ -120,7 +133,7 @@ app.post("/api/demo/identity", async (c) => {
 });
 /** The user changes phone number: Meta sends a system message with their new BSUID. */
 app.post("/api/demo/identity/change-number", async (c) => {
-  await receiveWebhook(CONVERSATION, inboundNumberChange());
+  await receiveWebhook(inboundNumberChange(), CONVERSATION);
   return c.json(demoUser);
 });
 

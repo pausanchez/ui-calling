@@ -81,6 +81,7 @@ export type UiCallingOptions = {
   baseUrl: string;
   pathPrefix?: string;
   store?: UiStore;
+  /** How long links stay valid. Default 1 hour; a surface's own `ttlSeconds` wins. */
   ttlSeconds?: number;
   /** Record an `abandoned` event if nothing happens this long after `opened`. */
   abandonAfterMs?: number;
@@ -123,6 +124,8 @@ export function createUiCalling(opts: UiCallingOptions) {
     const session = await store.getSessionByTokenHash(await sha256(token));
     if (!session) throw new UiCallingError("not_found", "Unknown link");
     if (Date.parse(session.expiresAt) < Date.now()) throw new UiCallingError("expired", "This link has expired");
+    // Once the user finishes, the link stops working: a tab left open, or a forwarded link, can't act again.
+    if (session.status === "completed") throw new UiCallingError("completed", "This screen is already done");
     return session;
   }
 
@@ -255,7 +258,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         locale,
         status: "sent",
         createdAt: now.toISOString(),
-        expiresAt: new Date(now.getTime() + ttl * 1000).toISOString(),
+        expiresAt: new Date(now.getTime() + (impl.surface.ttlSeconds ?? ttl) * 1000).toISOString(),
       };
       // Resolve once now so the agent knows what the user will see (and bad input fails early).
       const data = await impl.resolve(input as never, ctxOf(session));
