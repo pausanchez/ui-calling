@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { uiCallingRoutes } from "@ui-calling/server";
 import { MODE, getConversation, handleUiEvent, handleUserMessage, resetConversation, snapshot } from "./agent";
 import { seedOrders } from "./orders";
-import { PUBLIC_URL, onUiEvent, ui } from "./ui";
+import { PUBLIC_URL, failures, onUiEvent, ui } from "./ui";
 
 const CONVERSATION = "demo";
 onUiEvent(handleUiEvent);
@@ -27,7 +27,16 @@ app.post("/api/chat", async (c) => {
 app.post("/api/chat/reset", (c) => {
   resetConversation(CONVERSATION);
   seedOrders();
+  failures.ordersApi = failures.carrierApi = false;
   return c.json(snapshot(getConversation(CONVERSATION)));
+});
+
+app.get("/api/demo/failures", (c) => c.json(failures));
+app.post("/api/demo/failures", async (c) => {
+  const body = await c.req.json<Partial<typeof failures>>();
+  if (typeof body.ordersApi === "boolean") failures.ordersApi = body.ordersApi;
+  if (typeof body.carrierApi === "boolean") failures.carrierApi = body.carrierApi;
+  return c.json(failures);
 });
 
 if (process.env.NODE_ENV === "production") {

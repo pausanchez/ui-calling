@@ -1,7 +1,27 @@
 import { z } from "zod";
 import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload, SurfaceInput } from "./surface";
 import { MemoryStore, type UiStore } from "./store";
-import { LIFECYCLE_EVENTS, UiCallingError, type LifecycleEvent, type UiEvent, type UiSession } from "./types";
+import {
+  LIFECYCLE_EVENTS,
+  SurfaceError,
+  UiCallingError,
+  type ErrorSource,
+  type LifecycleEvent,
+  type UiEvent,
+  type UiSession,
+} from "./types";
+
+export type ErrorInfo = { code: string; message: string; retryable: boolean };
+
+/** What the screen may report about its own failures (e.g. a third-party API it calls from the browser). */
+const CLIENT_ERROR = z.object({
+  source: z.enum(["client", "render"]).default("client"),
+  code: z.string().max(60).default("client_error"),
+  message: z.string().max(500),
+  retryable: z.boolean().default(false),
+  /** What the user was doing, e.g. "loading the carrier map". */
+  context: z.string().max(200).optional(),
+});
 
 export type SurfaceContext = { session: UiSession; subject: string; conversationId: string; locale: string };
 
@@ -47,6 +67,10 @@ export type UiCallingOptions = {
   toolPrefix?: string;
   /** Used when a caller doesn't pass `locale`. */
   defaultLocale?: string;
+  /** Wake the agent the first time each kind of error happens in a session. Default true. */
+  wakeOnError?: boolean;
+  /** Turn unexpected errors into something safe to show the agent. `SurfaceError`s are used as-is. */
+  describeError?: (err: unknown) => ErrorInfo;
 };
 
 const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
@@ -90,6 +114,41 @@ export function createUiCalling(opts: UiCallingOptions) {
     await store.appendEvent(ev);
     await opts.onEvent?.(ev);
     return ev;
+  }
+
+  function toErrorInfo(err: unknown): ErrorInfo {
+    if (err instanceof SurfaceError) {
+      return { code: err.code, message: err.message, retryable: err.options.retryable ?? false };
+    }
+    if (opts.describeError) return opts.describeError(err);
+    const message = err instanceof Error ? err.message : String(err);
+    return { code: "unexpected", message: message.slice(0, 300), retryable: false };
+  }
+
+  const ERROR_TEXT: Record<ErrorSource, string> = {
+    load: "The screen couldn't load its data",
+    action: "The user's action failed",
+    client: "The screen reported an error",
+    render: "The screen crashed while rendering",
+  };
+
+  /** Record a failure for the agent. Wakes it once per session for each source + code + action. */
+  async function recordError(session: UiSession, info: ErrorInfo, source: ErrorSource, action?: string, attempted?: string) {
+    const previous = await store.listEvents({ sessionId: session.id });
+    const repeat = previous.some((e) => {
+      const p = e.payload as { source?: string; code?: string; action?: string };
+      return e.kind === "error" && p.source === source && p.code === info.code && p.action === action;
+    });
+    console.warn(`[ui_calling] ${session.surface} ${source} error ${info.code}: ${info.message}`);
+    return record(session, {
+      type: "error",
+      kind: "error",
+      payload: { source, action, ...info },
+      description:
+        `${ERROR_TEXT[source]}${attempted ? ` (${attempted})` : ""}. ` +
+        `${info.code}${info.retryable ? ", retryable" : ""}: ${info.message}`,
+      wake: (opts.wakeOnError ?? true) && !repeat,
+    });
   }
 
   function watchAbandon(sessionId: string) {
@@ -174,7 +233,14 @@ export function createUiCalling(opts: UiCallingOptions) {
     async open(token: string) {
       const session = await sessionFor(token);
       const impl = impls.get(session.surface)!;
-      const data = await impl.resolve(session.input as never, ctxOf(session));
+      let data;
+      try {
+        data = await impl.resolve(session.input as never, ctxOf(session));
+      } catch (err) {
+        const info = toErrorInfo(err);
+        await recordError(session, info, "load");
+        throw new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable);
+      }
       return { surface: session.surface, locale: session.locale, data, expiresAt: session.expiresAt };
     },
 
@@ -182,6 +248,14 @@ export function createUiCalling(opts: UiCallingOptions) {
     async emit(token: string, type: string, rawPayload: unknown = {}) {
       let session = await sessionFor(token);
       const impl = impls.get(session.surface)!;
+
+      if (type === "error") {
+        const parsed = CLIENT_ERROR.safeParse(rawPayload);
+        if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
+        const { source, context, ...info } = parsed.data;
+        const event = await recordError(session, info, source, undefined, context);
+        return { event, data: undefined };
+      }
 
       if ((LIFECYCLE_EVENTS as readonly string[]).includes(type)) {
         if (!CLIENT_LIFECYCLE.has(type)) throw new UiCallingError("unknown_event", `${type} is server-only`);
@@ -196,9 +270,10 @@ export function createUiCalling(opts: UiCallingOptions) {
         if (t === "completed") await store.updateSession(session.id, { status: "completed" });
         session = (await store.getSession(session.id))!;
         // On first open, capture what the user is looking at: data may have changed since the link was sent.
+        // A load failure was already recorded by open(); here it only means no snapshot.
         const state =
           t === "opened" && impl.summarize
-            ? impl.summarize(await impl.resolve(session.input as never, ctxOf(session)))
+            ? await impl.resolve(session.input as never, ctxOf(session)).then(impl.summarize, () => undefined)
             : undefined;
         const event = await record(session, {
           type: t,
@@ -217,7 +292,15 @@ export function createUiCalling(opts: UiCallingOptions) {
       if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
 
       const handler = impl.on?.[type as never] as ((p: unknown, c: SurfaceContext) => Promise<unknown>) | undefined;
-      const data = handler ? await handler(parsed.data, ctxOf(session)) : undefined;
+      let data: unknown;
+      try {
+        data = handler ? await handler(parsed.data, ctxOf(session)) : undefined;
+      } catch (err) {
+        // The intent still matters: the agent learns what the user tried and why it didn't happen.
+        const info = toErrorInfo(err);
+        await recordError(session, info, "action", type, def.describe(parsed.data));
+        throw new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable);
+      }
       const event = await record(session, {
         type,
         kind: "domain",

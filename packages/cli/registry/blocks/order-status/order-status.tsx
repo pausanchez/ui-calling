@@ -50,6 +50,11 @@ export const ORDER_STATUS_MESSAGES = {
     expired: "This link has expired",
     loadError: "We couldn't load this page",
     askNewLink: "Ask your assistant for a new link.",
+    unavailable: "This page isn't available right now",
+    unavailableBody: "Your assistant already knows and will follow up in the chat.",
+    actionFailed: "That didn't go through",
+    actionFailedBody: "Your assistant already knows. You can try again or go back to the chat.",
+    tryAgain: "Try again",
   },
   es: {
     order: "Pedido",
@@ -96,6 +101,11 @@ export const ORDER_STATUS_MESSAGES = {
     expired: "Este enlace ha caducado",
     loadError: "No hemos podido cargar esta página",
     askNewLink: "Pídele un enlace nuevo a tu asistente.",
+    unavailable: "Esta página no está disponible ahora mismo",
+    unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
+    actionFailed: "No se ha podido completar",
+    actionFailedBody: "Tu asistente ya lo sabe. Puedes intentarlo de nuevo o volver al chat.",
+    tryAgain: "Reintentar",
   },
 };
 
@@ -105,7 +115,7 @@ const REASONS = ["damaged", "missing_items", "wrong_address", "late", "other"] a
 type Reason = (typeof REASONS)[number];
 
 export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessages> }) {
-  const { status, data, error, locale, emit, complete, returnUrl } = useSurface(orderStatus);
+  const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(orderStatus);
   const t: OrderStatusMessages = { ...pickLocalized(ORDER_STATUS_MESSAGES, locale)!, ...messages };
   const [panel, setPanel] = useState<null | "reschedule" | "problem">(null);
   const [itemsOpen, setItemsOpen] = useState(false);
@@ -113,14 +123,20 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState<Reason>("damaged");
   const [details, setDetails] = useState("");
+  const [failed, setFailed] = useState<null | { retry: () => void }>(null);
 
   if (status === "loading") return <Shell><Skeleton /></Shell>;
   if (status !== "ready" || !data) {
+    // upstream_error: the data source failed and the agent was told, so don't send the user hunting for a new link.
+    const upstream = errorCode === "upstream_error";
     return (
       <Shell>
         <Card>
-          <p className="font-medium">{status === "expired" ? t.expired : t.loadError}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{t.askNewLink}</p>
+          <p className="font-medium">{status === "expired" ? t.expired : upstream ? t.unavailable : t.loadError}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{upstream ? t.unavailableBody : t.askNewLink}</p>
+          {upstream && returnUrl && (
+            <a href={returnUrl} className={btn("outline", "mt-3 w-full")}>{t.backToChat}</a>
+          )}
         </Card>
       </Shell>
     );
@@ -134,10 +150,14 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
 
   async function run(fn: () => Promise<void>, message: string) {
     setBusy(true);
+    setFailed(null);
     try {
       await fn();
       setPanel(null);
       setConfirmation(message);
+    } catch {
+      // The server already recorded the failure for the agent; here we only tell the user.
+      setFailed({ retry: () => void run(fn, message) });
     } finally {
       setBusy(false);
     }
@@ -152,6 +172,17 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
         </div>
         <StatusBadge status={data.status} label={t.status[data.status] ?? data.status} />
       </header>
+
+      {failed && (
+        <Card className="border-destructive/40 bg-destructive/10">
+          <p className="font-medium">{t.actionFailed}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t.actionFailedBody}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button disabled={busy} onClick={failed.retry} className={btn("primary")}>{t.tryAgain}</button>
+            {returnUrl && <a href={returnUrl} className={btn("outline")}>{t.backToChat}</a>}
+          </div>
+        </Card>
+      )}
 
       {confirmation && (
         <Card className="border-success/40 bg-success/10">

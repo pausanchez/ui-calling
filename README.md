@@ -108,6 +108,27 @@ The point isn't only that the agent writes again: the conversation continues wit
 
 Write `summarize` as "everything the screen shows, in one line": it's the agent's view of the screen.
 
+## Errors reach the agent too
+
+When something behind the screen fails, the agent hears about it as an `error` event. It never claims an action happened, and it can pick up the conversation from there.
+
+| Source | How it's caught | Example |
+|---|---|---|
+| `load` | `resolve` throws when the page opens | Orders API returns 503 |
+| `action` | An event handler throws; includes what the user tried | Carrier API times out while rescheduling |
+| `client` | `reportError(err, context)` from `useSurface()` | A maps or payments SDK fails in the browser |
+| `render` | Built-in error boundary in `<SurfaceProvider>` | A component crashes |
+
+```ts
+throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { retryable: true });
+```
+
+- Throw `SurfaceError` for failures you expect. Its code and message go to the agent as written, so keep them free of secrets. Other errors go through `describeError` (default: message trimmed to 300 characters).
+- The first error of each kind in a session wakes the agent. Retries are still recorded, but they don't trigger a new message (`wakeOnError: false` turns waking off).
+- The screen shows the user a generic message in their language, never the upstream error.
+
+The demo has switches in the side panel to simulate both outages.
+
 ## Language
 
 Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:

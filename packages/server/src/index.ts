@@ -29,7 +29,9 @@ export function uiCallingRoutes(ui: UiCalling) {
   });
 
   app.onError((err, c) => {
-    if (err instanceof UiCallingError) return c.json({ error: err.code, message: err.message }, err.status);
+    if (err instanceof UiCallingError) {
+      return c.json({ error: err.code, message: err.message, retryable: err.retryable }, err.status);
+    }
     console.error(err);
     return c.json({ error: "internal" }, 500);
   });

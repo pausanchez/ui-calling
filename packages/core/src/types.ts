@@ -26,7 +26,7 @@ export type UiEvent = {
   conversationId: string;
   surface: string;
   type: string;
-  kind: "lifecycle" | "domain";
+  kind: "lifecycle" | "domain" | "error";
   payload: unknown;
   /** Natural-language line, ready to put in the agent's context. */
   description: string;
@@ -42,10 +42,34 @@ export type UiEvent = {
 
 export class UiCallingError extends Error {
   constructor(
-    public code: "not_found" | "expired" | "unknown_surface" | "unknown_event" | "invalid_payload",
+    public code: "not_found" | "expired" | "unknown_surface" | "unknown_event" | "invalid_payload" | "upstream_error",
     message: string,
-    public status: 400 | 404 | 410 = code === "not_found" ? 404 : code === "expired" ? 410 : 400,
+    public status: 400 | 404 | 410 | 502 = code === "not_found"
+      ? 404
+      : code === "expired"
+        ? 410
+        : code === "upstream_error"
+          ? 502
+          : 400,
+    public retryable = false,
   ) {
     super(message);
   }
 }
+
+/**
+ * Throw from `resolve` or an event handler when a dependency fails (a third-party API, a database…).
+ * The code and message reach the agent, so keep them free of secrets and stack traces.
+ */
+export class SurfaceError extends Error {
+  constructor(
+    public code: string,
+    message: string,
+    public options: { retryable?: boolean } = {},
+  ) {
+    super(message);
+  }
+}
+
+/** Where a failure happened, as reported to the agent. */
+export type ErrorSource = "load" | "action" | "client" | "render";

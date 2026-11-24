@@ -1,4 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Component,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload } from "@ui-calling/core";
 
 type Status = "loading" | "ready" | "expired" | "error";
@@ -10,9 +21,23 @@ type ContextValue = {
   locale: string;
   data: unknown;
   error?: string;
+  /** e.g. "upstream_error" when the data source failed: the agent already knows. */
+  errorCode?: string;
   emit: (type: string, payload?: unknown) => Promise<void>;
+  reportError: (err: unknown, context?: string) => void;
   returnUrl?: string;
 };
+
+/** Error thrown by `emit` when the server rejects or fails an event. */
+export class SurfaceActionError extends Error {
+  constructor(
+    message: string,
+    public code?: string,
+    public retryable = false,
+  ) {
+    super(message);
+  }
+}
 
 const SurfaceContext = createContext<ContextValue | null>(null);
 
@@ -23,9 +48,14 @@ const SurfaceContext = createContext<ContextValue | null>(null);
  */
 export function SurfaceProvider(props: { token: string; endpoint?: string; returnUrl?: string; children: ReactNode }) {
   const base = `${props.endpoint ?? "/api/ui"}/sessions/${encodeURIComponent(props.token)}`;
-  const [state, setState] = useState<{ status: Status; surface?: string; locale?: string; data?: unknown; error?: string }>(
-    { status: "loading" },
-  );
+  const [state, setState] = useState<{
+    status: Status;
+    surface?: string;
+    locale?: string;
+    data?: unknown;
+    error?: string;
+    errorCode?: string;
+  }>({ status: "loading" });
   const opened = useRef(false);
 
   const emit = useCallback(
@@ -35,11 +65,30 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type, payload }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message ?? json.error);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable);
       if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
     },
     [base],
+  );
+
+  /**
+   * Tell the agent something failed on the screen, e.g. a third-party API called from the browser.
+   * Server-side failures (in `resolve` or event handlers) are reported automatically.
+   */
+  const reportError = useCallback(
+    (err: unknown, context?: string, source: "client" | "render" = "client") => {
+      const e = err as { name?: string; code?: unknown; message?: unknown; retryable?: unknown };
+      const payload = {
+        source,
+        code: String(typeof e?.code === "string" ? e.code : (e?.name ?? "client_error")).slice(0, 60),
+        message: String(e?.message ?? err).slice(0, 500),
+        retryable: e?.retryable === true,
+        context: context?.slice(0, 200),
+      };
+      void emit("error", payload).catch(() => {});
+    },
+    [emit],
   );
 
   useEffect(() => {
@@ -49,7 +98,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         const json = await res.json();
         if (cancelled) return;
         if (res.status === 410) return setState({ status: "expired", error: json.message });
-        if (!res.ok) return setState({ status: "error", error: json.message ?? json.error });
+        if (!res.ok) return setState({ status: "error", error: json.message ?? json.error, errorCode: json.error });
         setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
         if (!opened.current) {
           opened.current = true;
@@ -83,10 +132,54 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
   }, [locale]);
 
   const value = useMemo<ContextValue>(
-    () => ({ ...state, locale, data: state.data, emit, returnUrl: props.returnUrl }),
-    [state, locale, emit, props.returnUrl],
+    () => ({ ...state, locale, data: state.data, emit, reportError, returnUrl: props.returnUrl }),
+    [state, locale, emit, reportError, props.returnUrl],
   );
-  return <SurfaceContext.Provider value={value}>{props.children}</SurfaceContext.Provider>;
+  return (
+    <SurfaceContext.Provider value={value}>
+      <SurfaceErrorBoundary report={(err, info) => reportError(err, info, "render")} locale={locale} returnUrl={props.returnUrl}>
+        {props.children}
+      </SurfaceErrorBoundary>
+    </SurfaceContext.Provider>
+  );
+}
+
+const CRASH_TEXT: Record<string, [string, string]> = {
+  en: ["Something went wrong on this page", "Your assistant has been notified. You can go back to the chat."],
+  es: ["Algo ha fallado en esta página", "Tu asistente ya lo sabe. Puedes volver al chat."],
+};
+
+/** Reports render crashes to the agent and shows a minimal fallback instead of a blank page. */
+class SurfaceErrorBoundary extends Component<
+  { children: ReactNode; report: (err: unknown, where?: string) => void; locale: string; returnUrl?: string },
+  { crashed: boolean }
+> {
+  state = { crashed: false };
+
+  static getDerivedStateFromError() {
+    return { crashed: true };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    const where = info.componentStack?.trim().split("\n")[0]?.trim();
+    this.props.report(error, where ? `rendering ${where}` : "rendering the screen");
+  }
+
+  render() {
+    if (!this.state.crashed) return this.props.children;
+    const [title, body] = CRASH_TEXT[this.props.locale.split("-")[0]] ?? CRASH_TEXT.en;
+    return (
+      <div role="alert" style={{ padding: 24, maxWidth: 420, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
+        <p style={{ fontWeight: 600, margin: 0 }}>{title}</p>
+        <p style={{ margin: "6px 0 0", opacity: 0.7 }}>{body}</p>
+        {this.props.returnUrl && (
+          <a href={this.props.returnUrl} style={{ display: "inline-block", marginTop: 12 }}>
+            ←
+          </a>
+        )}
+      </div>
+    );
+  }
 }
 
 /** Typed access to a surface's data and events. */
@@ -99,6 +192,8 @@ export function useSurface<S extends AnySurface>(surface: S) {
   return {
     status: ctx.status,
     error: ctx.error,
+    errorCode: ctx.errorCode,
+    reportError: ctx.reportError,
     locale: ctx.locale,
     data: ctx.data as SurfaceData<S> | undefined,
     returnUrl: ctx.returnUrl,

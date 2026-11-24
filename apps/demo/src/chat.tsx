@@ -9,7 +9,24 @@ const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day
 export function Chat() {
   const [state, setState] = useState<State | null>(null);
   const [text, setText] = useState("");
+  const [failures, setFailures] = useState({ ordersApi: false, carrierApi: false });
   const scroller = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch("/api/demo/failures")
+      .then((r) => r.json())
+      .then(setFailures)
+      .catch(() => {});
+  }, []);
+
+  async function toggleFailure(key: keyof typeof failures) {
+    const res = await fetch("/api/demo/failures", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [key]: !failures[key] }),
+    });
+    setFailures(await res.json());
+  }
 
   useEffect(() => {
     let alive = true;
@@ -44,6 +61,7 @@ export function Chat() {
 
   async function reset() {
     setState(await (await fetch("/api/chat/reset", { method: "POST" })).json());
+    setFailures({ ordersApi: false, carrierApi: false });
   }
 
   return (
@@ -124,6 +142,18 @@ export function Chat() {
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border bg-card px-4 py-3 text-sm">
+            <span className="text-muted-foreground">Simulate failures:</span>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={failures.ordersApi} onChange={() => toggleFailure("ordersApi")} />
+              Orders API down (page won't load)
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={failures.carrierApi} onChange={() => toggleFailure("carrierApi")} />
+              Carrier API timeout (reschedule fails)
+            </label>
+          </div>
+
           <div className="rounded-lg border border-border bg-card">
             {!state?.timeline.length ? (
               <p className="p-6 text-sm text-muted-foreground">No events yet. Open a link from the chat and interact with it.</p>
@@ -136,7 +166,13 @@ export function Chat() {
                     </time>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{e.type}</code>
+                        <code
+                          className={`rounded px-1.5 py-0.5 text-xs ${
+                            e.kind === "error" ? "bg-destructive/15 text-destructive" : "bg-muted"
+                          }`}
+                        >
+                          {e.type}
+                        </code>
                         <span className="text-xs text-muted-foreground">{e.surface} · {e.kind}</span>
                         {e.wake && <span className="rounded bg-primary px-1.5 py-0.5 text-[11px] font-medium text-primary-foreground">wake</span>}
                       </div>
