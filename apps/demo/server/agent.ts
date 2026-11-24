@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { anthropicToolResult, anthropicTools } from "@ui-calling/anthropic";
 import { formatEventsForAgent, type SurfaceLink, type ToolRun, type UiEvent } from "@ui-calling/core";
 import {
+  parseWhatsAppStatuses,
   parseWhatsAppWebhook,
   whatsappCtaMessage,
   whatsappSubject,
@@ -18,7 +19,10 @@ export type ChatMessage = {
   text: string;
   at: string;
   cta?: { label: string; url: string };
+  /** Real WhatsApp chats only: how far Meta got delivering it. */
+  delivery?: Delivery;
 };
+type Delivery = { status: "sending" | "sent" | "delivered" | "read" | "failed"; wamid?: string; error?: string };
 
 /** One tool call end to end, for the demo's "Tool calls" panel. */
 export type ToolTrace = {
@@ -182,24 +186,65 @@ function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
     if (trace) trace.whatsapp = payload as ReturnType<typeof whatsappCtaMessage>;
   }
   if (!live) {
-    if (cta) console.log("[whatsapp] would send", JSON.stringify(payload));
+    if (cta) log(c, `would send cta "${cta.label}" ${url}`);
     return;
   }
-  void sendWhatsApp(payload);
+  const msg = c.chat.at(-1)!;
+  msg.delivery = { status: "sending" };
+  void sendWhatsApp(c, msg, payload);
 }
 
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const STATUS_ORDER = ["sending", "sent", "delivered", "read", "failed"];
 
-async function sendWhatsApp(payload: object) {
+/** `[whatsapp] 15:20:01 …a1b2c3 <what>`: enough to tell real users apart without printing who they are. */
+function log(c: Conversation, what: string, error = false) {
+  const time = new Date().toLocaleTimeString("en-GB");
+  (error ? console.error : console.log)(`[whatsapp] ${time} …${c.whatsapp?.bsuid.slice(-6) ?? c.id} ${what}`);
+}
+
+async function sendWhatsApp(c: Conversation, msg: ChatMessage, payload: { type?: string }) {
   const res = await fetch(`https://graph.facebook.com/v25.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`, {
     method: "POST",
     headers: { authorization: `Bearer ${WHATSAPP_TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify(payload),
   }).catch((err: unknown) => err as Error);
-  if (res instanceof Error) console.error("[whatsapp] send failed", res);
-  else if (!res.ok) console.error("[whatsapp] send failed", res.status, await res.text());
-  else console.log("[whatsapp] sent", (payload as { type?: string }).type);
+  if (res instanceof Error) {
+    msg.delivery = { status: "failed", error: res.message };
+  } else {
+    const body = (await res.json().catch(() => ({}))) as {
+      messages?: { id: string }[];
+      error?: { code?: number; message?: string; error_data?: { details?: string } };
+    };
+    msg.delivery = res.ok
+      ? { status: "sent", wamid: body.messages?.[0]?.id }
+      : {
+          status: "failed",
+          error: `${res.status} (#${body.error?.code}) ${body.error?.error_data?.details ?? body.error?.message ?? ""}`.trim(),
+        };
+  }
+  if (msg.delivery.status === "failed") log(c, `send ${payload.type} failed: ${msg.delivery.error}`, true);
+  else log(c, `sent ${payload.type}`);
+  // The send often finishes after the turn was saved.
+  turnEnded();
+}
+
+/** Meta's later word on a sent message: delivered, read, or failed after all (e.g. the 24h window closed). */
+function applyStatuses(payload: unknown) {
+  for (const s of parseWhatsAppStatuses(payload)) {
+    for (const c of conversations.values()) {
+      const msg = c.chat.find((m) => m.delivery?.wamid === s.messageId);
+      if (!msg?.delivery) continue;
+      // Statuses can arrive out of order; never go back from "read" to "delivered".
+      if (STATUS_ORDER.indexOf(s.status) <= STATUS_ORDER.indexOf(msg.delivery.status)) break;
+      const e = s.errors?.[0];
+      msg.delivery = { ...msg.delivery, status: s.status as Delivery["status"], error: e && `(#${e.code}) ${e.details ?? e.title ?? ""}`.trim() };
+      if (s.status === "failed") log(c, `delivery failed: ${msg.delivery.error}`, true);
+      turnEnded();
+      break;
+    }
+  }
 }
 
 const whoIs = (c: Conversation) => ({ conversationId: c.id, subject: c.subject });
@@ -232,10 +277,12 @@ async function callSurface(c: Conversation, tool: string, input: unknown): Promi
  * by subject; the simulated phone passes its fixed `conversationId` instead.
  */
 export function receiveWebhook(payload: unknown, conversationId?: string) {
+  applyStatuses(payload);
   let turn: Promise<void> | undefined;
   for (const m of parseWhatsAppWebhook(payload)) {
     if (!m.bsuid) continue;
     const subject = whatsappSubject(PORTFOLIO_ID, m.bsuid);
+    const isNew = !conversations.has(conversationId ?? subject);
     const c = getConversation(conversationId ?? subject, subject);
     let match: InboundTrace["match"];
     if (m.identityChange) {
@@ -257,6 +304,7 @@ export function receiveWebhook(payload: unknown, conversationId?: string) {
       phoneNumberId: m.phoneNumberId,
       businessPhone: m.businessPhone,
     };
+    if (isNew && !conversationId) log(c, `new chat, watch it at http://localhost:5173/?conversation=${encodeURIComponent(c.id)}`);
     const customer = customerFor(subject);
     c.inbound = {
       at: new Date().toISOString(),

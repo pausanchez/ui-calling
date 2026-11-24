@@ -24,6 +24,9 @@ type ToolsInfo = { agent: string; model: string | null; tools: ToolSpec[]; whats
 const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day?", "¿Hay turnos libres esta semana?"];
 const NO_FAILURES = { ordersApi: false, carrierApi: false, schedulingApi: false };
 
+// `?conversation=wa:…` watches a real WhatsApp user's chat (the API logs the link); you reply from your phone.
+const WATCHING = new URLSearchParams(location.search).get("conversation");
+
 export function Chat() {
   const [state, setState] = useState<State | null>(null);
   const [text, setText] = useState("");
@@ -74,7 +77,7 @@ export function Chat() {
   useEffect(() => {
     let alive = true;
     const tick = () =>
-      fetch("/api/chat")
+      fetch(WATCHING ? `/api/chat?conversation=${encodeURIComponent(WATCHING)}` : "/api/chat")
         .then((r) => r.json())
         .then((s) => alive && setState(s))
         .catch(() => {});
@@ -118,7 +121,9 @@ export function Chat() {
               <p className="text-sm font-semibold leading-tight">Acme Store</p>
               <p className="text-xs text-white/75">{state?.typing ? "typing…" : "online"}</p>
             </div>
-            <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11px]">WhatsApp · simulated</span>
+            <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11px]">
+              WhatsApp · {WATCHING ? "real" : "simulated"}
+            </span>
           </header>
 
           <div ref={scroller} className="flex-1 space-y-2 overflow-y-auto px-3 py-4">
@@ -135,7 +140,7 @@ export function Chat() {
             )}
           </div>
 
-          {state && state.chat.length === 0 && (
+          {!WATCHING && state && state.chat.length === 0 && (
             <div className="flex flex-wrap gap-2 px-3 pb-2">
               {SUGGESTIONS.map((s) => (
                 <button
@@ -150,6 +155,7 @@ export function Chat() {
           )}
 
           <form
+            hidden={!!WATCHING}
             onSubmit={(e) => {
               e.preventDefault();
               void send(text);
@@ -467,6 +473,8 @@ function safeParse(s: string) {
   }
 }
 
+const TICKS = { sending: "🕓", sent: "✓", delivered: "✓✓", read: "✓✓" };
+
 function Bubble({ m }: { m: ChatMessage }) {
   const mine = m.from === "user";
   const time = new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -480,7 +488,19 @@ function Bubble({ m }: { m: ChatMessage }) {
         }`}
       >
         <p className="whitespace-pre-wrap px-3 pt-2">{m.text}</p>
-        <p className="px-3 pb-1.5 text-right text-[10px] text-neutral-500 dark:text-neutral-400">{time}</p>
+        <p className="px-3 pb-1.5 text-right text-[10px] text-neutral-500 dark:text-neutral-400">
+          {time}
+          {m.delivery && m.delivery.status !== "failed" && (
+            <span className={`ml-1 ${m.delivery.status === "read" ? "text-[#53bdeb]" : ""}`} title={m.delivery.status}>
+              {TICKS[m.delivery.status]}
+            </span>
+          )}
+        </p>
+        {m.delivery?.status === "failed" && (
+          <p className="border-t border-red-200 bg-red-50 px-3 py-1.5 text-[11px] text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            Not delivered to WhatsApp: {m.delivery.error}
+          </p>
+        )}
         {m.cta && (
           <a
             href={m.cta.url}

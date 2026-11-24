@@ -6,6 +6,16 @@ import type { UiEvent } from "@ui-calling/core";
 process.env.AGENT = "scripted";
 process.env.ABANDON_AFTER_MS = "0";
 process.env.UI_CALLING_DB = ":memory:";
+// Chats that reach "real-number" are live: their sends hit the stub below instead of Meta.
+process.env.WHATSAPP_TOKEN = "test-token";
+process.env.WHATSAPP_PHONE_NUMBER_ID = "real-number";
+const meta: { status: number; body: unknown }[] = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+  if (!String(url).startsWith("https://graph.facebook.com/")) return realFetch(url, init);
+  const next = meta.shift() ?? { status: 200, body: { messages: [{ id: `wamid.${crypto.randomUUID()}` }] } };
+  return Response.json(next.body, { status: next.status });
+}) as typeof fetch;
 const { app, CONVERSATION } = await import("./app");
 const { settled } = await import("./agent");
 const { ui } = await import("./ui");
@@ -212,6 +222,40 @@ await check("webhook: each real sender gets their own conversation, apart from t
   assert.equal(real.chat[0]?.text, "Where is my order?");
   assert.equal(real.identity.customer, null, "a new sender isn't linked to anyone");
   assert.equal(real.chat.at(-1)?.cta?.label, "Verify it's you");
+});
+
+await check("webhook: Meta's verdict on each send reaches the chat, including failures after a 200", async () => {
+  const conversation = "wa:PF-1000000001:ES.real-sender-1";
+  const webhook = (value: object) =>
+    app.request("/api/whatsapp/webhook", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entry: [{ id: "waba", changes: [{ field: "messages", value: { metadata: { phone_number_id: "real-number" }, ...value } }] }] }),
+    });
+  const real = async () => (await call("GET", `/api/chat?conversation=${encodeURIComponent(conversation)}`)).json as Chat;
+  const lastAgent = async () => (await real()).chat.filter((m) => m.from === "agent").at(-1)! as Json;
+  const flush = () => new Promise((r) => setTimeout(r, 10));
+
+  meta.push({ status: 200, body: { messages: [{ id: "wamid.ok" }] } });
+  await webhook({ messages: [{ id: "m2", type: "text", text: { body: "Hello?" }, from_user_id: "ES.real-sender-1" }] });
+  await settled(conversation);
+  await flush();
+  assert.deepEqual((await lastAgent()).delivery, { status: "sent", wamid: "wamid.ok" });
+
+  await webhook({ statuses: [{ id: "wamid.ok", status: "read" }] });
+  await webhook({ statuses: [{ id: "wamid.ok", status: "delivered" }] });
+  assert.equal((await lastAgent()).delivery.status, "read", "a late 'delivered' doesn't undo 'read'");
+
+  await webhook({ statuses: [{ id: "wamid.ok", status: "failed", errors: [{ code: 131047, title: "Re-engagement message" }] }] });
+  assert.match((await lastAgent()).delivery.error, /131047/);
+
+  meta.push({ status: 403, body: { error: { code: 131005, message: "Access denied" } } });
+  await webhook({ messages: [{ id: "m3", type: "text", text: { body: "Anyone?" }, from_user_id: "ES.real-sender-1" }] });
+  await settled(conversation);
+  await flush();
+  const failed = (await lastAgent()).delivery;
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error, /403 \(#131005\)/);
 });
 
 await check("security: an unknown token is rejected", async () => {
