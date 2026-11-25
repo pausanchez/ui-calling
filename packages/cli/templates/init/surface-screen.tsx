@@ -8,6 +8,20 @@ const SURFACES: Record<string, () => React.JSX.Element> = {
 };
 
 /**
+ * A quiet placeholder in the screen's shape, for while the link loads. The `/s/[token]` page also shows it before
+ * any JavaScript runs, so a slow phone sees a screen taking shape instead of a white page.
+ */
+export function SurfaceLoading() {
+  return (
+    <main aria-busy="true" style={{ minHeight: "100dvh", maxWidth: 448, margin: "0 auto", padding: "24px 16px", display: "grid", gap: 12, alignContent: "start" }}>
+      {[40, 112, 64].map((h, i) => (
+        <div key={i} style={{ height: h, borderRadius: 8, background: "var(--muted, #eee)", opacity: 0.8 }} />
+      ))}
+    </main>
+  );
+}
+
+/**
  * Renders whichever surface the link's token points to. Mount it on your `/s/:token` route.
  * `returnUrl` is where "Back to chat" goes, e.g. `https://wa.me/<your number>` or your web chat.
  */
@@ -52,15 +66,7 @@ function Router() {
   const render = surface ? SURFACES[surface] : undefined;
   if (render) return render();
   // Until the surface is known: a quiet placeholder, so the first load doesn't look like a blank page.
-  if (status === "loading") {
-    return (
-      <main aria-busy="true" style={{ minHeight: "100dvh", maxWidth: 448, margin: "0 auto", padding: "24px 16px", display: "grid", gap: 12, alignContent: "start" }}>
-        {[40, 112, 64].map((h, i) => (
-          <div key={i} style={{ height: h, borderRadius: 8, background: "var(--muted, #eee)", opacity: 0.8 }} />
-        ))}
-      </main>
-    );
-  }
+  if (status === "loading") return <SurfaceLoading />;
   const t = TEXT[(locale ?? "en").startsWith("es") ? "es" : "en"];
   // "completed": the user already finished here and the link is closed.
   const done = status === "completed";

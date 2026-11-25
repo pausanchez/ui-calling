@@ -25,7 +25,7 @@ type ContextValue = {
   /** e.g. "upstream_error" when the data source failed (the agent already knows), "not_found" for a bad
    * link, or "network" when the server couldn't be reached. */
   errorCode?: string;
-  emit: (type: string, payload?: unknown) => Promise<void>;
+  emit: (type: string, payload?: unknown) => Promise<unknown>;
   reload: () => Promise<void>;
   reportError: (err: unknown, context?: string) => void;
   upload: (slot: string, file: File) => Promise<UiFileRef>;
@@ -125,8 +125,13 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         keepalive: true,
       });
       // The link is closed now: show the "done" screen if the user is still here.
-      if (type === "completed") return setState((s) => ({ status: "completed", locale: s.locale }));
+      if (type === "completed") {
+        setState((s) => ({ status: "completed", locale: s.locale }));
+        return undefined;
+      }
       if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
+      // Also returned, so the caller can show the outcome of *this* action (a new ticket number) right away.
+      return json.data ?? undefined;
     },
     [base, send],
   );
@@ -308,8 +313,9 @@ export function useSurface<S extends AnySurface>(surface: S) {
     locale: ctx.locale,
     data: ctx.data as SurfaceData<S> | undefined,
     returnUrl: ctx.returnUrl,
-    emit: ctx.emit as <K extends SurfaceEventName<S>>(type: K, payload: SurfaceEventPayload<S, K>) => Promise<void>,
-    complete: () => ctx.emit("completed"),
+    /** Report an event. Resolves with the screen's fresh data when the handler returned some (else undefined). */
+    emit: ctx.emit as <K extends SurfaceEventName<S>>(type: K, payload: SurfaceEventPayload<S, K>) => Promise<SurfaceData<S> | undefined>,
+    complete: () => ctx.emit("completed").then(() => undefined),
     upload: ctx.upload as (slot: SurfaceFileSlot<S>, file: File) => Promise<UiFileRef>,
     removeFile: ctx.removeFile,
     fileUrl: ctx.fileUrl,

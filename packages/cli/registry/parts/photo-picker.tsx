@@ -107,7 +107,8 @@ export function PhotoPicker({
       <div className="grid grid-cols-3 gap-2">
         {photos.map((p) => (
           <figure key={p.id} className="relative aspect-square overflow-hidden rounded-md border border-border bg-muted">
-            <img src={fileUrl(p.id)} alt={p.name} className="size-full object-cover" />
+            {/* A background, not <img>: Next.js's lint flags <img>, and next/image can't load these private files. */}
+            <div role="img" aria-label={p.name} className="size-full bg-cover bg-center" style={{ backgroundImage: `url("${fileUrl(p.id)}")` }} />
             <button
               type="button"
               onClick={() => drop(p.id)}

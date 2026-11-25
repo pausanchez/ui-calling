@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { SurfaceScreen } from "__SCREEN_IMPORT__";
+import { SurfaceLoading, SurfaceScreen } from "__SCREEN_IMPORT__";
 
 // The token is in this page's URL: don't send it to sites the screen links to.
 // The tab title: set UI_CALLING_PAGE_TITLE (e.g. your shop's name), or your layout's title shows.
@@ -9,7 +9,8 @@ export const metadata = { referrer: "no-referrer" as const, ...(process.env.UI_C
 // `params` is read inside <Suspense> so Next.js can still prerender the page shell (required from Next 16).
 export default function SurfacePage({ params }: { params: Promise<{ token: string }> }) {
   return (
-    <Suspense fallback={null}>
+    // The fallback is in the page's first HTML: a slow phone sees the screen's shape, not a white page.
+    <Suspense fallback={<SurfaceLoading />}>
       <Screen params={params} />
     </Suspense>
   );

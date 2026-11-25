@@ -520,7 +520,7 @@ type UiEvent = {
 | API | What it gives you |
 |---|---|
 | `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"`. On a computer, links to `returnUrl` close the tab instead |
-| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
+| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)` (resolves with the fresh data the handler returned, so you can show this action's outcome, e.g. a new ticket number), `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
 | `useSurfaceName()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
 | `useSurfaceSteps(steps, { initial, key? })` | `step`, `index`, `count`, `isFirst`, `isLast`, `go(step)`, `next()`, `back()`: the steps of a screen in the browser's history, so Back and reloads work |
 | `SurfaceActionError` | Thrown by a failed `emit`, `reload` or `upload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |

@@ -234,6 +234,7 @@ export function createUiCalling(opts: UiCallingOptions) {
   }
 
   async function sessionFor(token: string) {
+    void restore();
     const session = await store.getSessionByTokenHash(await sha256(token));
     if (!session) throw new UiCallingError("not_found", "Unknown link");
     if (Date.parse(session.expiresAt) < Date.now()) throw atSession(new UiCallingError("expired", "This link has expired"), session);
@@ -400,7 +401,10 @@ export function createUiCalling(opts: UiCallingOptions) {
 
   // With a persistent store, screens opened before a restart still get their abandon check,
   // after whatever time they had left.
-  const restored: Promise<void> =
+  // Started on the first request (or `ui.ready`), not at creation: creating the runtime must not open the store,
+  // or `next build`, which imports routes, would create the production database.
+  let restored: Promise<void> | undefined;
+  const restore = (): Promise<void> => (restored ??=
     [...impls.keys()].some((name) => abandonMs(name)) && store.listSessions
       ? store.listSessions({ status: "opened" }).then((sessions) => {
           for (const s of sessions) {
@@ -408,7 +412,7 @@ export function createUiCalling(opts: UiCallingOptions) {
             watchAbandon(s.id, s.surface, Math.max(0, Date.parse(s.openedAt) + abandonMs(s.surface) - Date.now()));
           }
         }, (err) => console.error("[ui_calling] couldn't restore abandon timers", err))
-      : Promise.resolve();
+      : Promise.resolve());
 
   const api = {
     store,
@@ -420,8 +424,10 @@ export function createUiCalling(opts: UiCallingOptions) {
       listeners.add(handler);
       return () => void listeners.delete(handler);
     },
-    /** Resolves once state from a previous run (abandon timers) has been restored. */
-    ready: restored,
+    /** Resolves once state from a previous run (abandon timers) has been restored. The first request also starts it. */
+    get ready() {
+      return restore();
+    },
     /** The largest upload any surface accepts, so the HTTP layer can refuse bigger bodies before reading them. */
     maxUploadBytes: Math.max(0, ...slots.map((s) => s.maxBytes)),
 
@@ -446,6 +452,7 @@ export function createUiCalling(opts: UiCallingOptions) {
 
     /** Execute a tool call: validate input, mint a session, return the link. */
     async call(toolName: string, rawInput: unknown, who: Who) {
+      void restore();
       // Only the tool names the model was given: a bare surface name isn't a tool.
       const impl = byTool.get(toolName);
       if (!impl) throw new UiCallingError("unknown_surface", `No surface for tool ${toolName}`);
