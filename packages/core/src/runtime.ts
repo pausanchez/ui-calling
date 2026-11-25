@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload, SurfaceInput } from "./surface";
+import { acceptsType, type AnySurface, type FileSlot, type SurfaceData, type SurfaceEventName, type SurfaceEventPayload, type SurfaceInput } from "./surface";
 import { MemoryStore, type UiStore } from "./store";
 import {
   LIFECYCLE_EVENTS,
@@ -8,6 +8,8 @@ import {
   type ErrorSource,
   type LifecycleEvent,
   type UiEvent,
+  type UiFile,
+  type UiFileRef,
   type UiSession,
 } from "./types";
 
@@ -23,7 +25,17 @@ const CLIENT_ERROR = z.object({
   context: z.string().max(200).optional(),
 });
 
-export type SurfaceContext = { session: UiSession; subject: string; conversationId: string; locale: string };
+export type SurfaceContext = {
+  session: UiSession;
+  subject: string;
+  conversationId: string;
+  locale: string;
+  /**
+   * Files uploaded on this screen, in upload order; pass IDs from an event's payload to get only those.
+   * IDs from another link are left out, so compare lengths to reject them.
+   */
+  files: (ids?: string[]) => Promise<UiFileRef[]>;
+};
 
 /** Added to every surface's tool schema so the screen speaks the conversation's language. */
 const LOCALE = z
@@ -144,6 +156,10 @@ export function createUiCalling(opts: UiCallingOptions) {
   const defaultLocale = opts.defaultLocale ?? "en";
   const impls = new Map(opts.surfaces.map((i) => [i.surface.name, i]));
   const byTool = new Map(opts.surfaces.map((i) => [prefix + i.surface.name, i]));
+  const slots: FileSlot[] = opts.surfaces.flatMap((i) => Object.values(i.surface.files ?? {}));
+  if (slots.length && !(store.putFile && store.getFile && store.listFiles && store.deleteFile)) {
+    throw new Error("A surface declares `files`, but the store can't keep files: use sqliteStore(), MemoryStore, or add putFile/getFile/listFiles/deleteFile to yours");
+  }
 
   async function sessionFor(token: string) {
     const session = await store.getSessionByTokenHash(await sha256(token));
@@ -159,7 +175,23 @@ export function createUiCalling(opts: UiCallingOptions) {
   }
 
   function ctxOf(session: UiSession): SurfaceContext {
-    return { session, subject: session.subject, conversationId: session.conversationId, locale: session.locale };
+    return {
+      session,
+      subject: session.subject,
+      conversationId: session.conversationId,
+      locale: session.locale,
+      files: async (ids) => {
+        const all = (await store.listFiles?.(session.id)) ?? [];
+        return (ids ? all.filter((f) => ids.includes(f.id)) : all).map(fileRef);
+      },
+    };
+  }
+
+  /** A file of this link's session, or not_found: a file ID alone never opens another user's upload. */
+  async function sessionFile(session: UiSession, id: string) {
+    const found = await store.getFile?.(id);
+    if (!found || found.file.sessionId !== session.id) throw atSession(new UiCallingError("not_found", "Unknown file"), session);
+    return found;
   }
 
   async function record(session: UiSession, e: Omit<UiEvent, "id" | "sessionId" | "conversationId" | "surface" | "at">) {
@@ -234,17 +266,25 @@ export function createUiCalling(opts: UiCallingOptions) {
         const session = await store.getSession(sessionId);
         if (!session || session.status !== "opened") return;
         const events = await store.listEvents({ sessionId });
-        // A user whose action failed did act: the agent already heard about the error.
-        const acted = events.some(
-          (e) => e.kind === "domain" || (e.kind === "error" && (e.payload as { source?: string }).source === "action"),
+        // Finishing means an event that wakes the agent (e.g. "submitted"). Quiet ones are steps along the way.
+        // A user whose action failed did act too: the agent already heard about the error.
+        const finished = events.some(
+          (e) => (e.kind === "domain" && e.wake) || (e.kind === "error" && (e.payload as { source?: string }).source === "action"),
         );
-        if (acted) return;
+        if (finished) return;
+        // Still moving through the steps: check again once they've been idle long enough.
+        const steps = events.filter((e) => e.kind === "domain");
+        const lastActive = Math.max(...events.filter((e) => e.kind === "domain" || e.type === "opened" || e.type === "returned").map((e) => Date.parse(e.at)));
+        const idle = Date.now() - lastActive;
+        if (idle < opts.abandonAfterMs!) return watchAbandon(sessionId, opts.abandonAfterMs! - idle);
         await store.updateSession(sessionId, { status: "abandoned" });
+        const last = steps.at(-1);
         await record(session, {
           type: "abandoned",
           kind: "lifecycle",
-          payload: { afterMs: opts.abandonAfterMs },
-          description: LIFECYCLE_TEXT.abandoned,
+          payload: { afterMs: opts.abandonAfterMs, ...(last ? { lastStep: last.type } : {}) },
+          description: last ? `User stopped partway without finishing. Last step: ${last.description}` : LIFECYCLE_TEXT.abandoned,
+          state: last?.state,
           wake: true,
         });
       } catch (err) {
@@ -271,6 +311,8 @@ export function createUiCalling(opts: UiCallingOptions) {
     store,
     /** Resolves once state from a previous run (abandon timers) has been restored. */
     ready: restored,
+    /** The largest upload any surface accepts, so the HTTP layer can refuse bigger bodies before reading them. */
+    maxUploadBytes: Math.max(0, ...slots.map((s) => s.maxBytes)),
 
     /** Tool definitions for any function-calling LLM: one tool per surface. */
     tools(): ToolSpec[] {
@@ -422,6 +464,47 @@ export function createUiCalling(opts: UiCallingOptions) {
     },
 
     /**
+     * Store a file the screen uploaded into one of its contract's slots. Checks the slot, type, size
+     * and count; failures are `invalid_file` errors whose `reason` says which (e.g. "file_too_large").
+     * Uploading records no event: the step that uses the files reports them, by ID.
+     */
+    async upload(token: string, slotName: string, input: { name: string; type: string; bytes: Uint8Array }) {
+      const session = await sessionFor(token);
+      const declared = impls.get(session.surface)!.surface.files ?? {};
+      const slot = Object.hasOwn(declared, slotName) ? declared[slotName] : undefined;
+      const reject = (reason: string, message: string) =>
+        atSession(new UiCallingError("invalid_file", message, 400, false, reason), session);
+      if (!slot) throw reject("unknown_slot", `This screen has no file slot "${slotName}"`);
+      if (!input.bytes.byteLength) throw reject("empty_file", "The file is empty");
+      if (input.bytes.byteLength > slot.maxBytes) throw reject("file_too_large", `Files here can be up to ${slot.maxBytes} bytes`);
+      if (!acceptsType(slot, input.type)) throw reject("file_type_not_allowed", `Files here must be ${slot.accept.join(", ")}`);
+      const inSlot = (await store.listFiles!(session.id)).filter((f) => f.slot === slotName);
+      if (inSlot.length >= (slot.maxFiles ?? 1)) throw reject("too_many_files", `This slot holds up to ${slot.maxFiles ?? 1} files`);
+      const file: UiFile = {
+        id: randomId(12),
+        sessionId: session.id,
+        slot: slotName,
+        name: cleanFileName(input.name),
+        type: input.type.toLowerCase(),
+        size: input.bytes.byteLength,
+        at: new Date().toISOString(),
+      };
+      await store.putFile!(file, input.bytes);
+      return fileRef(file);
+    },
+
+    /** A file uploaded through this link, with its bytes. Another link's file is `not_found`. */
+    async file(token: string, id: string) {
+      return sessionFile(await sessionFor(token), id);
+    },
+
+    /** Remove a file uploaded through this link, e.g. when the user takes a photo back. */
+    async deleteFile(token: string, id: string) {
+      const { file } = await sessionFile(await sessionFor(token), id);
+      await store.deleteFile!(file.id);
+    },
+
+    /**
      * The conversation's events, oldest first. Pass `after` (the ID of the last event you handled) to get
      * only newer ones, and `limit` to page. Throws `UnknownEventError` if `after` isn't a stored event.
      */
@@ -491,6 +574,16 @@ export function pickLocalized<T>(map: Record<string, T> | undefined, locale: str
     Object.keys(map).find((k) => k.toLowerCase() === lang) ??
     (map.en !== undefined ? "en" : Object.keys(map)[0]);
   return key === undefined ? undefined : map[key];
+}
+
+function fileRef({ id, slot, name, type, size }: UiFile): UiFileRef {
+  return { id, slot, name, type, size };
+}
+
+/** The base name only, without control characters, so it's safe in headers and on screen. */
+function cleanFileName(name: string) {
+  const base = name.split(/[\\/]/).pop() ?? "";
+  return base.replace(/[\u0000-\u001f\u007f"]/g, "").trim().slice(0, 120) || "file";
 }
 
 function randomId(bytes: number) {

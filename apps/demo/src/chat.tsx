@@ -21,7 +21,12 @@ type State = {
 };
 type ToolsInfo = { agent: string; model: string | null; tools: ToolSpec[]; whatsappEndpoint: string };
 
-const SUGGESTIONS = ["¿Dónde está mi pedido?", "Can I change the delivery day?", "¿Hay turnos libres esta semana?"];
+const SUGGESTIONS = [
+  "¿Dónde está mi pedido?",
+  "Can I change the delivery day?",
+  "The blender arrived cracked, I want to return it",
+  "¿Hay turnos libres esta semana?",
+];
 const NO_FAILURES = { ordersApi: false, carrierApi: false, schedulingApi: false };
 
 // `?conversation=wa:…` watches a real WhatsApp user's chat (the API logs the link); you reply from your phone.
@@ -215,7 +220,7 @@ export function Chat() {
             </label>
             <label className="flex cursor-pointer items-center gap-2">
               <input type="checkbox" checked={failures.carrierApi} onChange={() => toggleFailure("carrierApi")} />
-              Carrier API timeout (reschedule fails)
+              Carrier API timeout (reschedule and return pickup fail)
             </label>
             <label className="flex cursor-pointer items-center gap-2">
               <input type="checkbox" checked={failures.schedulingApi} onChange={() => toggleFailure("schedulingApi")} />

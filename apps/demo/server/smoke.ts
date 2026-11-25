@@ -123,6 +123,78 @@ await check("shifts: a full shift fails with a reason; a free one books and the 
   assert.match((await say("¿Qué turno tengo reservado?")).text, new RegExp(code));
 });
 
+await check("returns: what the user said starts the draft, and each step is saved as a quiet event", async () => {
+  await call("POST", "/api/chat/reset");
+  const reply = await say("The blender arrived cracked, I want to return it");
+  assert.equal(reply.cta?.label, "Start return");
+  const t = token(reply.cta!.url);
+  const draft = (await call("GET", `/api/ui/sessions/${t}`)).json.data.draft;
+  assert.deepEqual(draft.lines, [{ sku: "BL-200", qty: 1, reason: "damaged", details: "" }], "the agent prefilled item and reason");
+  await event(t, "opened");
+  assert.equal((await event(t, "items_chosen", { lines: [{ sku: "KS-1", qty: 1 }] })).json.reason, "item_not_returnable");
+  await event(t, "items_chosen", { lines: [{ sku: "BL-200", qty: 1 }] });
+  const r = await event(t, "reasons_given", { lines: [{ sku: "BL-200", reason: "damaged", details: "Lid cracked" }] });
+  assert.equal(r.json.data.draft.step, "photos", "a damaged item needs photos");
+  assert.equal((await event(t, "photos_added", { photos: [] })).json.reason, "photos_required");
+  const quiet = (await chat()).timeline.filter((e) => e.surface === "order_return" && e.kind === "domain");
+  assert.ok(quiet.every((e) => !e.wake), "steps don't wake the agent");
+});
+
+await check("returns: photos upload through the link, and the files a step reports must be this link's", async () => {
+  const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
+  const body = new FormData();
+  body.append("file", new Blob([new Uint8Array(200).fill(9)], { type: "image/jpeg" }), "lid.jpg");
+  const up = await app.request(`/api/ui/sessions/${t}/files/photos`, { method: "POST", body });
+  assert.equal(up.status, 200);
+  const { file } = (await up.json()) as { file: { id: string } };
+  assert.equal((await event(t, "photos_added", { photos: [file.id, "someone-elses"] })).json.reason, "unknown_photo");
+  const ok = await event(t, "photos_added", { photos: [file.id] });
+  assert.equal(ok.json.data.draft.step, "pickup");
+  assert.deepEqual(ok.json.data.uploaded.map((f: Json) => f.id), [file.id]);
+  assert.match((await lastEvent("photos_added")).state ?? "", /Photos: 1/);
+});
+
+await check("returns: a failed pickup keeps the draft and says why; submitting reaches the agent with the outcome", async () => {
+  const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
+  const slot = (await call("GET", `/api/ui/sessions/${t}`)).json.data.pickupOptions[1];
+  await event(t, "pickup_chosen", { refund: "original_payment", date: slot.date, window: slot.window });
+  await call("POST", "/api/demo/failures", { carrierApi: true });
+  const fail = await event(t, "return_submitted");
+  assert.equal(fail.status, 502);
+  assert.equal(fail.json.reason, "carrier_unavailable");
+  assert.equal(fail.json.retryable, true);
+  assert.match((await chat()).chat.at(-1)!.text, /saved/);
+  await call("POST", "/api/demo/failures", { carrierApi: false });
+  const ok = await event(t, "return_submitted");
+  const id = ok.json.data.submitted.returnId;
+  assert.match((await lastEvent("return_submitted")).state ?? "", new RegExp(`Submitted as ${id}: 1× Countertop blender`));
+  assert.match((await chat()).chat.at(-1)!.text, new RegExp(`${id}.*€79\\.00`));
+});
+
+await check("returns: a later call can still preselect the item, until the user saves their own choice", async () => {
+  await call("POST", "/api/chat/reset");
+  await say("Hi"); // links the chat by phone
+  const who = { conversationId: "prefill", subject: (await chat()).inbound!.subject };
+  const first = await ui.call("show_order_return", { order_id: "A-0987" }, who);
+  assert.equal((await call("GET", `/api/ui/sessions/${token(first.url)}`)).json.data.draft.lines.length, 0);
+  const second = await ui.call("show_order_return", { order_id: "A-0987", sku: "BL-200", reason: "damaged" }, who);
+  const t = token(second.url);
+  assert.deepEqual((await call("GET", `/api/ui/sessions/${t}`)).json.data.draft.lines.map((l: Json) => l.sku), ["BL-200"]);
+  await event(t, "items_chosen", { lines: [{ sku: "GB-3", qty: 1 }] });
+  const third = await ui.call("show_order_return", { order_id: "A-0987", sku: "BL-200" }, who);
+  const lines = (await call("GET", `/api/ui/sessions/${token(third.url)}`)).json.data.draft.lines;
+  assert.deepEqual(lines.map((l: Json) => l.sku), ["GB-3"], "the user's own choice wins");
+});
+
+await check("returns: a Spanish chat opens the return in Spanish, with the item preselected", async () => {
+  await call("POST", "/api/chat/reset");
+  const reply = await say("Quiero devolver los boles, no los necesito");
+  assert.equal(reply.cta?.label, "Iniciar devolución");
+  const open = (await call("GET", `/api/ui/sessions/${token(reply.cta!.url)}`)).json;
+  assert.equal(open.locale, "es");
+  assert.equal(open.data.draft.lines[0].sku, "GB-3");
+});
+
 await check("identity: a shared phone number links the BSUID, and replies go to the phone", async () => {
   await call("POST", "/api/chat/reset");
   await say("Where is my order?");

@@ -16,6 +16,22 @@ export type UiSession = {
   openedAt?: string;
 };
 
+/** A file uploaded from a screen. Its bytes live in the store; events and the agent only see this. */
+export type UiFile = {
+  id: string;
+  sessionId: string;
+  /** The contract's file slot it was uploaded into, e.g. "photos". */
+  slot: string;
+  name: string;
+  /** MIME type, checked against the slot's `accept`. */
+  type: string;
+  size: number;
+  at: string;
+};
+
+/** What the screen gets back for an upload, and what a handler's `ctx.files()` lists. */
+export type UiFileRef = Pick<UiFile, "id" | "slot" | "name" | "type" | "size">;
+
 export const LIFECYCLE_EVENTS = ["opened", "returned", "left", "completed", "abandoned"] as const;
 export type LifecycleEvent = (typeof LIFECYCLE_EVENTS)[number];
 
@@ -50,7 +66,8 @@ export class UiCallingError extends Error {
       | "unknown_event"
       | "invalid_payload"
       | "upstream_error"
-      | "too_many_events",
+      | "too_many_events"
+      | "invalid_file",
     message: string,
     public status: 400 | 404 | 410 | 429 | 502 = code === "not_found"
       ? 404

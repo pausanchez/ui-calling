@@ -3,7 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import { UiCallingError, type UiCalling } from "@ui-calling/core";
 
 /**
- * Routes the screen talks to. Mount them under any prefix:
+ * Routes the screen talks to (session, events, and files for surfaces that declare them). Mount them under any prefix:
  *   app.route("/api/ui", uiCallingRoutes(ui))
  *
  * Link previews: WhatsApp and other crawlers fetch the page HTML but don't run
@@ -33,6 +33,43 @@ export function uiCallingRoutes(ui: UiCalling) {
     return c.json({ event: { id: event.id, type: event.type }, data });
     },
   );
+
+  // Uploads are multipart, with the file in a field named "file". The exact limit is per slot (checked by
+  // the runtime); this cap only stops bodies bigger than any slot accepts before they're read.
+  app.post(
+    "/sessions/:token/files/:slot",
+    bodyLimit({
+      maxSize: ui.maxUploadBytes + 64 * 1024,
+      onError: (c) => c.json({ error: "invalid_file", reason: "file_too_large", message: "File too large" }, 413),
+    }),
+    async (c) => {
+      const body = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
+      const file = body.file;
+      if (!(file instanceof File)) return c.json({ error: "invalid_file", reason: "no_file", message: "Send the file in a multipart field named \"file\"" }, 400);
+      const ref = await ui.upload(c.req.param("token"), c.req.param("slot"), {
+        name: file.name,
+        type: file.type,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      });
+      return c.json({ file: ref });
+    },
+  );
+
+  app.get("/sessions/:token/files/:id", async (c) => {
+    const { file, bytes } = await ui.file(c.req.param("token"), c.req.param("id"));
+    return c.body(bytes as Uint8Array<ArrayBuffer>, 200, {
+      "Content-Type": file.type,
+      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      // Uploaded bytes are untrusted: never let the browser guess a type or run anything in them.
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; sandbox",
+    });
+  });
+
+  app.delete("/sessions/:token/files/:id", async (c) => {
+    await ui.deleteFile(c.req.param("token"), c.req.param("id"));
+    return c.json({ ok: true });
+  });
 
   app.onError((err, c) => {
     if (err instanceof UiCallingError) {

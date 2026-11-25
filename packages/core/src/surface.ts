@@ -22,6 +22,19 @@ export function event<P extends z.ZodType>(payload: P, opts: Omit<EventDef<P>, "
 }
 
 /**
+ * Files the screen may upload into one slot. Uploads go to the store, never through events: events carry
+ * only the file IDs, and the agent reads what the event's `describe` says about them.
+ */
+export type FileSlot = {
+  /** MIME types, exact (`"image/png"`) or by family (`"image/*"`). SVG is only accepted when listed exactly. */
+  accept: string[];
+  /** Largest file accepted, in bytes. */
+  maxBytes: number;
+  /** How many files the slot holds at once. Default 1. */
+  maxFiles?: number;
+};
+
+/**
  * The contract of a screen an agent can call. Isomorphic: shared by the agent
  * (tool schema), the server (validation) and the UI (typed data + events).
  */
@@ -30,6 +43,7 @@ export type SurfaceContract<
   I extends z.ZodObject = z.ZodObject,
   D extends z.ZodType = z.ZodType,
   E extends Record<string, EventDef<any>> = Record<string, EventDef<any>>,
+  F extends Record<string, FileSlot> = Record<string, FileSlot>,
 > = {
   name: N;
   /** Read by the LLM to decide when this screen is the best answer. */
@@ -43,6 +57,8 @@ export type SurfaceContract<
   cta?: Record<string, string>;
   /** How long its links stay valid, in seconds. Keep it short for sensitive screens. Default: `createUiCalling`'s (1 hour). */
   ttlSeconds?: number;
+  /** Named slots the screen can upload files into, e.g. `{ photos: { accept: ["image/*"], maxBytes: 10e6, maxFiles: 5 } }`. */
+  files?: F;
 };
 
 export function defineSurface<
@@ -50,14 +66,27 @@ export function defineSurface<
   I extends z.ZodObject,
   D extends z.ZodType,
   E extends Record<string, EventDef<any>>,
->(def: SurfaceContract<N, I, D, E>): SurfaceContract<N, I, D, E> {
+  const F extends Record<string, FileSlot> = {},
+>(def: SurfaceContract<N, I, D, E, F>): SurfaceContract<N, I, D, E, F> {
   return def;
 }
 
-export type AnySurface = SurfaceContract<string, z.ZodObject, z.ZodType, Record<string, EventDef<any>>>;
+export type AnySurface = SurfaceContract<string, z.ZodObject, z.ZodType, Record<string, EventDef<any>>, Record<string, FileSlot>>;
 export type SurfaceInput<S extends AnySurface> = z.infer<S["input"]>;
 export type SurfaceData<S extends AnySurface> = z.infer<S["data"]>;
 export type SurfaceEventName<S extends AnySurface> = keyof S["events"] & string;
 export type SurfaceEventPayload<S extends AnySurface, K extends SurfaceEventName<S>> = z.infer<
   S["events"][K]["payload"]
 >;
+export type SurfaceFileSlot<S extends AnySurface> = keyof NonNullable<S["files"]> & string;
+
+/** Whether a slot accepts a MIME type. SVG can carry scripts, so `image/*` doesn't cover it. */
+export function acceptsType(slot: FileSlot, type: string) {
+  const t = type.toLowerCase();
+  if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(t)) return false;
+  return slot.accept.some((a) => {
+    const rule = a.toLowerCase();
+    if (rule === t) return true;
+    return rule.endsWith("/*") && t.startsWith(rule.slice(0, -1)) && t !== "image/svg+xml";
+  });
+}
