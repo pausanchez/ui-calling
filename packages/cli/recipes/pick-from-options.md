@@ -26,7 +26,7 @@ Check the pick against your data, and fail with a specific code when it's gone. 
 
 ```ts
 shift_selected: async (p, ctx) => {
-  const workerId = String(ctx.session.input.worker_id);
+  const workerId = ctx.input.worker_id;
   const shown = getShiftBoard(workerId, ctx.subject).open.find((s) => s.id === p.shift_id);
   if (shown && (shown.date !== p.date || shown.start !== p.start)) {
     throw new SurfaceError("shift_changed", `Shift ${p.shift_id} changed after the screen loaded`);

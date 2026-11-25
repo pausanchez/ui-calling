@@ -83,6 +83,8 @@ export const MODE: "claude" | "scripted" =
       : "scripted";
 
 const NO_REPLY = "NO_REPLY";
+/** The demo's customers are in Spain: event times in the agent's context use their clock. */
+const TIME_ZONE = "Europe/Madrid";
 
 const conversations = new Map<string, Conversation>();
 
@@ -325,7 +327,7 @@ export function handleUserMessage(c: Conversation, text: string) {
   return enqueue(c, async () => {
     const quiet = c.pending.splice(0);
     if (MODE === "scripted") return scriptedReply(c, text);
-    const content = quiet.length ? `${formatEventsForAgent(quiet)}\n\n${text}` : text;
+    const content = quiet.length ? `${formatEventsForAgent(quiet, { timeZone: TIME_ZONE })}\n\n${text}` : text;
     c.messages.push({ role: "user", content });
     await runClaude(c);
   });
@@ -346,7 +348,7 @@ export function handleUiEvent(e: UiEvent) {
     c.messages.push({
       role: "user",
       content:
-        `${formatEventsForAgent(events)}\n\n` +
+        `${formatEventsForAgent(events, { timeZone: TIME_ZONE })}\n\n` +
         `The customer hasn't written anything new. Decide whether a short follow-up in the chat helps them. If not, reply exactly ${NO_REPLY}.`,
     });
     await runClaude(c);

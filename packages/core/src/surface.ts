@@ -15,6 +15,11 @@ export type EventDef<P extends z.ZodType = z.ZodType> = {
    * The event handler still receives them; `describe` and the event log see "[redacted]".
    */
   redact?: (keyof z.infer<P> & string)[];
+  /**
+   * Show the payload as JSON after `describe` in what the agent reads. Default true. Set it to false when
+   * `describe` already quotes everything that matters (a long free-text field would otherwise appear twice).
+   */
+  includePayload?: boolean;
 };
 
 export function event<P extends z.ZodType>(payload: P, opts: Omit<EventDef<P>, "payload">): EventDef<P> {
@@ -59,7 +64,22 @@ export type SurfaceContract<
   ttlSeconds?: number;
   /** Named slots the screen can upload files into, e.g. `{ photos: { accept: ["image/*"], maxBytes: 10e6, maxFiles: 5 } }`. */
   files?: F;
+  /**
+   * When a user who opened this screen and stopped wakes the agent with `abandoned`. Overrides `createUiCalling`'s
+   * `abandonAfterMs` for this surface; `false` for screens that are mostly read (a rota, an address), where
+   * closing without tapping anything is finishing.
+   */
+  abandonAfterMs?: number | false;
+  /**
+   * Fields of `data` that must never reach the agent: an access code, alarm instructions, an ID number. The screen
+   * still gets them. Every value inside them is removed from what `summarize` returns (as "[secret]") before it goes
+   * into the tool result or an event, so a careless `summarize` can't leak them. Keep them out of `summarize` anyway.
+   */
+  secret?: SecretKey<D>[];
 };
+
+/** A top-level field of the data, when the data is an object; any name otherwise (so any surface fits `AnySurface`). */
+type SecretKey<D extends z.ZodType> = D extends z.ZodObject ? keyof z.infer<D> & string : string;
 
 export function defineSurface<
   const N extends string,

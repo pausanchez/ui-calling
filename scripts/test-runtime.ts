@@ -397,6 +397,99 @@ await check("files: a newer link can show an earlier upload but not delete it", 
   assert.equal((await filesHttp(new Request(`https://ui.example.com/api/ui/sessions/${first}/files/${earlier}`))).status, 200, "still there");
 });
 
+await check("abandon: a screen that's only read can opt out, and one surface can wait longer", async () => {
+  const screen = (name: string, abandonAfterMs?: number | false) =>
+    defineSurface({ name, description: "x", input: z.object({}), data: z.object({}), events: {}, abandonAfterMs });
+  const rota = screen("rota", false);
+  const claim = screen("long_claim", 400);
+  const quick = screen("quick");
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    abandonAfterMs: 30,
+    surfaces: [rota, claim, quick].map((s) => implement(s, { resolve: async () => ({}), summarize: () => "" })),
+  });
+  const open = async (tool: string, c: string) => {
+    const t = token((await ui.call(tool, {}, { conversationId: c, subject: "u" })).url);
+    await ui.emit(t, "opened");
+  };
+  await open("show_rota", "c30");
+  await open("show_long_claim", "c31");
+  await open("show_quick", "c32");
+  await sleep(120);
+  const abandoned = async (c: string) => (await ui.events(c)).some((e) => e.type === "abandoned");
+  assert.equal(await abandoned("c30"), false, "read-only: never");
+  assert.equal(await abandoned("c31"), false, "its own, longer wait");
+  assert.equal(await abandoned("c32"), true, "the runtime's default");
+});
+
+await check("agent text: no empty payloads, optional payloads, a short line after events, and times with their zone", async () => {
+  const report = defineSurface({
+    name: "report",
+    description: "x",
+    input: z.object({}),
+    data: z.object({ text: z.string(), long: z.string() }),
+    events: {
+      sent: event(z.object({ text: z.string().max(500) }), { describe: (p) => `User reported ${JSON.stringify(p.text)}`, includePayload: false }),
+      seen: event(z.object({}), { describe: () => "User looked" }),
+    },
+  });
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    surfaces: [
+      implement(report, {
+        resolve: async () => ({ text: "", long: "a very long screen" }),
+        // The full screen when the link is made or opened; only the outcome after an event.
+        summarize: (d, moment) => (moment.after ? `Outcome of ${moment.after.type}: ${d.text}` : `Full: ${d.long}`),
+        on: { sent: async (p) => ({ text: p.text, long: "a very long screen" }), seen: async () => ({ text: "", long: "a very long screen" }) },
+      }),
+    ],
+  });
+  const link = await ui.call("show_report", {}, { conversationId: "c40", subject: "u" });
+  assert.equal(link.summary, "Full: a very long screen");
+  const t = token(link.url);
+  const sent = (await ui.emit(t, "sent", { text: "Door forced" })).event;
+  const seen = (await ui.emit(t, "seen", {})).event;
+  const read = formatEventsForAgent([sent, seen], { timeZone: "Europe/Madrid" });
+  assert.equal(read.match(/Door forced/g)?.length, 2, "in describe and in the outcome, not a third time as JSON");
+  assert.match(read, /screen now shows: Outcome of sent: Door forced/);
+  assert.doesNotMatch(read, /\{\}/, "no empty payload");
+  assert.match(read, / CE[S]?T \[report\]/, "the zone is named");
+  assert.match(formatEventsForAgent([seen]), / UTC \[report\]/);
+});
+
+await check("secret data: a careless summarize can't put the code in the tool result, an event or the store", async () => {
+  const placement = defineSurface({
+    name: "placement",
+    description: "x",
+    input: z.object({}),
+    data: z.object({ site: z.string(), access: z.object({ code: z.string(), alarm: z.string() }).nullable() }),
+    events: { reveal: event(z.object({}), { describe: () => "Guard revealed the access code" }) },
+    secret: ["access"],
+  });
+  const store = new MemoryStore();
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    store,
+    surfaces: [
+      implement(placement, {
+        resolve: async () => ({ site: "Harbour Tower", access: { code: "1958#", alarm: "Disarm at panel B" } }),
+        summarize: (d) => JSON.stringify(d), // the mistake this guards against
+        on: { reveal: async () => ({ site: "Harbour Tower", access: { code: "1958#", alarm: "Disarm at panel B" } }) },
+      }),
+    ],
+  });
+  const link = await ui.call("show_placement", {}, { conversationId: "c50", subject: "guard-1" });
+  assert.doesNotMatch(link.summary ?? "", /1958#|panel B/);
+  assert.match(link.summary ?? "", /Harbour Tower/);
+  const t = token(link.url);
+  assert.equal((await ui.open(t)).data.access?.code, "1958#", "the screen still gets it");
+  await ui.emit(t, "opened");
+  await ui.emit(t, "reveal", {});
+  const everything = JSON.stringify(await store.listEvents({ conversationId: "c50" }));
+  assert.doesNotMatch(everything, /1958#|panel B/);
+  assert.match(everything, /\[secret\]/);
+});
+
 await check("files: a surface with files needs a store that can keep them", async () => {
   const noFiles = { ...new MemoryStore(), putFile: undefined } as unknown as UiStore;
   assert.throws(

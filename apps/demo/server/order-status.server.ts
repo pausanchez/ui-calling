@@ -28,10 +28,10 @@ export const orderStatusImpl = implement(orderStatus, {
           retryable: true,
         });
       }
-      return updateOrder(String(ctx.session.input.order_id), ctx.subject, { eta: slot });
+      return updateOrder(ctx.input.order_id, ctx.subject, { eta: slot });
     },
     report_problem: async (p, ctx) =>
-      updateOrder(String(ctx.session.input.order_id), ctx.subject, {
+      updateOrder(ctx.input.order_id, ctx.subject, {
         status: "issue",
         issue: { reason: p.reason, ticket: `INC-${Math.floor(1000 + Math.random() * 9000)}` },
       }),

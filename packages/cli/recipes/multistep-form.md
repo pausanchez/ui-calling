@@ -63,11 +63,11 @@ export const claimImpl = implement(claim, {
   on: {
     details_saved: async ({ details }, ctx) => {
       if (!details.trim()) throw new SurfaceError("details_missing", "The details are empty");
-      return save(String(ctx.session.input.id), ctx.subject, { details: details.trim() }, "choice");
+      return save(ctx.input.id, ctx.subject, { details: details.trim() }, "choice");
     },
-    choice_saved: async ({ choice }, ctx) => save(String(ctx.session.input.id), ctx.subject, { choice }, "review"),
+    choice_saved: async ({ choice }, ctx) => save(ctx.input.id, ctx.subject, { choice }, "review"),
     submitted: async (_p, ctx) => {
-      const d = load(String(ctx.session.input.id), ctx.subject);
+      const d = load(ctx.input.id, ctx.subject);
       if (d.submitted) return d; // a double tap submits once
       if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing");
       return submitClaim(d); // your system; throw SurfaceError(..., { retryable: true }) if it fails

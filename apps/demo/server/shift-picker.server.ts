@@ -47,7 +47,7 @@ export const shiftPickerImpl = implement(shiftPicker, {
     // Booking replaces the current shift; the fresh board carries the confirmation code to the agent.
     shift_selected: async (p, ctx) => {
       checkScheduling();
-      const workerId = String(ctx.session.input.worker_id);
+      const workerId = ctx.input.worker_id;
       const shown = getShiftBoard(workerId, ctx.subject).open.find((s) => s.id === p.shift_id);
       // The screen sends what the worker saw; if the rota changed since, don't book something else.
       if (shown && (shown.date !== p.date || shown.start !== p.start || shown.end !== p.end || shown.location !== p.location)) {

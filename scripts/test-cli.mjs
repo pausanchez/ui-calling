@@ -97,7 +97,11 @@ try {
   run(nextRoot, "init", "--deliver", "message");
   run(nextRoot, "new", "payslip");
   assert.match(read("init-next-app", "ui-calling/ui.ts"), /deliverLinks: "message"/);
-  console.log("generated  init-next-app (+1 surface)");
+  // The link-account block's server uses init's store; its import is pointed at this project's store.ts.
+  run(nextRoot, "add", "link-account", "--server-dir", "server");
+  assert.match(read("init-next-app", "server/link-account.server.ts"), /from "\.\.\/ui-calling\/store";/);
+  assert.match(read("init-next-app", "ui-calling/ui.ts"), /linkAccountImpl,/);
+  console.log("generated  init-next-app (+1 surface, +1 block)");
 
   const vite = project("init-vite", { devDependencies: { vite: "7" } });
   assert.match(run(vite, "init"), /uiCallingHandler/);

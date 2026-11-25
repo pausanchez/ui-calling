@@ -363,7 +363,14 @@ switch (cmd) {
       if (existsSync(serverFile)) console.log(`  keep   ${shown(serverFile)} (your data code; delete it to get the example again)`);
       else {
         const s = readFileSync(join(registryDir, block.server), "utf8");
-        wroteServer = write(serverFile, s.replaceAll(`"./${basename(contract, ".ts")}"`, `"${importPath(serverFile, join(outDir, basename(contract)))}"`));
+        // Blocks import init's store from the registry (so the repo typechecks them); in your project it's ui-calling/store.ts.
+        const storeFile = join(config?.runtime ? dirname(config.runtime) : outDir, "store.ts");
+        wroteServer = write(
+          serverFile,
+          s
+            .replaceAll(`"./${basename(contract, ".ts")}"`, `"${importPath(serverFile, join(outDir, basename(contract)))}"`)
+            .replaceAll(`"../../../templates/init/store"`, `"${importPath(serverFile, storeFile)}"`),
+        );
       }
       const screenFile = join(outDir, basename(block.files.find((f) => f.endsWith(".tsx"))));
       if (!registerSurface(block.register, serverFile, screenFile)) unregistered.push(block);

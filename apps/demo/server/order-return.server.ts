@@ -46,7 +46,7 @@ export const orderReturnImpl = implement(orderReturn, {
   },
   on: {
     items_chosen: async ({ lines }, ctx) => {
-      const r = getReturn(String(ctx.session.input.order_id), ctx.subject);
+      const r = getReturn(ctx.input.order_id, ctx.subject);
       for (const l of lines) {
         const item = r.items.find((i) => i.sku === l.sku);
         if (!item || !item.returnable || l.qty > item.qty) throw new SurfaceError("item_not_returnable", `${l.sku} can't be returned in that quantity`);
@@ -57,7 +57,7 @@ export const orderReturnImpl = implement(orderReturn, {
       return withUploads(saveDraft(r.orderId, ctx.subject, { lines: next }, "reasons"), ctx);
     },
     reasons_given: async ({ lines }, ctx) => {
-      const r = getReturn(String(ctx.session.input.order_id), ctx.subject);
+      const r = getReturn(ctx.input.order_id, ctx.subject);
       const given = new Map(lines.map((l) => [l.sku, l]));
       if (r.draft.lines.some((l) => !given.has(l.sku))) throw new SurfaceError("reason_missing", "Every item needs a reason");
       const next = r.draft.lines.map((l) => ({ ...l, reason: given.get(l.sku)!.reason, details: given.get(l.sku)!.details }));
@@ -65,7 +65,7 @@ export const orderReturnImpl = implement(orderReturn, {
       return withUploads(saveDraft(r.orderId, ctx.subject, { lines: next }, photos ? "photos" : "pickup"), ctx);
     },
     photos_added: async ({ photos }, ctx) => {
-      const r = getReturn(String(ctx.session.input.order_id), ctx.subject);
+      const r = getReturn(ctx.input.order_id, ctx.subject);
       // Only files uploaded through this link count; anything else in the payload is rejected.
       const files = await ctx.files(photos);
       if (files.length !== photos.length) throw new SurfaceError("unknown_photo", "A photo isn't from this screen");
@@ -73,14 +73,14 @@ export const orderReturnImpl = implement(orderReturn, {
       return withUploads(saveDraft(r.orderId, ctx.subject, { photos: files.map((f) => ({ id: f.id, name: f.name })) }, "pickup"), ctx);
     },
     pickup_chosen: async ({ refund, date, window }, ctx) => {
-      const r = getReturn(String(ctx.session.input.order_id), ctx.subject);
+      const r = getReturn(ctx.input.order_id, ctx.subject);
       const slot = r.pickupOptions.find((o) => o.date === date && o.window === window);
       if (!slot) throw new SurfaceError("pickup_unknown", `No pickup on ${date}, ${window}`);
       if (slot.spotsLeft <= 0) throw new SurfaceError("pickup_slot_full", `Pickup on ${date}, ${window} is full`);
       return withUploads(saveDraft(r.orderId, ctx.subject, { refund, pickup: { date, window } }, "review"), ctx);
     },
     return_submitted: async (_p, ctx) => {
-      const orderId = String(ctx.session.input.order_id);
+      const orderId = ctx.input.order_id;
       const r = getReturn(orderId, ctx.subject);
       if (r.submitted) return withUploads(r, ctx);
       if (!r.draft.lines.length || r.draft.lines.some((l) => !l.reason) || !r.draft.refund || !r.draft.pickup) {
