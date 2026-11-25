@@ -58,6 +58,10 @@ try {
 Events of type "error" mean something failed on the screen, usually a system behind it. Never say an action happened if it failed. Tell the customer plainly what didn't work, without technical jargon or internal codes, and offer a way forward.
 ```
 
+## Outages and refusals
+
+An outage (the API is down, a timeout) is `upstream_error` (502), and can be `retryable`. A refusal (the slot filled up, the code was wrong) isn't an outage: throw it with `{ refused: true }` and the screen gets 422 `refused`, so your monitoring only alerts on real failures. The screen handles both the same way: by `reason`, with "try again" only when `retryable`.
+
 ## Watch out
 
 - **The message goes to the agent as written.** No secrets, tokens or stack traces in it.

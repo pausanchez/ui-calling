@@ -29,8 +29,8 @@ The store must keep files: `sqliteStore()` and the in-memory store do. `createUi
 ```ts
 photos_added: async ({ photos }, ctx) => {
   const files = await ctx.files(photos);
-  if (files.length !== photos.length) throw new SurfaceError("unknown_photo", "A photo isn't from this screen");
-  if (files.length === 0) throw new SurfaceError("photos_required", "Damaged items need at least one photo");
+  if (files.length !== photos.length) throw new SurfaceError("unknown_photo", "A photo isn't from this screen", { refused: true });
+  if (files.length === 0) throw new SurfaceError("photos_required", "Damaged items need at least one photo", { refused: true });
   return saveDraft(id, ctx.subject, { photos: files.map((f) => ({ id: f.id, name: f.name })) }, "pickup");
 },
 ```

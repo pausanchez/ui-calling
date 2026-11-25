@@ -38,6 +38,27 @@ export interface UiStore {
   getFile?(id: string): Promise<{ file: UiFile; bytes: Uint8Array } | undefined>;
   listFiles?(sessionId: string): Promise<UiFile[]>;
   deleteFile?(id: string): Promise<void>;
+  /**
+   * Optional: delete matching sessions with their events and files, for a deletion request or a retention
+   * policy. `ui.forget(...)` needs it. Returns how many of each it deleted.
+   */
+  forget?(filter: ForgetFilter): Promise<ForgetResult>;
+}
+
+/** Which sessions to forget. Give exactly one. */
+export type ForgetFilter =
+  | { conversationId: string }
+  | { subject: string }
+  /** Sessions whose link expired before this ISO time (and the user is done with them). */
+  | { expiredBefore: string };
+
+export type ForgetResult = { sessions: number; events: number; files: number };
+
+/** Whether a session matches a forget filter. Stores can use it to stay consistent with each other. */
+export function matchesForget(session: UiSession, filter: ForgetFilter): boolean {
+  if ("conversationId" in filter) return session.conversationId === filter.conversationId;
+  if ("subject" in filter) return session.subject === filter.subject;
+  return session.expiresAt < filter.expiredBefore;
 }
 
 export class MemoryStore implements UiStore {
@@ -83,6 +104,16 @@ export class MemoryStore implements UiStore {
 
   async deleteFile(id: string) {
     this.files.delete(id);
+  }
+
+  async forget(filter: ForgetFilter) {
+    const ids = new Set([...this.sessions.values()].filter((s) => matchesForget(s, filter)).map((s) => s.id));
+    const before = { events: this.events.length, files: this.files.size };
+    for (const id of ids) this.sessions.delete(id);
+    for (const [hash, id] of this.byToken) if (ids.has(id)) this.byToken.delete(hash);
+    this.events = this.events.filter((e) => !ids.has(e.sessionId));
+    for (const [id, f] of this.files) if (ids.has(f.file.sessionId)) this.files.delete(id);
+    return { sessions: ids.size, events: before.events - this.events.length, files: before.files - this.files.size };
   }
 
   async listSessions({ status }: { status?: SessionStatus }) {

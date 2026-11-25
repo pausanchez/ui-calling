@@ -84,6 +84,8 @@ The demo also answers a real WhatsApp number, using a Meta test number on the Wh
 
 4. Message the test number. Your number isn't linked to a demo customer, so the agent first sends a linking screen: use `lucia.romero@example.com` and code `246810`.
 
+**In your own app:** the same keys, then `npx ui-calling whatsapp dev` (tunnel, your dev server with `PUBLIC_URL`, Meta's webhook pointed at it) and `npx ui-calling whatsapp check`. The GUIDE has the details.
+
 At every start, the demo checks the WhatsApp setup and prints one line. It catches the problems that are otherwise silent: an expired token (replies stop going out) and Meta delivering to an old address (messages never arrive).
 
 Run the tests: typecheck, the generator in several layouts, and an in-process smoke test of the whole loop. No ports or API key needed:
@@ -299,5 +301,5 @@ Before the first publish, decide:
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
 - More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
-- Binding a sensitive link to the first device that opens it, or a PIN step before it shows its data (today a forwarded link works for anyone until it expires)
+- A PIN step before a sensitive screen shows its data (`bindToDevice` already stops a forwarded link from working on another device)
 - More languages in the blocks (en and es today)

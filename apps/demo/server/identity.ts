@@ -54,7 +54,7 @@ export function linkByPhone(subject: string, phone: string) {
 export function verifyAndLink(subject: string, email: string, code: string) {
   const c = CUSTOMERS.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
   if (!c || code.trim() !== DEMO_CODE) {
-    throw new SurfaceError("invalid_code", "The email and code don't match an account", { retryable: true });
+    throw new SurfaceError("invalid_code", "The email and code don't match an account", { retryable: true, refused: true });
   }
   links.set(subject, c.id);
   return c;

@@ -49,7 +49,7 @@ export const orderReturnImpl = implement(orderReturn, {
       const r = getReturn(ctx.input.order_id, ctx.subject);
       for (const l of lines) {
         const item = r.items.find((i) => i.sku === l.sku);
-        if (!item || !item.returnable || l.qty > item.qty) throw new SurfaceError("item_not_returnable", `${l.sku} can't be returned in that quantity`);
+        if (!item || !item.returnable || l.qty > item.qty) throw new SurfaceError("item_not_returnable", `${l.sku} can't be returned in that quantity`, { refused: true });
       }
       // Keep the reasons already given for items that are still in the return.
       const previous = new Map(r.draft.lines.map((l) => [l.sku, l]));
@@ -59,7 +59,7 @@ export const orderReturnImpl = implement(orderReturn, {
     reasons_given: async ({ lines }, ctx) => {
       const r = getReturn(ctx.input.order_id, ctx.subject);
       const given = new Map(lines.map((l) => [l.sku, l]));
-      if (r.draft.lines.some((l) => !given.has(l.sku))) throw new SurfaceError("reason_missing", "Every item needs a reason");
+      if (r.draft.lines.some((l) => !given.has(l.sku))) throw new SurfaceError("reason_missing", "Every item needs a reason", { refused: true });
       const next = r.draft.lines.map((l) => ({ ...l, reason: given.get(l.sku)!.reason, details: given.get(l.sku)!.details }));
       const photos = next.some((l) => NEEDS_PHOTOS.includes(l.reason));
       return withUploads(saveDraft(r.orderId, ctx.subject, { lines: next }, photos ? "photos" : "pickup"), ctx);
@@ -68,15 +68,15 @@ export const orderReturnImpl = implement(orderReturn, {
       const r = getReturn(ctx.input.order_id, ctx.subject);
       // Only files uploaded through this link count; anything else in the payload is rejected.
       const files = await ctx.files(photos);
-      if (files.length !== photos.length) throw new SurfaceError("unknown_photo", "A photo isn't from this screen");
-      if (needsPhotos(r) && files.length === 0) throw new SurfaceError("photos_required", "Damaged or wrong items need at least one photo");
+      if (files.length !== photos.length) throw new SurfaceError("unknown_photo", "A photo isn't from this screen", { refused: true });
+      if (needsPhotos(r) && files.length === 0) throw new SurfaceError("photos_required", "Damaged or wrong items need at least one photo", { refused: true });
       return withUploads(saveDraft(r.orderId, ctx.subject, { photos: files.map((f) => ({ id: f.id, name: f.name })) }, "pickup"), ctx);
     },
     pickup_chosen: async ({ refund, date, window }, ctx) => {
       const r = getReturn(ctx.input.order_id, ctx.subject);
       const slot = r.pickupOptions.find((o) => o.date === date && o.window === window);
-      if (!slot) throw new SurfaceError("pickup_unknown", `No pickup on ${date}, ${window}`);
-      if (slot.spotsLeft <= 0) throw new SurfaceError("pickup_slot_full", `Pickup on ${date}, ${window} is full`);
+      if (!slot) throw new SurfaceError("pickup_unknown", `No pickup on ${date}, ${window}`, { refused: true });
+      if (slot.spotsLeft <= 0) throw new SurfaceError("pickup_slot_full", `Pickup on ${date}, ${window} is full`, { refused: true });
       return withUploads(saveDraft(r.orderId, ctx.subject, { refund, pickup: { date, window } }, "review"), ctx);
     },
     return_submitted: async (_p, ctx) => {
@@ -84,16 +84,16 @@ export const orderReturnImpl = implement(orderReturn, {
       const r = getReturn(orderId, ctx.subject);
       if (r.submitted) return withUploads(r, ctx);
       if (!r.draft.lines.length || r.draft.lines.some((l) => !l.reason) || !r.draft.refund || !r.draft.pickup) {
-        throw new SurfaceError("return_incomplete", "The return is missing items, reasons, refund or pickup");
+        throw new SurfaceError("return_incomplete", "The return is missing items, reasons, refund or pickup", { refused: true });
       }
-      if (needsPhotos(r) && !r.draft.photos.length) throw new SurfaceError("photos_required", "Damaged or wrong items need at least one photo");
+      if (needsPhotos(r) && !r.draft.photos.length) throw new SurfaceError("photos_required", "Damaged or wrong items need at least one photo", { refused: true });
       if (failures.carrierApi) {
         throw new SurfaceError("carrier_unavailable", "Carrier API timed out while booking the pickup", { retryable: true });
       }
       try {
         return withUploads(submitReturn(orderId, ctx.subject), ctx);
       } catch (err) {
-        if (err instanceof PickupFull) throw new SurfaceError("pickup_slot_full", err.message);
+        if (err instanceof PickupFull) throw new SurfaceError("pickup_slot_full", err.message, { refused: true });
         throw err;
       }
     },

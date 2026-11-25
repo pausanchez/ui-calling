@@ -52,7 +52,7 @@ export const linkAccountImpl = implement(linkAccount, {
         return state(ctx.subject, ctx.input.continue_with);
       }
       const code = identity.startVerification(ctx.subject, customer.id);
-      if (!code) throw new SurfaceError("try_later", "Too many wrong codes for this account; it's locked for a while");
+      if (!code) throw new SurfaceError("try_later", "Too many wrong codes for this account; it's locked for a while", { refused: true });
       await sendCode(customer, code);
       return state(ctx.subject, ctx.input.continue_with);
     },
@@ -60,7 +60,7 @@ export const linkAccountImpl = implement(linkAccount, {
       const result = identity.verify(ctx.subject, code);
       if (!result.ok) {
         const retryable = result.reason === "wrong_code";
-        throw new SurfaceError(result.reason, `Verification failed: ${result.reason.replace("_", " ")}`, { retryable });
+        throw new SurfaceError(result.reason, `Verification failed: ${result.reason.replace("_", " ")}`, { retryable, refused: true });
       }
       return state(ctx.subject, ctx.input.continue_with);
     },

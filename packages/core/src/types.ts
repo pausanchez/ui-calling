@@ -14,6 +14,8 @@ export type UiSession = {
   createdAt: string;
   expiresAt: string;
   openedAt?: string;
+  /** For surfaces with `bindToDevice`: the hash of the secret the first browser to open the link got as a cookie. */
+  deviceHash?: string;
 };
 
 /** A file uploaded from a screen. Its bytes live in the store; events and the agent only see this. */
@@ -69,19 +71,25 @@ export class UiCallingError extends Error {
       | "invalid_payload"
       | "upstream_error"
       | "too_many_events"
-      | "invalid_file",
+      | "invalid_file"
+      | "refused"
+      | "other_device",
     message: string,
-    public status: 400 | 404 | 410 | 429 | 502 = code === "not_found"
+    public status: 400 | 403 | 404 | 410 | 422 | 429 | 502 = code === "not_found"
       ? 404
+      : code === "other_device"
+        ? 403
       : code === "expired" || code === "completed"
         ? 410
         : code === "upstream_error"
           ? 502
-          : code === "too_many_events"
-            ? 429
-            : 400,
+          : code === "refused"
+            ? 422
+            : code === "too_many_events"
+              ? 429
+              : 400,
     public retryable = false,
-    /** For `upstream_error`: the `SurfaceError` code (e.g. "shift_full"), so the screen can explain it in the user's language. */
+    /** For `upstream_error` and `refused`: the `SurfaceError` code (e.g. "shift_full"), so the screen can explain it in the user's language. */
     public reason?: string,
   ) {
     super(message);
@@ -99,7 +107,14 @@ export class SurfaceError extends Error {
   constructor(
     public code: string,
     message: string,
-    public options: { retryable?: boolean } = {},
+    public options: {
+      retryable?: boolean;
+      /**
+       * A business refusal (the shift filled up, the code was wrong), not an outage: the screen gets 422 `refused`
+       * instead of 502 `upstream_error`, so monitoring doesn't read it as your back office being down.
+       */
+      refused?: boolean;
+    } = {},
   ) {
     super(message);
   }

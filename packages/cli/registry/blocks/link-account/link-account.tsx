@@ -33,6 +33,7 @@ const LINK_ACCOUNT_MESSAGES = {
     failed: "That didn't go through. Try again in a moment.",
     unavailable: "This page isn't available right now",
     expiredLink: "This link has expired",
+    otherDevice: "This link was already opened on another device",
     askNewLink: "Ask your assistant for a new link.",
   },
   es: {
@@ -62,6 +63,7 @@ const LINK_ACCOUNT_MESSAGES = {
     failed: "No se ha podido completar. Inténtalo de nuevo en un momento.",
     unavailable: "Esta página no está disponible ahora mismo",
     expiredLink: "Este enlace ha caducado",
+    otherDevice: "Este enlace ya se abrió en otro dispositivo",
     askNewLink: "Pídele un enlace nuevo a tu asistente.",
   },
 };
@@ -87,7 +89,7 @@ export function LinkAccount({
   /** Strings for every language at once. */
   messages?: Partial<LinkAccountMessages>;
 }) {
-  const { status, data, locale, emit, complete, returnUrl } = useSurface(linkAccount);
+  const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(linkAccount);
   // Your strings only for the language they're written in: no English label on a Spanish screen.
   const own = locales?.[locale] ?? locales?.[locale.split("-")[0]];
   const t: LinkAccountMessages = { ...pickLocalized(LINK_ACCOUNT_MESSAGES, locale)!, ...own, ...messages };
@@ -101,7 +103,7 @@ export function LinkAccount({
     return (
       <Shell>
         <Card>
-          <p className="font-medium">{status === "expired" ? t.expiredLink : t.unavailable}</p>
+          <p className="font-medium">{status === "expired" ? t.expiredLink : errorCode === "other_device" ? t.otherDevice : t.unavailable}</p>
           <p className="mt-1 text-sm text-muted-foreground">{t.askNewLink}</p>
         </Card>
       </Shell>

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { UnknownEventError, type EventQuery, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
+import { UnknownEventError, matchesForget, type EventQuery, type ForgetFilter, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
 
 /**
  * Sessions and events in a SQLite file, on Node's built-in `node:sqlite`: nothing to install, nothing
@@ -72,6 +72,9 @@ function open(path: string) {
     fileById: db.prepare("SELECT json, bytes FROM ui_files WHERE id = ?"),
     filesBySession: db.prepare("SELECT json FROM ui_files WHERE session_id = ? ORDER BY seq"),
     deleteFile: db.prepare("DELETE FROM ui_files WHERE id = ?"),
+    deleteEventsOf: db.prepare("DELETE FROM ui_events WHERE session_id = ?"),
+    deleteFilesOf: db.prepare("DELETE FROM ui_files WHERE session_id = ?"),
+    deleteSession: db.prepare("DELETE FROM ui_sessions WHERE id = ?"),
   };
   // One statement per combination of filters, so each query can use the (…, seq) indexes.
   const eventQueries = new Map<string, ReturnType<DatabaseSync["prepare"]>>();
@@ -146,6 +149,24 @@ function open(path: string) {
     },
     async deleteFile(id: string) {
       q.deleteFile.run(id);
+    },
+    async forget(filter: ForgetFilter) {
+      // The session's subject and expiry live in its JSON: pick the sessions in code, then delete by ID.
+      const ids = many<UiSession>(q.allSessions.all()).filter((s) => matchesForget(s, filter)).map((s) => s.id);
+      const result = { sessions: 0, events: 0, files: 0 };
+      db.exec("BEGIN");
+      try {
+        for (const id of ids) {
+          result.events += Number(q.deleteEventsOf.run(id).changes);
+          result.files += Number(q.deleteFilesOf.run(id).changes);
+          result.sessions += Number(q.deleteSession.run(id).changes);
+        }
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+      return result;
     },
   };
   return store;

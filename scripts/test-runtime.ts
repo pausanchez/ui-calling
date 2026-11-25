@@ -554,6 +554,51 @@ await check("secret data: a misspelled path doesn't compile, and one that matche
   assert.match(warned[0], /secret path "access.secrte" matches no field/);
 });
 
+await check("bindToDevice: the first browser to open a link keeps it; a forwarded copy gets other_device", async () => {
+  const code = defineSurface({
+    name: "door_code", description: "x", input: z.object({}), data: z.object({ code: z.string() }), bindToDevice: true,
+    events: { seen: event(z.object({}), { describe: () => "Guard saw the code" }) },
+  });
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    deviceClaimGraceMs: 50,
+    surfaces: [implement(code, { resolve: async () => ({ code: "1958#" }), summarize: () => "Door code shown" })],
+  });
+  const http = uiCallingHandler(ui);
+  const t = token((await ui.call("show_door_code", {}, { conversationId: "c80", subject: "guard-1" })).url);
+  const url = `https://ui.example.com/api/ui/sessions/${t}`;
+  // The page loads twice at once (React's dev mode): both first requests get the same cookie.
+  const [first, twin] = await Promise.all([http(new Request(url)), http(new Request(url))]);
+  assert.equal(first.status, 200);
+  assert.equal(twin.status, 200);
+  assert.equal(twin.headers.get("set-cookie")?.split(";")[0], first.headers.get("set-cookie")?.split(";")[0]);
+  await sleep(80); // past the grace period
+  const cookie = first.headers.get("set-cookie") ?? "";
+  assert.match(cookie, /uic_device=/);
+  assert.match(cookie, new RegExp(`Path=/api/ui/sessions/${t}`), "sent only for this link");
+  assert.match(cookie, /HttpOnly/);
+  const device = cookie.split(";")[0];
+  assert.equal((await http(new Request(url, { headers: { cookie: device } }))).status, 200, "the same phone, again");
+  const forwarded = await http(new Request(url));
+  assert.equal(forwarded.status, 403);
+  const body = (await forwarded.json()) as { error: string; surface?: string };
+  assert.equal(body.error, "other_device");
+  assert.equal(body.surface, "door_code", "the screen can explain it in the user's language");
+  const post = (headers: Record<string, string>) => http(new Request(`${url}/events`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ type: "seen", payload: {} }) }));
+  assert.equal((await post({})).status, 403, "nor act on it");
+  assert.equal((await post({ cookie: device })).status, 200);
+});
+
+await check("onEvent: the agent module can subscribe after createUiCalling, and unsubscribe", async () => {
+  const seen: string[] = [];
+  const off = withFiles.onEvent((e) => void seen.push(e.type));
+  const t = await claimLink();
+  await withFiles.emit(t, "opened");
+  off();
+  await withFiles.emit(t, "left");
+  assert.deepEqual(seen, ["opened"]);
+});
+
 await check("files: a surface with files needs a store that can keep them", async () => {
   const noFiles = { ...new MemoryStore(), putFile: undefined } as unknown as UiStore;
   assert.throws(

@@ -20,6 +20,7 @@ const __MESSAGES__ = {
     unavailable: "This page isn't available right now",
     unavailableBody: "Your assistant already knows and will follow up in the chat.",
     expired: "This link has expired",
+    otherDevice: "This link was already opened on another device",
     loadError: "We couldn't load this page",
     askNewLink: "Ask your assistant for a new link.",
   },
@@ -37,6 +38,7 @@ const __MESSAGES__ = {
     unavailable: "Esta página no está disponible ahora mismo",
     unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
     expired: "Este enlace ha caducado",
+    otherDevice: "Este enlace ya se abrió en otro dispositivo",
     loadError: "No hemos podido cargar esta página",
     askNewLink: "Pídele un enlace nuevo a tu asistente.",
   },
@@ -60,7 +62,7 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
     return (
       <Shell>
         <Card>
-          <p className="font-medium">{status === "expired" ? t.expired : upstream ? t.unavailable : t.loadError}</p>
+          <p className="font-medium">{status === "expired" ? t.expired : errorCode === "other_device" ? t.otherDevice : upstream ? t.unavailable : t.loadError}</p>
           <p className="mt-1 text-sm text-muted-foreground">{upstream ? t.unavailableBody : t.askNewLink}</p>
           {upstream && returnUrl && <a href={returnUrl} className={btn("outline", "mt-3 w-full")}>{t.backToChat}</a>}
         </Card>

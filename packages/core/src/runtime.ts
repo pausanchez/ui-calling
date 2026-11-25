@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { acceptsType, type AnySurface, type FileSlot, type SurfaceData, type SurfaceEventName, type SurfaceEventPayload, type SurfaceInput } from "./surface";
-import { MemoryStore, type UiStore } from "./store";
+import { MemoryStore, type ForgetFilter, type ForgetResult, type UiStore } from "./store";
 import {
   LIFECYCLE_EVENTS,
   SurfaceError,
@@ -13,7 +13,7 @@ import {
   type UiSession,
 } from "./types";
 
-export type ErrorInfo = { code: string; message: string; retryable: boolean };
+export type ErrorInfo = { code: string; message: string; retryable: boolean; refused?: boolean };
 
 /** What the screen may report about its own failures (e.g. a third-party API it calls from the browser). */
 const CLIENT_ERROR = z.object({
@@ -136,6 +136,11 @@ export type UiCallingOptions = {
    * still recorded, quietly). A script holding a link can't run up agent turns. Default 6.
    */
   maxWakesPerMinute?: number;
+  /**
+   * For `bindToDevice` surfaces: how long after a link's first open a request without the cookie still gets it.
+   * Pages often load twice at once (React's dev mode, a quick reload). Default 5000 ms.
+   */
+  deviceClaimGraceMs?: number;
 };
 
 const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
@@ -218,6 +223,10 @@ export function createUiCalling(opts: UiCallingOptions) {
   const pathPrefix = opts.pathPrefix ?? "/s/";
   const defaultLocale = opts.defaultLocale ?? "en";
   const impls = new Map(opts.surfaces.map((i) => [i.surface.name, i]));
+  // bindToDevice: the secret issued on a link's first open, kept for a few seconds so parallel first requests agree.
+  const claims = new Map<string, { secret: string; until: number }>();
+  // Handlers added after creation (ui.onEvent), e.g. from the agent's module, which imports `ui`.
+  const listeners = new Set<(event: UiEvent) => void | Promise<void>>();
   const byTool = new Map(opts.surfaces.map((i) => [prefix + i.surface.name, i]));
   const slots: FileSlot[] = opts.surfaces.flatMap((i) => Object.values(i.surface.files ?? {}));
   if (slots.length && !(store.putFile && store.getFile && store.listFiles && store.deleteFile)) {
@@ -290,17 +299,19 @@ export function createUiCalling(opts: UiCallingOptions) {
     };
     await store.appendEvent(ev);
     // The event is stored: the agent's handler can't undo it, slow it down or fail the user's action.
-    try {
-      void Promise.resolve(opts.onEvent?.(ev)).catch((err) => console.error("[ui_calling] onEvent failed", err));
-    } catch (err) {
-      console.error("[ui_calling] onEvent failed", err);
+    for (const handler of [opts.onEvent, ...listeners]) {
+      try {
+        void Promise.resolve(handler?.(ev)).catch((err) => console.error("[ui_calling] onEvent failed", err));
+      } catch (err) {
+        console.error("[ui_calling] onEvent failed", err);
+      }
     }
     return ev;
   }
 
   function toErrorInfo(err: unknown): ErrorInfo {
     if (err instanceof SurfaceError) {
-      return { code: err.code, message: err.message, retryable: err.options.retryable ?? false };
+      return { code: err.code, message: err.message, retryable: err.options.retryable ?? false, ...(err.options.refused ? { refused: true } : {}) };
     }
     if (opts.describeError) return opts.describeError(err);
     // Raw messages can carry redacted values, SQL or hostnames: log them here, give the agent a generic line.
@@ -401,6 +412,14 @@ export function createUiCalling(opts: UiCallingOptions) {
 
   const api = {
     store,
+    /**
+     * Get every event, like the `onEvent` option, from code that imports `ui`: your agent module can subscribe
+     * itself instead of `ui.ts` importing it (an import cycle). Returns a function that unsubscribes.
+     */
+    onEvent(handler: (event: UiEvent) => void | Promise<void>) {
+      listeners.add(handler);
+      return () => void listeners.delete(handler);
+    },
     /** Resolves once state from a previous run (abandon timers) has been restored. */
     ready: restored,
     /** The largest upload any surface accepts, so the HTTP layer can refuse bigger bodies before reading them. */
@@ -473,7 +492,12 @@ export function createUiCalling(opts: UiCallingOptions) {
       } catch (err) {
         const info = toErrorInfo(err);
         await recordError(session, info, "load");
-        throw atSession(new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable, info.code), session);
+        throw atSession(
+          info.refused
+            ? new UiCallingError("refused", "This screen can't be shown", 422, info.retryable, info.code)
+            : new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable, info.code),
+          session,
+        );
       }
       return { surface: session.surface, locale: session.locale, data, expiresAt: session.expiresAt };
     },
@@ -542,7 +566,12 @@ export function createUiCalling(opts: UiCallingOptions) {
         // The intent still matters: the agent learns what the user tried and why it didn't happen.
         const info = toErrorInfo(err);
         await recordError(session, info, "action", type, safeDescribe(def, visible, type));
-        throw atSession(new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code), session);
+        throw atSession(
+          info.refused
+            ? new UiCallingError("refused", "That action was refused", 422, info.retryable, info.code)
+            : new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code),
+          session,
+        );
       }
       const event = await record(session, {
         type,
@@ -598,6 +627,39 @@ export function createUiCalling(opts: UiCallingOptions) {
       const { file } = await sessionFile(session, id);
       if (file.sessionId !== session.id) throw atSession(new UiCallingError("not_found", "Unknown file"), session);
       await store.deleteFile!(file.id);
+    },
+
+    /**
+     * For surfaces with `bindToDevice`: called by the HTTP routes before every request, with the device cookie the
+     * browser sent. The first call issues a secret to set as that cookie; after that, only that secret works.
+     * Throws `other_device` (403) for any other browser. A no-op for other surfaces.
+     */
+    async device(token: string, presented?: string): Promise<{ issue?: string }> {
+      const session = await sessionFor(token);
+      if (!impls.get(session.surface)?.surface.bindToDevice) return {};
+      if (session.deviceHash && presented && (await sha256(presented)) === session.deviceHash) return {};
+      // A page often loads twice at once (React's dev mode, a quick reload): requests sent before the browser stored
+      // the cookie get the same secret again, for a few seconds after the first open.
+      const recent = claims.get(session.id);
+      if (recent && recent.until > Date.now()) return { issue: recent.secret };
+      if (recent) claims.delete(session.id);
+      if (!session.deviceHash) {
+        const secret = randomId(24);
+        claims.set(session.id, { secret, until: Date.now() + (opts.deviceClaimGraceMs ?? 5_000) });
+        await store.updateSession(session.id, { deviceHash: await sha256(secret) });
+        return { issue: secret };
+      }
+      throw atSession(new UiCallingError("other_device", "This link was already opened on another device"), session);
+    },
+
+    /**
+     * Delete sessions with their events and uploaded files: everything for a conversation (`{ conversationId }`) or a
+     * user (`{ subject }`), e.g. for a deletion request, or links that expired before a date (`{ expiredBefore }`) on a
+     * schedule, for a retention policy. Open links stop working. Your own data (drafts, account links) isn't touched.
+     */
+    async forget(filter: ForgetFilter): Promise<ForgetResult> {
+      if (!store.forget) throw new Error("This store can't delete data: use sqliteStore(), MemoryStore, or add forget() to yours");
+      return store.forget(filter);
     },
 
     /**

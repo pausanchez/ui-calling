@@ -22,6 +22,7 @@ export function SurfaceScreen({ token, returnUrl }: { token: string; returnUrl?:
 const TEXT = {
   en: {
     expired: "This link has expired",
+    otherDevice: "This link was already opened on another device",
     invalid: "This link isn't valid",
     help: "Ask your assistant for a new one.",
     loadError: "We couldn't load this page",
@@ -33,6 +34,7 @@ const TEXT = {
   },
   es: {
     expired: "Este enlace ha caducado",
+    otherDevice: "Este enlace ya se abrió en otro dispositivo",
     invalid: "Este enlace no es válido",
     help: "Pídele uno nuevo a tu asistente.",
     loadError: "No hemos podido cargar esta página",
@@ -63,11 +65,12 @@ function Router() {
   // "completed": the user already finished here and the link is closed.
   const done = status === "completed";
   // Only an unknown token is a bad link. Anything else (offline, server down) may work on a retry.
-  const unreachable = status === "error" && errorCode !== "not_found";
+  const otherDevice = errorCode === "other_device";
+  const unreachable = status === "error" && errorCode !== "not_found" && !otherDevice;
   const [title, help] = done
     ? [t.completed, t.completedHelp]
-    : status === "expired"
-      ? [t.expired, t.help]
+    : status === "expired" || otherDevice
+      ? [otherDevice ? t.otherDevice : t.expired, t.help]
       : unreachable
         ? [t.loadError, t.loadErrorHelp]
         : [t.invalid, t.help];
