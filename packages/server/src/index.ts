@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { UiCallingError, type UiCalling } from "@ui-calling/core";
 
 /**
@@ -21,12 +22,17 @@ export function uiCallingRoutes(ui: UiCalling) {
 
   app.get("/sessions/:token", async (c) => c.json(await ui.open(c.req.param("token"))));
 
-  app.post("/sessions/:token/events", async (c) => {
+  app.post(
+    "/sessions/:token/events",
+    // Events are small: an ID and the user's choices. Anything bigger is a mistake or abuse.
+    bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "payload_too_large", message: "Event too large" }, 413) }),
+    async (c) => {
     const body = await c.req.json<{ type?: string; payload?: unknown }>().catch(() => ({}) as { type?: string; payload?: unknown });
     if (!body.type) return c.json({ error: "invalid_payload", message: "Missing event type" }, 400);
     const { event, data } = await ui.emit(c.req.param("token"), body.type, body.payload);
     return c.json({ event: { id: event.id, type: event.type }, data });
-  });
+    },
+  );
 
   app.onError((err, c) => {
     if (err instanceof UiCallingError) {
