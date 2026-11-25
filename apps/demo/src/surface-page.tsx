@@ -1,4 +1,4 @@
-import { SurfaceProvider, useSurfaceName } from "@ui-calling/react";
+import { SurfaceProvider, useSurfaceSession } from "@ui-calling/react";
 import { OrderStatus } from "./components/ui-calling/order-status";
 import { LinkAccount } from "./components/ui-calling/link-account";
 import { OrderReturn } from "./components/ui-calling/order-return";
@@ -51,7 +51,7 @@ const TEXT = {
 };
 
 function Router() {
-  const { status, surface, locale, errorCode, returnUrl } = useSurfaceName();
+  const { status, surface, locale, errorCode, returnUrl } = useSurfaceSession();
   const render = surface ? SURFACES[surface] : undefined;
   if (render) return render();
   // No surface known yet: a neutral skeleton while loading, a neutral message if the link is bad.

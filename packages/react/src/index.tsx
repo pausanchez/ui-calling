@@ -322,8 +322,8 @@ export function useSurface<S extends AnySurface>(surface: S) {
   };
 }
 
-/** Which surface a token points to, for routing between several surfaces on one page. */
-export function useSurfaceName() {
+/** The link's state (status, surface, locale, errorCode, returnUrl), before you know which screen it is: for routing between surfaces on one page. */
+export function useSurfaceSession() {
   const ctx = useContext(SurfaceContext);
   return {
     status: ctx?.status ?? "loading",
@@ -334,6 +334,9 @@ export function useSurfaceName() {
     returnUrl: ctx?.returnUrl,
   };
 }
+
+/** @deprecated Renamed to `useSurfaceSession`: it returns the link's whole state, not just a name. */
+export const useSurfaceName = useSurfaceSession;
 
 /**
  * The steps of a screen with several steps, kept in the browser's history so the phone's back button

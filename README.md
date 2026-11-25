@@ -84,7 +84,7 @@ The demo also answers a real WhatsApp number, using a Meta test number on the Wh
 
 4. Message the test number. Your number isn't linked to a demo customer, so the agent first sends a linking screen: use `lucia.romero@example.com` and code `246810`.
 
-**In your own app:** the same keys, then `npx ui-calling whatsapp dev` (tunnel, your dev server with `PUBLIC_URL`, Meta's webhook pointed at it) and `npx ui-calling whatsapp check`. The GUIDE has the details.
+**In your own app:** the same keys, then `npx ui-calling whatsapp dev` (tunnel, your dev server with `PUBLIC_URL`, Meta's webhook pointed at it) and `npx ui-calling whatsapp check`. The GUIDE has the details. One Meta app (and its test number) delivers to one address at a time, so give each project its own, or the last one you started takes the messages.
 
 At every start, the demo checks the WhatsApp setup and prints one line. It catches the problems that are otherwise silent: an expired token (replies stop going out) and Meta delivering to an old address (messages never arrive).
 
@@ -278,10 +278,14 @@ npm run build
 
 This builds every package with tsup into `dist/` (ESM, `.d.ts` and source maps). Published packages ship only `dist/`. Inside this repo, a custom export condition, `ui-calling-source`, makes TypeScript, tsx and Vite read `src/` directly, so development and tests never need a build.
 
-To try a release before publishing, pack the packages and install the tarballs in a fresh app:
+To try a release before publishing, create the app first, then pack the packages and install the tarballs into it (installing them before `create-next-app` makes it refuse a non-empty folder):
 
 ```bash
 npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli --pack-destination /tmp/ui-calling
+```
+
+```bash
+cd my-app && npm install /tmp/ui-calling/*.tgz
 ```
 
 This was verified end to end on a new Next.js 16 app (`create-next-app` defaults), installed from tarballs:
@@ -290,7 +294,6 @@ This was verified end to end on a new Next.js 16 app (`create-next-app` defaults
 - a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
 
 Before the first publish, decide:
-- **License.** There's none yet.
 - **The npm `@ui-calling` scope.** Create the npm organization, and check that the unscoped `ui-calling` name for the CLI is free.
 - **The first version number.** Every package is `0.0.1`, and internal dependencies use `^0.0.1`.
 

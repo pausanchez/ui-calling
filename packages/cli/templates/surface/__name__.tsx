@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { pickLocalized } from "@ui-calling/core";
 import { SurfaceActionError, useSurface } from "@ui-calling/react";
+import { Card, Shell, Skeleton, btn } from "../../registry/parts/screen-kit";
 import { __const__ } from "./__name__.surface";
 
 /** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop.
@@ -55,7 +56,7 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
   // `offline`: the request never arrived, so the agent doesn't know either.
   const [failed, setFailed] = useState<null | { retryable: boolean; offline: boolean }>(null);
 
-  if (status === "loading") return <Shell><div className="h-40 animate-pulse rounded-lg bg-muted" /></Shell>;
+  if (status === "loading") return <Shell><Skeleton /></Shell>;
   if (status !== "ready" || !data) {
     // upstream_error: your data source failed and the agent was told, so send the user back to the chat.
     const upstream = errorCode === "upstream_error";
@@ -131,26 +132,4 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
       )}
     </Shell>
   );
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <div className="mx-auto flex max-w-md flex-col gap-4 px-4 py-6">{children}</div>
-    </main>
-  );
-}
-
-function Card({ children, className = "", role }: { children: ReactNode; className?: string; role?: string }) {
-  return <section role={role} className={`rounded-lg border border-border bg-card p-4 text-card-foreground ${className}`}>{children}</section>;
-}
-
-function btn(variant: "primary" | "outline", extra = "") {
-  const base =
-    "inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  const v = {
-    primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-    outline: "border border-border bg-card hover:bg-muted",
-  }[variant];
-  return `${base} ${v} ${extra}`;
 }
