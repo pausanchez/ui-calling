@@ -10,6 +10,7 @@ import {
 } from "@ui-calling/core/whatsapp";
 import { PORTFOLIO_ID, customerFor, linkByPhone, relink } from "./identity";
 import { listOrderIds, getOrder } from "./orders";
+import { describeReturnable, getReturn, listReturnableOrderIds } from "./returns";
 import { getShiftBoard, listWorkerIds } from "./shifts";
 import { ui } from "./ui";
 
@@ -359,14 +360,14 @@ const client = MODE === "claude" ? new Anthropic() : null;
 function systemPrompt(c: Conversation) {
   const customer = customerFor(c.subject);
   const who = customer
-    ? `This WhatsApp user is linked to customer ${customer.name} (${customer.id}). Their orders: ${listOrderIds(c.subject).join(", ") || "none"}. Their worker ID: ${listWorkerIds(c.subject).join(", ") || "none (not a worker)"}.`
+    ? `This WhatsApp user is linked to customer ${customer.name} (${customer.id}). Their orders in progress: ${listOrderIds(c.subject).join(", ") || "none"}. Delivered orders they can return items from: ${describeReturnable(c.subject) || "none"}. Their worker ID: ${listWorkerIds(c.subject).join(", ") || "none (not a worker)"}.`
     : `This WhatsApp user${c.whatsapp?.username ? ` (@${c.whatsapp.username})` : ""} isn't linked to a customer account yet: WhatsApp didn't share their phone number, so you don't know who they are. Don't share, confirm or guess any personal details. If they ask about anything personal, open show_link_account (passing what they asked for) and say they need to verify once. When a <ui_events> block shows the chat is now linked, carry on with what they asked for.`;
   return `You are the assistant of Acme Store, chatting on WhatsApp with a customer who may also be one of Acme's shift workers.
 ${who}
 
 Write like WhatsApp: 1–3 short sentences, friendly, no headings or markdown. Reply in the customer's language.
 
-You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, or, for workers, seeing open shifts and booking or changing their shift. Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
+You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, returning items from a delivered order (pass the item's sku and the reason if they told you), or, for workers, seeing open shifts and booking or changing their shift. Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
 
 Messages wrapped in <ui_events> are reported by the screens the customer opened, not written by the customer. Use them to know what they did and follow up naturally: confirm changes, mention ticket numbers, offer next steps. Lines starting with "→ screen now shows" are what the customer saw after that event; rely on them for outcomes (ticket numbers, new dates, totals) and for later questions about the screen.
 
@@ -445,6 +446,18 @@ const SCRIPT = {
     verifyFirst: "I can help with that, but first I need to know it's you: WhatsApp didn't share your number with us. Verify once here 👇",
     linked: (name: string) => `Thanks, ${name} ✅ Your chat is linked now.`,
     verifyFailed: "That email and code didn't match. You can try again on the same page.",
+    returnStart: (id: string, prefilled: boolean) =>
+      prefilled
+        ? `Sorry about that 😕 I've started the return for order ${id} with that item already selected. It takes a minute 👇`
+        : `Sure. Here you can pick what to return from order ${id}, and book the courier pickup 👇`,
+    returnSubmitted: (id: string, amount: string, when: string) =>
+      `Done ✅ Return ${id} is filed. The courier picks it up on ${when}, and you'll get ${amount} back after that.`,
+    returnStalled: (step: string) => `I saw you stopped at the ${step} step of your return. Need a hand? Your progress is saved, so the same link picks up where you left off.`,
+    returnAbandoned: "Did you manage to start the return? If it's easier, tell me what you'd like to send back and why.",
+    returnFailed: "Sorry, the return couldn't be sent because the courier's system isn't responding. Everything you filled in is saved: try again in a few minutes from the same page.",
+    returnSlotFull: "That pickup slot just filled up, sorry. Pick another one on the same page and you're done.",
+    returnLoadFailed: "Sorry, the returns page isn't loading right now. Tell me what you'd like to return and I'll take note.",
+    steps: { items: "items", reasons: "reasons", photos: "photos", pickup: "pickup", review: "review" } as Record<string, string>,
   },
   es: {
     status: (id: string) => `Aquí tienes el estado de tu pedido ${id} en directo. Desde ahí también puedes cambiar la entrega 👇`,
@@ -465,10 +478,32 @@ const SCRIPT = {
     verifyFirst: "Te ayudo con eso, pero antes necesito saber que eres tú: WhatsApp no nos ha compartido tu número. Verifícalo una vez aquí 👇",
     linked: (name: string) => `Gracias, ${name} ✅ Tu chat ya está vinculado.`,
     verifyFailed: "El email y el código no coinciden. Puedes volver a intentarlo en la misma página.",
+    returnStart: (id: string, prefilled: boolean) =>
+      prefilled
+        ? `Vaya, lo siento 😕 He empezado la devolución del pedido ${id} con ese artículo ya marcado. Es un minuto 👇`
+        : `Claro. Aquí puedes elegir qué devolver del pedido ${id} y reservar la recogida 👇`,
+    returnSubmitted: (id: string, amount: string, when: string) =>
+      `Hecho ✅ La devolución ${id} está registrada. El mensajero la recoge el ${when} y después te devolvemos ${amount}.`,
+    returnStalled: (step: string) => `He visto que te quedaste en el paso de ${step} de la devolución. ¿Te echo una mano? Lo que rellenaste está guardado: el mismo enlace sigue donde lo dejaste.`,
+    returnAbandoned: "¿Has podido empezar la devolución? Si te es más fácil, dime qué quieres devolver y por qué.",
+    returnFailed: "Perdona, la devolución no se ha podido enviar porque el sistema de mensajería no responde. Lo que rellenaste está guardado: vuelve a intentarlo en unos minutos desde la misma página.",
+    returnSlotFull: "Esa franja de recogida se acaba de completar, perdona. Elige otra en la misma página y listo.",
+    returnLoadFailed: "Perdona, la página de devoluciones no carga ahora mismo. Dime qué quieres devolver y lo apunto.",
+    steps: { items: "artículos", reasons: "motivos", photos: "fotos", pickup: "recogida", review: "revisión" } as Record<string, string>,
   },
 };
 
 const SHIFT_TOPIC = /\b(shifts?|rota|turnos?|horarios?)\b/i;
+const RETURN_TOPIC = /return|send (it )?back|refund|broken|cracked|damaged|wrong item|devol|reembols|roto|rota|rajad|da[ñn]ad|equivocad/i;
+// What the user already said, so the return starts with it filled in.
+const RETURN_ITEM: [RegExp, string][] = [
+  [/blender|batidora/i, "BL-200"],
+  [/bowls?|bol(es)?|cuencos?/i, "GB-3"],
+];
+const RETURN_REASON: [RegExp, "damaged" | "wrong_item"][] = [
+  [/broken|cracked|damaged|roto|rota|rajad|da[ñn]ad/i, "damaged"],
+  [/wrong|equivocad|no es lo que/i, "wrong_item"],
+];
 // No \b next to accented letters: JS word boundaries are ASCII-only.
 const ASKS_WHAT_BOOKED = /(what|which|when|qu[eé]|cu[aá]l|cu[aá]ndo)\s.*(booked|have|got|reserv|tengo|me toca)/i;
 
@@ -481,7 +516,7 @@ function currentShiftText(c: Conversation, workerId: string) {
 
 async function scriptedReply(c: Conversation, text: string) {
   // Unicode-aware word edges: \b is ASCII-only, so it fails next to accented letters ("está").
-  c.locale = /[¿¡ñ]|(?<!\p{L})(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar)(?!\p{L})/iu.test(text)
+  c.locale = /[¿¡ñ]|(?<!\p{L})(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar|devolver|devoluci[oó]n|lleg[oó]|roto|rota)(?!\p{L})/iu.test(text)
     ? "es"
     : "en";
   const s = SCRIPT[c.locale];
@@ -493,7 +528,13 @@ async function scriptedReply(c: Conversation, text: string) {
   }
   const [orderId] = listOrderIds(c.subject);
   const [workerId] = listWorkerIds(c.subject);
-  if (workerId && SHIFT_TOPIC.test(text)) {
+  const [returnId] = listReturnableOrderIds(c.subject);
+  if (returnId && RETURN_TOPIC.test(text)) {
+    const sku = RETURN_ITEM.find(([re]) => re.test(text))?.[1];
+    const reason = RETURN_REASON.find(([re]) => re.test(text))?.[1];
+    const r = await callSurface(c, "show_order_return", { order_id: returnId, ...(sku ? { sku } : {}), ...(reason ? { reason } : {}), locale: c.locale });
+    post(c, s.returnStart(returnId, Boolean(sku)), { label: r.label, url: r.url });
+  } else if (workerId && SHIFT_TOPIC.test(text)) {
     const current = ASKS_WHAT_BOOKED.test(text) ? currentShiftText(c, workerId) : null;
     if (current) return post(c, s.yourShift(...current));
     const r = await callSurface(c, "show_shift_picker", { worker_id: workerId, locale: c.locale });
@@ -520,6 +561,26 @@ async function scriptedFollowUp(c: Conversation, e: UiEvent) {
       if (ask) await scriptedReply(c, ask);
     } else if (e.type === "error") {
       post(c, s.verifyFailed);
+    }
+    return;
+  }
+  if (e.surface === "order_return") {
+    if (e.type === "return_submitted") {
+      const r = getReturn(orderId, c.subject);
+      if (!r.submitted) return;
+      const amount = r.submitted.refundAmount.toLocaleString(c.locale, { style: "currency", currency: r.currency });
+      const when = `${new Date(r.submitted.pickup.date + "T12:00:00").toLocaleDateString(c.locale, { weekday: "long", day: "numeric", month: "long" })}, ${r.submitted.pickup.window}`;
+      post(c, s.returnSubmitted(r.submitted.returnId, amount, when));
+    } else if (e.type === "abandoned") {
+      // Where they stopped is the step after the last one they saved.
+      const last = (e.payload as { lastStep?: string }).lastStep;
+      const stoppedAt = last ? getReturn(orderId, c.subject).draft.step : undefined;
+      post(c, stoppedAt ? s.returnStalled(s.steps[stoppedAt]) : s.returnAbandoned);
+    } else if (e.type === "error") {
+      const code = (e.payload as { code?: string }).code;
+      if (p.source === "load") post(c, s.returnLoadFailed);
+      else if (code === "pickup_slot_full") post(c, s.returnSlotFull);
+      else post(c, s.returnFailed);
     }
     return;
   }

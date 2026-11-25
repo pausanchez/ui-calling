@@ -1,6 +1,7 @@
 import { SurfaceProvider, useSurfaceName } from "@ui-calling/react";
 import { OrderStatus } from "./components/ui-calling/order-status";
 import { LinkAccount } from "./components/ui-calling/link-account";
+import { OrderReturn } from "./components/ui-calling/order-return";
 import { ShiftPicker } from "./components/ui-calling/shift-picker";
 
 /** One route serves every surface; the token decides which one renders. */
@@ -19,6 +20,7 @@ export function SurfacePage({ token }: { token: string }) {
 // Add a line here for each surface the demo serves.
 const SURFACES: Record<string, () => React.JSX.Element> = {
   order_status: () => <OrderStatus />,
+  order_return: () => <OrderReturn />,
   shift_picker: () => <ShiftPicker />,
   link_account: () => <LinkAccount />,
 };

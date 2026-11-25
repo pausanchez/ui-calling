@@ -64,7 +64,7 @@ Each chat message becomes the webhook Meta would send (`server/whatsapp-sim.ts`)
 The demo keeps UI_calling's sessions and events, and its own state, in `apps/demo/.ui-calling/demo.db`. Its own state is:
 - chat;
 - links;
-- mock orders and shifts;
+- mock orders, returns and shifts;
 - the simulated user.
 
 Restarting the dev server keeps all of it. **Reset** in the UI (or `POST /api/chat/reset`) clears it. Module state that should survive exposes a `{ save, load }` object, registered in `STATE` in `server/app.ts`. The smoke test runs on `:memory:`.

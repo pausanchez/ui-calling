@@ -10,7 +10,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from "react";
-import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload } from "@ui-calling/core";
+import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload, SurfaceFileSlot, UiFileRef } from "@ui-calling/core";
 
 /** `completed`: the user already finished on this screen, so its link no longer works. */
 type Status = "loading" | "ready" | "expired" | "completed" | "error";
@@ -28,6 +28,9 @@ type ContextValue = {
   emit: (type: string, payload?: unknown) => Promise<void>;
   reload: () => Promise<void>;
   reportError: (err: unknown, context?: string) => void;
+  upload: (slot: string, file: File) => Promise<UiFileRef>;
+  removeFile: (id: string) => Promise<void>;
+  fileUrl: (id: string) => string;
   returnUrl?: string;
 };
 
@@ -67,32 +70,9 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
   }>({ status: "loading" });
   const opened = useRef(false);
 
-  const emit = useCallback(
-    async (type: string, payload: unknown = {}) => {
-      const res = await fetch(`${base}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, payload }),
-        // `complete()` usually runs as the user follows "Back to chat": let it finish after the page goes.
-        keepalive: true,
-      }).catch(() => {
-        throw new SurfaceActionError("Couldn't reach the server", "network", true);
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (json.error === "completed") setState((s) => ({ status: "completed", locale: s.locale }));
-        throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
-      }
-      // The link is closed now: show the "done" screen if the user is still here.
-      if (type === "completed") return setState((s) => ({ status: "completed", locale: s.locale }));
-      if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
-    },
-    [base],
-  );
-
-  /** Fetch fresh data, e.g. after a failed action when what's on screen may be stale. */
-  const reload = useCallback(async () => {
-    const res = await fetch(base).catch(() => {
+  /** Every request after the first load: turns failures into `SurfaceActionError`s, and notices a closed link. */
+  const send = useCallback(async (url: string, init: RequestInit) => {
+    const res = await fetch(url, init).catch(() => {
       throw new SurfaceActionError("Couldn't reach the server", "network", true);
     });
     const json = await res.json().catch(() => ({}));
@@ -100,8 +80,47 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
       if (json.error === "completed") setState((s) => ({ status: "completed", locale: s.locale }));
       throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
     }
+    return json;
+  }, []);
+
+  const emit = useCallback(
+    async (type: string, payload: unknown = {}) => {
+      const json = await send(`${base}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, payload }),
+        // `complete()` usually runs as the user follows "Back to chat": let it finish after the page goes.
+        keepalive: true,
+      });
+      // The link is closed now: show the "done" screen if the user is still here.
+      if (type === "completed") return setState((s) => ({ status: "completed", locale: s.locale }));
+      if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
+    },
+    [base, send],
+  );
+
+  /** Upload into one of the contract's file slots. Rejections are `invalid_file`, with `reason` e.g. "file_too_large". */
+  const upload = useCallback(
+    async (slot: string, file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      const json = await send(`${base}/files/${encodeURIComponent(slot)}`, { method: "POST", body });
+      return json.file as UiFileRef;
+    },
+    [base, send],
+  );
+  const removeFile = useCallback(
+    async (id: string) => void (await send(`${base}/files/${encodeURIComponent(id)}`, { method: "DELETE" })),
+    [base, send],
+  );
+  /** Where to show an uploaded file, e.g. as an <img> src. Only works through this link. */
+  const fileUrl = useCallback((id: string) => `${base}/files/${encodeURIComponent(id)}`, [base]);
+
+  /** Fetch fresh data, e.g. after a failed action when what's on screen may be stale. */
+  const reload = useCallback(async () => {
+    const json = await send(base, {});
     setState((s) => ({ ...s, data: json.data }));
-  }, [base]);
+  }, [base, send]);
 
   /**
    * Tell the agent something failed on the screen, e.g. a third-party API called from the browser.
@@ -171,8 +190,8 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
   }, [locale]);
 
   const value = useMemo<ContextValue>(
-    () => ({ ...state, locale, data: state.data, emit, reload, reportError, returnUrl: props.returnUrl }),
-    [state, locale, emit, reload, reportError, props.returnUrl],
+    () => ({ ...state, locale, data: state.data, emit, reload, reportError, upload, removeFile, fileUrl, returnUrl: props.returnUrl }),
+    [state, locale, emit, reload, reportError, upload, removeFile, fileUrl, props.returnUrl],
   );
   return (
     <SurfaceContext.Provider value={value}>
@@ -239,6 +258,9 @@ export function useSurface<S extends AnySurface>(surface: S) {
     returnUrl: ctx.returnUrl,
     emit: ctx.emit as <K extends SurfaceEventName<S>>(type: K, payload: SurfaceEventPayload<S, K>) => Promise<void>,
     complete: () => ctx.emit("completed"),
+    upload: ctx.upload as (slot: SurfaceFileSlot<S>, file: File) => Promise<UiFileRef>,
+    removeFile: ctx.removeFile,
+    fileUrl: ctx.fileUrl,
   };
 }
 

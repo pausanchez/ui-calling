@@ -67,6 +67,19 @@ async function contract(name: string, store: UiStore) {
     // Silently returning everything would duplicate the agent's context, so a bad cursor must fail loudly.
     await assert.rejects(store.listEvents({ conversationId: "c1", after: "missing" }), UnknownEventError);
   });
+  await check(`${name}: files keep their bytes, list by session in upload order, and delete`, async () => {
+    const file = (id: string, sessionId: string) => ({ id, sessionId, slot: "photos", name: `${id}.png`, type: "image/png", size: 3, at: new Date().toISOString() });
+    await store.putFile!(file("f1", "s-a"), new Uint8Array([1, 2, 3]));
+    await store.putFile!(file("f2", "s-b"), new Uint8Array([4, 5, 6]));
+    await store.putFile!(file("f3", "s-a"), new Uint8Array([7, 8, 9]));
+    const got = await store.getFile!("f1");
+    assert.deepEqual([...got!.bytes], [1, 2, 3]);
+    assert.equal(got!.file.name, "f1.png");
+    assert.deepEqual((await store.listFiles!("s-a")).map((f) => f.id), ["f1", "f3"]);
+    await store.deleteFile!("f1");
+    assert.equal(await store.getFile!("f1"), undefined);
+    assert.deepEqual((await store.listFiles!("s-a")).map((f) => f.id), ["f3"]);
+  });
 }
 
 await contract("memory", new MemoryStore());

@@ -1,4 +1,4 @@
-import type { SessionStatus, UiEvent, UiSession } from "./types";
+import type { SessionStatus, UiEvent, UiFile, UiSession } from "./types";
 
 /**
  * Which events `listEvents` returns. `after` is the ID of an event already read: only events appended
@@ -30,12 +30,21 @@ export interface UiStore {
   listEvents(query: EventQuery): Promise<UiEvent[]>;
   /** Optional. Lets the runtime re-arm abandon timers for screens left open across a restart. */
   listSessions?(query: { status?: SessionStatus }): Promise<UiSession[]>;
+  /**
+   * Optional, all four together: needed only by surfaces that declare `files`. Bytes can live elsewhere
+   * (e.g. object storage) as long as `getFile` returns them. `listFiles` returns a session's files in upload order.
+   */
+  putFile?(file: UiFile, bytes: Uint8Array): Promise<void>;
+  getFile?(id: string): Promise<{ file: UiFile; bytes: Uint8Array } | undefined>;
+  listFiles?(sessionId: string): Promise<UiFile[]>;
+  deleteFile?(id: string): Promise<void>;
 }
 
 export class MemoryStore implements UiStore {
   private sessions = new Map<string, UiSession>();
   private byToken = new Map<string, string>();
   private events: UiEvent[] = [];
+  private files = new Map<string, { file: UiFile; bytes: Uint8Array }>();
 
   async createSession(session: UiSession, tokenHash: string) {
     this.sessions.set(session.id, session);
@@ -58,6 +67,22 @@ export class MemoryStore implements UiStore {
 
   async appendEvent(event: UiEvent) {
     this.events.push(event);
+  }
+
+  async putFile(file: UiFile, bytes: Uint8Array) {
+    this.files.set(file.id, { file, bytes });
+  }
+
+  async getFile(id: string) {
+    return this.files.get(id);
+  }
+
+  async listFiles(sessionId: string) {
+    return [...this.files.values()].map((f) => f.file).filter((f) => f.sessionId === sessionId);
+  }
+
+  async deleteFile(id: string) {
+    this.files.delete(id);
   }
 
   async listSessions({ status }: { status?: SessionStatus }) {

@@ -273,6 +273,34 @@ A surface isn't a page of your website. The user is mid-conversation, on a phone
 - **Use the tokens.** `tokens.css` uses shadcn/ui variable names (`--primary`, `--background`, `--card`, `--muted-foreground`, `--success`, `--destructive`, `--radius`). Change their values to match your brand, and every block and generated screen follows. Dark mode follows the phone's setting.
 - **Start from a block or the template.** `npx ui-calling add order-status` and `npx ui-calling new`, together with `surface-screen.tsx` from `init`, handle every state above.
 
+### Screens with several steps
+
+One surface, with the steps inside the screen. The demo's `order_return` (items, reasons, photos, pickup, review) is a full example.
+
+- **Each step is a quiet event that saves a draft.** Its handler validates the step, saves it, and returns fresh data. The agent sees how far the user got, and reopening the link resumes there.
+- **Only the last step wakes the agent.** Give `wake: true` to the event that finishes (e.g. `return_submitted`). `abandoned` treats it as the finish line: a user who saves a few steps and then goes quiet for `abandonAfterMs` gets an `abandoned` event that names the last step they saved.
+- **Let the agent fill in what it knows.** Put what the user already said in `input` (an item, a reason), and start the draft with it.
+- **Keep the answers when going back.** Hold them in component state and move between steps without losing them. Push a history entry per step, so the phone's back button goes to the previous step instead of closing the screen.
+- **Skip steps that don't apply** (no photos unless an item is damaged), and say "Step 2 of 4" for the steps the user will actually see.
+
+### File uploads
+
+Declare slots in the contract. The screen uploads into them; events carry only the file IDs.
+
+```ts
+defineSurface({
+  // ...
+  files: { photos: { accept: ["image/*"], maxBytes: 8 * 1024 * 1024, maxFiles: 5 } },
+  events: { photos_added: event(z.object({ photos: z.array(z.string()) }), { describe: (p) => `Attached ${p.photos.length} photos` }) },
+});
+```
+
+- **On the screen:** `const ref = await upload("photos", file)` (the slot name is typed), `removeFile(id)`, and `fileUrl(id)` for an `<img>`. A rejected file throws `SurfaceActionError` with `code: "invalid_file"` and a `reason`: `file_too_large`, `file_type_not_allowed`, `too_many_files`, `empty_file` or `unknown_slot`. Check size and type on the screen too, so the user doesn't wait for an upload that will be refused.
+- **In handlers:** `await ctx.files(p.photos)` returns only files uploaded through this link. Compare lengths to reject IDs from anywhere else.
+- **Uploading records no event.** The step that uses the files reports them, so the agent reads "Attached 2 photos", not one line per upload.
+- **Safety.** `image/*` never matches SVG, which can carry scripts. Files are served only through their own link, with `nosniff` and a sandboxing CSP. File names are cut to the base name.
+- **Storage.** `sqliteStore()` keeps files as blobs in the same database, which is fine for photos on one machine. For more, implement the store's four file methods (`putFile`, `getFile`, `listFiles`, `deleteFile`) on object storage.
+
 ## WhatsApp: who is the `subject`?
 
 On WhatsApp, Meta identifies each user with a **BSUID** (business-scoped user ID), unique within your business portfolio. The phone number is only included when you exchanged messages or calls with it in the last 30 days, or it's in your contact book. Users with a WhatsApp username may never share it. So:
@@ -375,7 +403,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `pathPrefix` | `"/s/"` | Path in front of the token |
 | `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after` |
 | `ttlSeconds` | `3600` | Link lifetime; a surface's own `ttlSeconds` wins |
-| `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen gets no domain event in this time |
+| `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen goes this long without activity and hasn't finished (no event with `wake: true`) |
 | `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
 | `toolPrefix` | `"show_"` | Tool name is `toolPrefix + surface name` |
 | `defaultLocale` | `"en"` | Used when a call doesn't pass `locale` |
@@ -401,10 +429,10 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 
 | API | Fields |
 |---|---|
-| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?` |
+| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `files?` (slots: `{ accept, maxBytes, maxFiles? }`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent) |
 | `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data) => string`, `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
-| `ctx` | `{ subject, conversationId, locale, session }` |
+| `ctx` | `{ subject, conversationId, locale, session, files(ids?) }`; `files` lists this link's uploads |
 | `new SurfaceError(code, message, { retryable? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason` |
 
 ### `UiEvent`
@@ -433,7 +461,7 @@ type UiEvent = {
 | `left` | The tab is hidden or closed | No |
 | `returned` | The user comes back to a screen they'd left | No |
 | `completed` | `complete()` is called; the link closes | No |
-| `abandoned` | `abandonAfterMs` after `opened` with no domain event; off unless set | Yes |
+| `abandoned` | No event with `wake: true` (and no failed action) by `abandonAfterMs` after the last activity; names the last step saved, if any. Off unless set | Yes |
 | `error` | `resolve`, a handler, `reportError` or a render crash failed | First of each kind |
 
 ### React
@@ -441,9 +469,9 @@ type UiEvent = {
 | API | What it gives you |
 |---|---|
 | `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"` |
-| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `returnUrl` |
+| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
 | `useSurfaceName()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
-| `SurfaceActionError` | Thrown by a failed `emit` or `reload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |
+| `SurfaceActionError` | Thrown by a failed `emit`, `reload` or `upload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |
 
 ### HTTP
 
@@ -453,14 +481,18 @@ What `@ui-calling/server` serves under your mount point. Any client can use it; 
 |---|---|
 | `GET /sessions/:token` | `200 { surface, locale, data, expiresAt }` |
 | `POST /sessions/:token/events` with `{ type, payload }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it |
+| `POST /sessions/:token/files/:slot`, multipart with a `file` field | `200 { file: { id, slot, name, type, size } }` |
+| `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
+| `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
 
 Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:
 
 | Status | `error` | Meaning |
 |---|---|---|
 | 400 | `invalid_payload`, `unknown_event` | The body didn't match the contract |
+| 400 | `invalid_file` | An upload was refused; `reason` says why (`file_too_large`, `file_type_not_allowed`, `too_many_files`…) |
 | 404 | `not_found` | No such link |
 | 410 | `expired`, `completed` | The link ran out, or the user already finished |
-| 413 | `payload_too_large` | The event body is over 64 KB |
+| 413 | `payload_too_large`, `invalid_file` | The event body is over 64 KB, or an upload is bigger than any slot accepts |
 | 429 | `too_many_events` | The link reached `maxEventsPerSession` |
 | 502 | `upstream_error` | `resolve` or a handler threw; `reason` is your `SurfaceError` code |

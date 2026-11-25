@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { UnknownEventError, type EventQuery, type SessionStatus, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
+import { UnknownEventError, type EventQuery, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
 
 /**
  * Sessions and events in a SQLite file, on Node's built-in `node:sqlite`: nothing to install, nothing
@@ -34,6 +34,14 @@ export function sqliteStore(path = ".ui-calling/ui-calling.db") {
     );
     CREATE INDEX IF NOT EXISTS ui_events_session ON ui_events (session_id, seq);
     CREATE INDEX IF NOT EXISTS ui_events_conversation ON ui_events (conversation_id, seq);
+    CREATE TABLE IF NOT EXISTS ui_files (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      session_id TEXT NOT NULL,
+      json TEXT NOT NULL,
+      bytes BLOB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ui_files_session ON ui_files (session_id, seq);
   `);
 
   const q = {
@@ -45,6 +53,10 @@ export function sqliteStore(path = ".ui-calling/ui-calling.db") {
     allSessions: db.prepare("SELECT json FROM ui_sessions"),
     insertEvent: db.prepare("INSERT INTO ui_events (id, session_id, conversation_id, json) VALUES (?, ?, ?, ?)"),
     seqOf: db.prepare("SELECT seq FROM ui_events WHERE id = ?"),
+    insertFile: db.prepare("INSERT INTO ui_files (id, session_id, json, bytes) VALUES (?, ?, ?, ?)"),
+    fileById: db.prepare("SELECT json, bytes FROM ui_files WHERE id = ?"),
+    filesBySession: db.prepare("SELECT json FROM ui_files WHERE session_id = ? ORDER BY seq"),
+    deleteFile: db.prepare("DELETE FROM ui_files WHERE id = ?"),
   };
   // One statement per combination of filters, so each query can use the (…, seq) indexes.
   const eventQueries = new Map<string, ReturnType<DatabaseSync["prepare"]>>();
@@ -104,6 +116,21 @@ export function sqliteStore(path = ".ui-calling/ui-calling.db") {
     },
     async listSessions({ status }: { status?: SessionStatus }) {
       return many<UiSession>(status ? q.sessionsByStatus.all(status) : q.allSessions.all());
+    },
+    // Files sit in the same database as blobs: fine for screenshots and photos on one machine.
+    // For larger files or several servers, implement these four on object storage.
+    async putFile(file: UiFile, bytes: Uint8Array) {
+      q.insertFile.run(file.id, file.sessionId, JSON.stringify(file), bytes);
+    },
+    async getFile(id: string) {
+      const row = q.fileById.get(id) as { json: string; bytes: Uint8Array } | undefined;
+      return row ? { file: JSON.parse(row.json) as UiFile, bytes: new Uint8Array(row.bytes) } : undefined;
+    },
+    async listFiles(sessionId: string) {
+      return many<UiFile>(q.filesBySession.all(sessionId));
+    },
+    async deleteFile(id: string) {
+      q.deleteFile.run(id);
     },
   };
   return store;

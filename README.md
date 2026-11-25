@@ -25,7 +25,7 @@ The usual model is a predesigned flow: a button opens a webview, and when it clo
 
 - **The agent decides to open a screen,** the way it calls a function, in the middle of any conversation. There's no fixed flow.
 - **Events cover the screen's whole life,** written for the model to read: opened, left, came back, the actions the user attempted and their outcomes, errors, completed. It's more than one result on close.
-- **Users who stall get noticed.** If someone opens the screen and does nothing, an `abandoned` event can wake the agent to follow up (turn it on with `abandonAfterMs`).
+- **Users who stall get noticed.** If someone opens the screen and does nothing, or stops halfway through the steps, an `abandoned` event can wake the agent to follow up, naming where they stopped (turn it on with `abandonAfterMs`).
 - **Failures are explained, not lost.** When an API is down or the slot is gone, the agent learns what the user tried and why it didn't work, and can say so in the chat.
 - **The agent never answers blind.** `summarize` tells it what the user is looking at.
 - **It plugs into the agent you have:** Anthropic, OpenAI, the AI SDK or MCP. There's no new platform or visual flow builder.
@@ -44,7 +44,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and ask "¿Dónde está mi pedido?" or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to an "Under the hood" panel with two tabs:
+Open http://localhost:5173 and ask "¿Dónde está mi pedido?", "The blender arrived cracked, I want to return it" (a five-step return with photo upload) or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to an "Under the hood" panel with two tabs:
 - **Tool calls** (agent → screen): the tool definitions the model gets, then for each call the params the model passed, what `ui.runTool()` returned, the `tool_result` sent back, and the WhatsApp Cloud API request that would deliver the link.
 - **Agent context** (screen → agent): the events coming back from the screen, with what it showed after each one.
 
@@ -258,5 +258,5 @@ Before the first publish, decide:
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
-- More blocks: payslip viewer, document signing, availability calendar (a shift picker exists in the demo)
+- More blocks: payslip viewer, document signing, availability calendar (a shift picker and a multistep return with photo upload exist in the demo)
 - More languages in the blocks (en and es today)

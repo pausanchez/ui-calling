@@ -1,6 +1,7 @@
 import { createUiCalling, type UiEvent } from "@ui-calling/core";
 import { sqliteStore } from "@ui-calling/sqlite";
 import { failures } from "./failures";
+import { orderReturnImpl } from "./order-return.server";
 import { orderStatusImpl } from "./order-status.server";
 import { shiftPickerImpl } from "./shift-picker.server";
 import { linkAccountImpl } from "./link-account.server";
@@ -22,6 +23,7 @@ export const ui = createUiCalling({
   onEvent: (e) => listeners.forEach((fn) => fn(e)),
   surfaces: [
     orderStatusImpl,
+    orderReturnImpl,
     shiftPickerImpl,
     linkAccountImpl,
   ],

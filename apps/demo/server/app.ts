@@ -15,6 +15,7 @@ import {
 } from "./agent";
 import { linksState, seedIdentity } from "./identity";
 import { ordersState, seedOrders } from "./orders";
+import { returnsState, seedReturns } from "./returns";
 import { seedShifts, shiftsState } from "./shifts";
 import { failures, onUiEvent, store, ui } from "./ui";
 import { demoUser, demoUserState, inboundNumberChange, inboundText, seedDemoUser } from "./whatsapp-sim";
@@ -26,7 +27,7 @@ onUiEvent(handleUiEvent);
 // The demo's own state (chat, links, mock data) lives next to UI_calling's sessions and events, in the
 // same SQLite file, so a restart loses nothing. A real product keeps these in its own database.
 store.db.exec("CREATE TABLE IF NOT EXISTS demo_state (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
-const STATE = { orders: ordersState, shifts: shiftsState, links: linksState, user: demoUserState, conversations: conversationsState };
+const STATE = { orders: ordersState, returns: returnsState, shifts: shiftsState, links: linksState, user: demoUserState, conversations: conversationsState };
 const getState = store.db.prepare("SELECT json FROM demo_state WHERE key = ?");
 const putState = store.db.prepare(
   "INSERT INTO demo_state (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json",
@@ -98,6 +99,7 @@ app.post("/api/chat", async (c) => {
 app.post("/api/chat/reset", (c) => {
   resetConversations();
   seedOrders();
+  seedReturns();
   seedShifts();
   seedIdentity();
   seedDemoUser();
