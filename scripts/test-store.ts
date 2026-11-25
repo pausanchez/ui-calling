@@ -28,7 +28,7 @@ const session = (id: string, conversationId = "c1"): UiSession => ({
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
 });
 const ev = (id: string, s: UiSession, type: string): UiEvent => ({
-  id, sessionId: s.id, conversationId: s.conversationId, surface: s.surface, type, kind: "domain",
+  id, sessionId: s.id, conversationId: s.conversationId, subject: s.subject, surface: s.surface, type, kind: "domain",
   payload: { n: id }, description: type, wake: false, at: new Date().toISOString(),
 });
 

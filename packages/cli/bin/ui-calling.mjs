@@ -26,7 +26,7 @@ const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")
 const fromRoot = (p) => (p ? resolve(root, p) : undefined);
 const config = raw && { ...raw, runtime: fromRoot(raw.runtime), screen: fromRoot(raw.screen), surfacesDir: fromRoot(raw.surfacesDir), serverDir: fromRoot(raw.serverDir) };
 
-const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone", "--conversation", "--port", "--webhook-path"];
+const VALUE_FLAGS = ["--identifier", "--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone", "--conversation", "--port", "--webhook-path"];
 const [cmd, ...all] = process.argv.slice(2);
 // Everything after a bare "--" is passed through (e.g. the dev command for `whatsapp dev`).
 const dashDash = all.indexOf("--");
@@ -115,7 +115,11 @@ function register(file, importLine, entry) {
   let s = readFileSync(file, "utf8");
   if (!s.includes("// ui-calling:imports") || !s.includes("/* ui-calling:surfaces */")) return false;
   if (!s.includes(importLine)) s = s.replace("// ui-calling:imports", `${importLine}\n// ui-calling:imports`);
-  if (!s.includes(entry)) {
+  // The same surface registered with other props (add link-account --identifier text): replace its entry.
+  const key = entry.match(/^(\w+): /)?.[1];
+  const existing = key && s.match(new RegExp(`^([ \\t]*)${key}: .*,$`, "m"));
+  if (existing && !s.includes(entry)) s = s.replace(existing[0], `${existing[1]}${entry}`);
+  else if (!s.includes(entry)) {
     // On a line of its own, each entry goes on a new line above the marker (a clean diff per surface);
     // an inline marker (older setups: `[/* ui-calling:surfaces */]`) keeps entries on its line.
     const own = s.match(/\n([ \t]*)\/\* ui-calling:surfaces \*\//);
@@ -129,9 +133,9 @@ function register(file, importLine, entry) {
 }
 
 /** Register a surface's implementation in the runtime and its component in the screen, if `init` made them. */
-function registerSurface({ impl, component, surface }, serverFile, screenFile) {
+function registerSurface({ impl, component, surface }, serverFile, screenFile, props = "") {
   const inRuntime = register(config?.runtime, `import { ${impl} } from "${importPath(config?.runtime ?? ".", serverFile)}";`, `${impl},`);
-  const inScreen = register(config?.screen, `import { ${component} } from "${importPath(config?.screen ?? ".", screenFile)}";`, `${surface}: () => <${component} />,`);
+  const inScreen = register(config?.screen, `import { ${component} } from "${importPath(config?.screen ?? ".", screenFile)}";`, `${surface}: () => <${component}${props} />,`);
   return inRuntime && inScreen;
 }
 
@@ -143,7 +147,7 @@ function newSurface(name) {
   const words = name.split("-");
   const cap = (w) => w[0].toUpperCase() + w.slice(1);
   // The contract's constant is the camelCase name; the templates already use these names for their own variables.
-  const TAKEN = ["note", "busy", "failed", "problem", "details", "choice", "nav", "step", "status", "data", "locale", "emit", "reload", "complete", "returnUrl", "errorCode", "options", "drafts", "saved", "reached", "upstream", "known", "retryable", "key", "id", "base", "load", "save", "next", "go", "confirm", "btn", "messages", "t", "d", "e", "v"];
+  const TAKEN = ["note", "busy", "failed", "problem", "details", "choice", "nav", "step", "status", "data", "locale", "emit", "reload", "complete", "returnUrl", "errorCode", "options", "drafts", "saved", "store", "tableReady", "draftsTable", "readDraft", "writeDraft", "reached", "upstream", "known", "retryable", "key", "id", "base", "load", "save", "next", "go", "confirm", "btn", "messages", "t", "d", "e", "v"];
   const constName = words[0] + words.slice(1).map(cap).join("");
   if (TAKEN.includes(constName)) {
     console.error(`"${name}" clashes with a name the generated code already uses. Pick a more specific one, e.g. ${name}-form or site-${name}.`);
@@ -165,11 +169,17 @@ function newSurface(name) {
   const serverFile = join(serverDir, `${name}.server.ts`);
   const screenFile = join(outDir, `${name}.tsx`);
 
+  // The steps template keeps drafts in init's store (store.ts next to ui.ts). Without init, `new` writes one.
+  const storeFile = join(config?.runtime ? dirname(config.runtime) : serverDir, "store.ts");
   for (const file of readdirSync(templateDir)) {
     const isServer = file.endsWith(".server.ts");
     let content = readFileSync(join(templateDir, file), "utf8");
     // Only the server file may live elsewhere; the screen sits next to its contract.
     if (isServer) content = content.replaceAll('"./__name__.surface"', `"${importPath(serverFile, join(outDir, `${name}.surface.ts`))}"`);
+    if (content.includes('"../init/store"')) {
+      if (!existsSync(storeFile)) write(storeFile, fill("store.ts", {}));
+      content = content.replaceAll('"../init/store"', `"${importPath(serverFile, storeFile)}"`);
+    }
     // The template imports parts from the registry (so the repo typechecks it); in your project they're in ./parts.
     for (const [, part] of content.matchAll(/"\.\.\/\.\.\/registry\/parts\/([a-z-]+)"/g)) {
       addPart(part);
@@ -216,6 +226,63 @@ function allowTunnelInNextDev(done) {
   console.log(`  update ${file}`);
 }
 
+/**
+ * Vite has no server of its own: write a small Hono one for the API, proxy /api to it in development, and render
+ * the screen on /s/:token. Each step that can't be done safely on your files becomes a line in "Next" instead.
+ */
+const API_PORT = 8787;
+function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg }) {
+  const serverEntry = join(serverLib, "index.ts");
+  write(serverEntry, fill("vite-server.ts", { __UI_IMPORT__: importPath(serverEntry, runtime), __API_PORT__: String(API_PORT) }));
+  const route = join(lib, "surface-route.tsx");
+  write(route, fill("vite-surface-route.tsx", {}));
+  done.push(`API server in ${serverEntry}`);
+
+  // create-vite's `tsc -b` checks src/ (tsconfig.app.json) and vite.config (tsconfig.node.json): add the server.
+  const serverPath = serverLib.split(sep).join("/");
+  if (existsSync("tsconfig.json") && !existsSync("tsconfig.server.json")) {
+    const ts = readFileSync("tsconfig.json", "utf8");
+    const last = ts.match(/\{ "path": "\.\/tsconfig\.node\.json" \}/);
+    if (last) {
+      write("tsconfig.server.json", fill("vite-tsconfig.server.json", { __SERVER_DIR__: serverPath }));
+      writeFileSync("tsconfig.json", ts.replace(last[0], `${last[0]},\n    { "path": "./tsconfig.server.json" }`));
+      console.log("  update tsconfig.json");
+    } else todo.push(`Typecheck ${serverPath}/ too: it's outside what your tsconfig includes.`);
+  }
+
+  if (!pkg.scripts?.["dev:api"]) {
+    pkg.scripts = { ...pkg.scripts, "dev:api": `tsx watch --env-file-if-exists=.env ${serverEntry.split(sep).join("/")}` };
+    writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+    console.log("  update package.json (dev:api)");
+  }
+
+  // create-vite's shape: `export default defineConfig({`. Anything else, or a proxy of your own, is left to you.
+  const config = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"].find((f) => existsSync(f));
+  const c = config && readFileSync(config, "utf8");
+  if (c && !c.includes("/api") && !/\bserver\s*:/.test(c) && /defineConfig\(\{\n/.test(c)) {
+    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // UI_calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { proxy: { "/api": "http://localhost:${API_PORT}" } },\n`));
+    console.log(`  update ${config}`);
+    done.push(`/api proxied to the API in ${config}`);
+  } else if (!c?.includes("/api")) {
+    todo.push(`In vite.config, proxy "/api" to http://localhost:${API_PORT} (server.proxy), so the screens reach the API.`);
+  }
+
+  // create-vite's main.tsx renders <App />: show the screen instead on /s/:token.
+  const main = ["src/main.tsx", "src/main.jsx"].find((f) => existsSync(f));
+  const m = main && readFileSync(main, "utf8");
+  if (m && !m.includes("surfaceRoute") && m.split("<App />").length === 2) {
+    const imports = [...m.matchAll(/^import .*$/gm)].at(-1);
+    const withImport = imports
+      ? m.slice(0, imports.index + imports[0].length) + `\nimport { surfaceRoute } from "${importPath(main, route)}";` + m.slice(imports.index + imports[0].length)
+      : m;
+    writeFileSync(main, withImport.replace("<App />", "{surfaceRoute() ?? <App />}"));
+    console.log(`  update ${main}`);
+    done.push(`screens render on /s/:token (${main})`);
+  } else if (!m?.includes("surfaceRoute")) {
+    todo.push(`Render {surfaceRoute() ?? <App />} with surfaceRoute from ${route}, or route /s/:token to <SurfaceScreen token={token} /> from ${screen}.`);
+  }
+}
+
 function init() {
   if (!existsSync("package.json")) {
     console.error("No package.json here. Run `npx ui-calling init` in your project's root.");
@@ -236,7 +303,10 @@ function init() {
     process.exit(1);
   }
   const deliver = flag("--deliver", "button");
-  const runtime = join(lib, "ui.ts");
+  // Next.js keeps server and browser code side by side; elsewhere `src/` is what gets bundled for the browser, so
+  // the runtime (node:sqlite, process.env) and every .server.ts go in a server folder of their own.
+  const serverLib = flag("--server-dir", raw?.serverDir ?? (framework === "next" ? lib : "server"));
+  const runtime = join(serverLib, "ui.ts");
   const screen = join(lib, "surface-screen.tsx");
   console.log(`Setting up UI_calling for ${framework === "other" ? "your project" : framework === "next" ? "Next.js" : "Vite"}\n`);
 
@@ -246,9 +316,21 @@ function init() {
     console.error(`--deliver is "button" or "message", not "${deliver}".`);
     process.exit(1);
   }
-  write(runtime, fill("ui.ts", { __BASE_URL__: literal(flag("--base-url", framework === "vite" ? "http://localhost:5173" : "http://localhost:3000")), __DELIVER__: deliver }));
-  write(screen, fill("surface-screen.tsx", {}));
-  write(join(lib, "store.ts"), fill("store.ts", {}));
+  const devUrl = flag("--base-url", raw?.devUrl ?? (framework === "vite" ? "http://localhost:5173" : "http://localhost:3000"));
+  write(runtime, fill("ui.ts", { __BASE_URL__: literal(devUrl), __DELIVER__: deliver }));
+  // "use client" is a Next.js directive: elsewhere it only reads as if this were Next-only.
+  write(screen, framework === "next" ? fill("surface-screen.tsx", {}) : fill("surface-screen.tsx", {}).replace(/^"use client";\n/, ""));
+  // Next's dev server watches the project, so its development database lives in node_modules/.cache; elsewhere
+  // .ui-calling/ (git-ignored) keeps it safe from a clean install.
+  const storeCode = fill("store.ts", {});
+  write(
+    join(serverLib, "store.ts"),
+    framework === "next"
+      ? storeCode
+      : storeCode
+          .replace("or node_modules/.cache/ui-calling/ in development, where the\n * dev server doesn't watch it.", "or .ui-calling/dev.db in development.")
+          .replace("sqliteStore();", `sqliteStore(process.env.NODE_ENV === "production" ? undefined : ".ui-calling/dev.db");`),
+  );
   write(join(lib, "tokens.css"), readFileSync(join(registryDir, registry.tokens)));
 
   const done = [];
@@ -261,8 +343,10 @@ function init() {
     done.push(`API routes at /api/ui (${route})`, `surface page at /s/[token] (${page})`);
     allowTunnelInNextDev(done);
   }
+  const todo = [];
+  if (framework === "vite") setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg });
 
-  writeFileSync(CONFIG_FILE, JSON.stringify({ framework, runtime, screen, surfacesDir: lib, serverDir: lib }, null, 2) + "\n");
+  writeFileSync(CONFIG_FILE, JSON.stringify({ framework, runtime, screen, surfacesDir: lib, serverDir: serverLib, devUrl }, null, 2) + "\n");
   console.log(`  write  ${CONFIG_FILE}`);
 
   // Point coding agents at the guide, in the instructions files they already read.
@@ -299,11 +383,17 @@ function init() {
     if (/:root\s*{[^}]*--(background|foreground)\s*:/.test(s)) {
       done.push(`tokens imported in ${css}, but its own --background/--foreground override them; delete those to use UI_calling's`);
     } else done.push(`tokens imported in ${css}`);
+    // create-vite's starter page styles bare elements (#root, h1, p…) outside Tailwind's layers, so they win on the
+    // screens too: a centered, oversized title.
+    if (/^(#root|h1|h2|p|body)\s*\{/m.test(s)) {
+      todo.push(`${css} still has starter styles for #root, h1, p…, which also style the screens. Remove them when you replace the starter page.`);
+    }
   }
 
   const pm = existsSync("pnpm-lock.yaml") ? "pnpm add" : existsSync("yarn.lock") ? "yarn add" : existsSync("bun.lockb") || existsSync("bun.lock") ? "bun add" : "npm install";
   // Only what's missing. zod must be a direct dependency: contracts import it.
-  const missing = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", "@ui-calling/sqlite", "zod"].filter((d) => !deps[d]);
+  const wanted = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", "@ui-calling/sqlite", "zod", ...(framework === "vite" ? ["hono", "@hono/node-server", "tsx"] : [])];
+  const missing = wanted.filter((d) => !deps[d]);
   const steps = [];
   if (missing.length) {
     const ours = missing.filter((d) => d.startsWith("@ui-calling/"));
@@ -314,7 +404,9 @@ function init() {
     );
   }
   if (tokensStep) steps.push(tokensStep);
-  if (framework !== "next") {
+  steps.push(...todo);
+  if (framework === "vite") steps.push(`Run the API next to Vite: npm run dev:api (and npm run dev). Vite proxies /api to it.`);
+  if (framework === "other") {
     steps.push(
       `Serve the API: mount uiCallingHandler(ui) from "@ui-calling/server" at /api/ui on your server (any framework that takes (Request) => Response; for Hono/Express-style apps, uiCallingRoutes(ui)).`,
       `Route /s/:token in your app to <SurfaceScreen token={token} /> from ${screen}.`,
@@ -332,9 +424,11 @@ function init() {
  * which `init` sets up for `next dev`), so you can click through a screen without an agent.
  */
 async function devCommand(which) {
-  const port = config?.framework === "vite" ? 5173 : 3000;
+  // Where the app runs: --url, else ui-calling.json's devUrl (init writes it), else the framework's default port.
+  const fallback = config?.devUrl ?? `http://localhost:${config?.framework === "vite" ? 5173 : 3000}`;
+  const from = flag("--url") ? "--url" : config?.devUrl ? `devUrl in ${CONFIG_FILE}` : "the default";
   // --url can be the app (http://localhost:3100) or its API (http://localhost:3100/api/ui).
-  const given = new URL(flag("--url", `http://localhost:${port}`));
+  const given = new URL(flag("--url", fallback));
   const base = (given.pathname === "/" ? `${given.origin}/api/ui` : given.href).replace(/\/$/, "");
   const subject = flag("--subject", "dev-user");
   // Your agent's conversation, so the screen's events reach it (default: a conversation of its own, dev:<subject>).
@@ -342,7 +436,7 @@ async function devCommand(which) {
   const reach = async (path, init) => {
     const res = await fetch(base + path, init).catch(() => null);
     if (!res) {
-      console.error(`Couldn't reach ${base}. Start your dev server, or pass --url (e.g. --url http://localhost:3001/api/ui).`);
+      console.error(`Couldn't reach ${base} (from ${from}). Start your dev server, or pass --url http://localhost:<port>; to remember it, set "devUrl" in ${CONFIG_FILE}.`);
       process.exit(1);
     }
     if (res.status === 404 && !path.startsWith("/dev/links")) {
@@ -378,7 +472,11 @@ async function devCommand(which) {
   });
   const json = await res.json().catch(() => ({ message: `${base}/dev/links isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js).` }));
   if (!res.ok) {
-    console.error(json.message ?? json.error ?? `HTTP ${res.status}`);
+    // A refusal from resolve: say which, and the usual cause (the test user isn't linked to anyone yet).
+    if (json.error && json.error !== "unknown_surface" && json.error !== "invalid_payload" && res.status === 422) {
+      console.error(`The screen refused subject "${subject}": ${json.error}: ${json.message}`);
+      console.error(`In development, give "${subject}" a test account at startup (with the link-account block: identity.link("${subject}", "<customer id>")), or pass --subject <a linked subject>.`);
+    } else console.error(json.message ?? json.error ?? `HTTP ${res.status}`);
     process.exit(1);
   }
   console.log(json.url);
@@ -398,7 +496,8 @@ function repoLinks(md) {
   return md.replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui_calling/blob/main/${posix.normalize(posix.join("packages/cli/recipes", rel))})`);
 }
 
-switch (cmd) {
+// `<command> --help` shows the usage instead of running the command.
+switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
   case "init":
     init();
     break;
@@ -458,7 +557,14 @@ switch (cmd) {
         wroteServer = writeOver(serverFile, s);
       }
       const screenFile = join(outDir, basename(block.files.find((f) => f.endsWith(".tsx"))));
-      if (!registerSurface(block.register, serverFile, screenFile)) unregistered.push(block);
+      // --identifier: what users type to be found (link-account). The screen is registered with it.
+      const identifier = flag("--identifier");
+      const kinds = block.options?.identifier;
+      if (identifier && !kinds?.includes(identifier)) {
+        console.error(kinds ? `--identifier is ${kinds.join(", ")}, not "${identifier}".` : `${name} has no --identifier.`);
+        process.exit(1);
+      }
+      if (!registerSurface(block.register, serverFile, screenFile, identifier && identifier !== "email" ? ` identifier="${identifier}"` : "")) unregistered.push(block);
     }
     if (deps.size) console.log(`\nMake sure these are installed: ${[...deps].join(" ")}`);
     for (const { register: r } of unregistered) {
@@ -489,11 +595,29 @@ switch (cmd) {
     const recipesDir = join(pkgDir, "recipes");
     const recipes = readdirSync(recipesDir).filter((f) => f.endsWith(".md") && f !== "README.md").map((f) => f.slice(0, -3));
     const [topic] = names;
-    if (!topic) process.stdout.write(readFileSync(join(pkgDir, "GUIDE.md"), "utf8"));
-    else if (topic === "recipes") process.stdout.write(readFileSync(join(recipesDir, "README.md"), "utf8"));
+    const guide = readFileSync(join(pkgDir, "GUIDE.md"), "utf8");
+    // The guide's sections, by their ## heading: `guide toc` lists them, `guide <section>` prints one. A ### heading
+    // works too (guide vite), printing just that part.
+    const slug = (title) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const cut = (level) =>
+      guide.split(new RegExp(`^(?=#{${level}} )`, "m")).flatMap((text) => {
+        const title = text.match(new RegExp(`^#{${level}} (.*)`))?.[1].replace(/`/g, "");
+        return title ? [{ title, slug: slug(title), text: level === 3 ? text.split(/^(?=## )/m)[0] : text }] : [];
+      });
+    const sections = cut(2);
+    const parts = [...sections, ...cut(3)];
+    const word = topic?.toLowerCase();
+    const section = topic && (parts.find((x) => x.slug === word) ?? parts.find((x) => x.slug.split("-").includes(word)));
+    if (!topic) process.stdout.write(guide);
+    else if (topic === "toc") {
+      console.log("Sections (npx ui-calling guide <section>, or one word of it, e.g. guide agent):\n");
+      for (const x of sections) console.log(`  ${x.slug.padEnd(38)} ${x.title}`);
+      console.log(`\nRecipes (npx ui-calling guide <recipe>): ${recipes.join(", ")}`);
+    } else if (topic === "recipes") process.stdout.write(readFileSync(join(recipesDir, "README.md"), "utf8"));
     else if (recipes.includes(topic)) process.stdout.write(repoLinks(readFileSync(join(recipesDir, `${topic}.md`), "utf8")));
+    else if (section) process.stdout.write(section.text);
     else {
-      console.error(`No recipe "${topic}". Recipes: ${recipes.join(", ")}`);
+      console.error(`No section or recipe "${topic}". See npx ui-calling guide toc.`);
       process.exit(1);
     }
     break;
@@ -502,14 +626,16 @@ switch (cmd) {
     console.log(`ui-calling <command>
 
   init              set up UI_calling in this project (detects Next.js or Vite)
-                    --dir (default src/ui-calling or ui-calling), --deliver button|message,
-                    --framework next|vite|other, --base-url
+                    --dir (default src/ui-calling or ui-calling), --server-dir (default: the same
+                    for Next.js, server/ otherwise), --deliver button|message,
+                    --framework next|vite|other, --base-url (your dev address, e.g. http://localhost:5173)
   new <name>        scaffold a surface (contract, screen, server) and register it
                     --template steps: a screen with several steps, a saved draft and Back
                     --dir, --server-dir (default: from ui-calling.json)
   add <block...>    copy ready-made blocks and register them; their .server.ts is written once,
                     never overwritten (--dir, --server-dir, --force; --replace rewrites everything,
-                    server file included, to swap your own screen for the block)
+                    server file included, to swap your own screen for the block).
+                    link-account: --identifier email|tel|text, what users type to be found
   list              show available blocks
   tokens            copy the design tokens only
   link <surface> [key=value...]
@@ -522,6 +648,7 @@ switch (cmd) {
   whatsapp check    is the WhatsApp setup right? (token, where Meta delivers; --url, --webhook-path)
   whatsapp dev      tunnel + your dev server with PUBLIC_URL + point Meta's webhook there
                     (--port 3000, --webhook-path /api/whatsapp/webhook, -- your dev command)
-  guide [recipe]    print the guide for building surfaces (for people and coding agents);
-                    "guide recipes" lists task-shaped recipes, "guide <recipe>" prints one`);
+  guide             print the guide for building surfaces (for people and coding agents)
+  guide toc         list its sections and the recipes; "guide <section>" prints one section
+                    (a word is enough: guide vite, guide testing), "guide <recipe>" one recipe`);
 }

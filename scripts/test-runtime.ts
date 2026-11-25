@@ -78,7 +78,9 @@ await check("ttl: a surface's ttlSeconds overrides the default; others get 1 hou
   assert.equal(minutes((await ui.call("show_verify", {}, who)).expiresAt), 10);
   assert.equal(minutes((await ui.call("show_ticket", { ticket_id: "T-4" }, who)).expiresAt), 60);
   const run = await ui.runTool("show_verify", {}, who);
-  assert.ok(run.ok && minutes(JSON.parse(run.content).expires_at) === 10, "the model is told the real expiry");
+  assert.ok(run.ok && JSON.parse(run.content).expires_in_minutes === 10, "the model is told the real expiry");
+  // A readable time with its zone, not UTC ISO, which models misread next to a local "now".
+  assert.match(JSON.parse(run.content).expires_at, /^\d{1,2} \w{3} \d{2}:\d{2} UTC$/);
 });
 
 // A second runtime whose agent and handlers misbehave on purpose.
@@ -605,6 +607,50 @@ await check("files: a surface with files needs a store that can keep them", asyn
     () => createUiCalling({ baseUrl: "https://ui.example.com", store: noFiles, surfaces: [implement(claim, { resolve: async () => ({ photos: 0 }), summarize: () => "" })] }),
     /can't keep files/,
   );
+});
+
+await check("pilot 2: events carry the subject, ctx.resolve rebuilds data, times are zoned, refusals don't wake", async () => {
+  const hold = defineSurface({
+    name: "hold",
+    description: "Holds an item.",
+    input: z.object({ item: z.string() }),
+    data: z.object({ item: z.string(), held: z.boolean(), until: z.string() }),
+    events: {
+      hold: event(z.object({}), { describe: () => "User held the item", wake: true }),
+      code: event(z.object({ code: z.string() }), { describe: () => "User entered a code", wake: true }),
+    },
+  });
+  let held = false;
+  const zoned = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    timeZone: "Europe/Madrid",
+    surfaces: [
+      implement(hold, {
+        resolve: async ({ item }) => ({ item, held, until: "2026-11-26T20:00:00.000Z" }),
+        summarize: (d, m) => `${d.item}${d.held ? `, held until ${m.time(d.until)}` : ""}`,
+        on: {
+          hold: async (_p, ctx) => {
+            held = true;
+            return ctx.resolve(); // the whole data again, without rebuilding it here
+          },
+          code: async () => {
+            throw new SurfaceError("wrong_code", "Wrong code", { refused: true, retryable: true });
+          },
+        },
+      }),
+    ],
+  });
+  const t = token((await zoned.call("show_hold", { item: "overshirt" }, { conversationId: "z", subject: "web:dev-1" })).url);
+  const done = await zoned.emit(t, "hold", {});
+  assert.deepEqual(done.data, { item: "overshirt", held: true, until: "2026-11-26T20:00:00.000Z" });
+  assert.equal(done.event.subject, "web:dev-1", "a woken turn can rebuild `who` from the event");
+  assert.equal(done.event.state, "overshirt, held until 26 Nov 21:00 CET");
+  await assert.rejects(zoned.emit(t, "code", { code: "1" }), (e: { code?: string }) => e.code === "refused");
+  const refusal = (await zoned.events("z")).at(-1)!;
+  assert.equal(refusal.kind, "error");
+  assert.equal(refusal.wake, false, "the screen explains a refusal; the agent reads it on its next turn");
+  const run = await zoned.runTool("show_hold", { item: "jeans" }, { conversationId: "z", subject: "web:dev-1" });
+  assert.match(JSON.parse(run.content).expires_at, /^\d{1,2} \w{3} \d{2}:\d{2} CES?T$/); // CEST in summer
 });
 
 console.log(`\n${passed} checks passed`);

@@ -39,7 +39,14 @@
       ],
       "support": [
         "blocks/link-account/identity.ts"
-      ]
+      ],
+      "options": {
+        "identifier": [
+          "email",
+          "tel",
+          "text"
+        ]
+      }
     }
   },
   "parts": {

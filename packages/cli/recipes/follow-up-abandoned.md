@@ -17,7 +17,7 @@ export const ui = createUiCalling({
 
 ## What the agent gets
 
-The finish line is any event with `wake: true`, or a failed action (the agent already heard about the error). If neither happened and the user has been idle for `abandonAfterMs`, the runtime records one `abandoned` event, which wakes the agent:
+The finish line is any event with `wake: true`, or a failed action that woke the agent (an outage: the agent already heard about it). A refusal, like a wrong code, doesn't count: the user may have given up after it. If neither happened and the user has been idle for `abandonAfterMs`, the runtime records one `abandoned` event, which wakes the agent:
 
 | What the user did | What the agent reads |
 |---|---|

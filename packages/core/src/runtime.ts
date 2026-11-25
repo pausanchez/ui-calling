@@ -38,6 +38,8 @@ export type SurfaceContext<S extends AnySurface = AnySurface> = {
    * keeps their IDs). Anything else is left out, so compare lengths to reject it.
    */
   files: (ids?: string[]) => Promise<UiFileRef[]>;
+  /** Run `resolve` again with the link's input: a handler returns `ctx.resolve()` instead of rebuilding `data` by hand. */
+  resolve: () => Promise<SurfaceData<S>>;
 };
 
 /** Added to every surface's tool schema so the screen speaks the conversation's language. */
@@ -49,6 +51,11 @@ const LOCALE = z
 /** When `summarize` runs: when the link is made or opened (no `after`), or right after a domain event. */
 export type SummaryMoment<S extends AnySurface = AnySurface> = {
   after?: { [K in SurfaceEventName<S>]: { type: K; payload: SurfaceEventPayload<S, K> } }[SurfaceEventName<S>];
+  /**
+   * A date or ISO string as the agent should read it: in `createUiCalling`'s `timeZone`, with the zone's name
+   * ("26 Nov 21:00 CET"). Models misread bare UTC ISO times, so write every time in `summarize` with it.
+   */
+  time: (date: Date | string | number) => string;
 };
 
 /** Server-side half of a surface: where its data comes from and what its events do. */
@@ -141,6 +148,11 @@ export type UiCallingOptions = {
    * Pages often load twice at once (React's dev mode, a quick reload). Default 5000 ms.
    */
   deviceClaimGraceMs?: number;
+  /**
+   * The business's time zone, e.g. "Europe/Madrid". Times the agent reads (the tool result's `expires_at`,
+   * `moment.time()` in `summarize`) are written in it, with the zone's name. Default "UTC".
+   */
+  timeZone?: string;
 };
 
 const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
@@ -153,7 +165,7 @@ const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
 const CLIENT_LIFECYCLE = new Set<string>(["opened", "left", "completed"]);
 
 // The handler's side effect already happened by the time these run: a bug in them must not lose the event.
-function safeSummary(impl: SurfaceImpl<any>, data: unknown, moment: SummaryMoment = {}): string | undefined {
+function safeSummary(impl: SurfaceImpl<any>, data: unknown, moment: SummaryMoment): string | undefined {
   try {
     checkSecretPaths(impl.surface.name, impl.surface.secret, data);
     const summary = impl.summarize?.(data as never, moment as never);
@@ -223,6 +235,7 @@ export function createUiCalling(opts: UiCallingOptions) {
   const pathPrefix = opts.pathPrefix ?? "/s/";
   const defaultLocale = opts.defaultLocale ?? "en";
   const impls = new Map(opts.surfaces.map((i) => [i.surface.name, i]));
+  const time = zonedTime(opts.timeZone ?? "UTC");
   // bindToDevice: the secret issued on a link's first open, kept for a few seconds so parallel first requests agree.
   const claims = new Map<string, { secret: string; until: number }>();
   // Handlers added after creation (ui.onEvent), e.g. from the agent's module, which imports `ui`.
@@ -248,7 +261,7 @@ export function createUiCalling(opts: UiCallingOptions) {
   }
 
   function ctxOf(session: UiSession): SurfaceContext {
-    return {
+    const ctx: SurfaceContext = {
       session,
       input: session.input as SurfaceInput<AnySurface>,
       subject: session.subject,
@@ -261,7 +274,9 @@ export function createUiCalling(opts: UiCallingOptions) {
         const found = await Promise.all(ids.map(async (id) => own.find((f) => f.id === id) ?? (await usableFile(session, id))?.file));
         return found.filter((f): f is UiFile => Boolean(f)).map(fileRef);
       },
+      resolve: () => impls.get(session.surface)!.resolve(session.input as never, ctx),
     };
+    return ctx;
   }
 
   /**
@@ -289,11 +304,12 @@ export function createUiCalling(opts: UiCallingOptions) {
     return recent.length < (opts.maxWakesPerMinute ?? 6);
   }
 
-  async function record(session: UiSession, e: Omit<UiEvent, "id" | "sessionId" | "conversationId" | "surface" | "at">) {
+  async function record(session: UiSession, e: Omit<UiEvent, "id" | "sessionId" | "conversationId" | "subject" | "surface" | "at">) {
     const ev: UiEvent = {
       id: randomId(10),
       sessionId: session.id,
       conversationId: session.conversationId,
+      subject: session.subject,
       surface: session.surface,
       at: new Date().toISOString(),
       ...e,
@@ -351,7 +367,9 @@ export function createUiCalling(opts: UiCallingOptions) {
         : // `attempted` is the event's describe(): what the user asked for, not something that happened.
           `${ERROR_TEXT[source]}.${attempted ? ` Attempted: ${attempted}.` : ""} ` +
           `${info.code}${info.retryable ? ", retryable" : ""}: ${info.message}`,
-      wake: (opts.wakeOnError ?? true) && !repeat,
+      // A refused action (wrong code, shift full) is explained by the screen, where the user still is: waking the
+      // agent would post a stale reply behind their back. It's recorded, so the agent reads it on its next turn.
+      wake: (opts.wakeOnError ?? true) && !repeat && !(source === "action" && info.refused),
     });
   }
 
@@ -372,8 +390,9 @@ export function createUiCalling(opts: UiCallingOptions) {
         const events = await store.listEvents({ sessionId });
         // Finishing means an event that wakes the agent (e.g. "submitted"). Quiet ones are steps along the way.
         // A user whose action failed did act too: the agent already heard about the error.
+        // A refusal doesn't count: the user may have given up on it.
         const finished = events.some(
-          (e) => (e.kind === "domain" && e.wake) || (e.kind === "error" && (e.payload as { source?: string }).source === "action"),
+          (e) => (e.kind === "domain" && e.wake) || (e.kind === "error" && e.wake && (e.payload as { source?: string }).source === "action"),
         );
         if (finished) return;
         // Still moving through the steps: check again once they've been idle long enough.
@@ -475,7 +494,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       };
       // Resolve once now so the agent knows what the user will see (and bad input fails early).
       const data = await impl.resolve(input as never, ctxOf(session));
-      const summary = safeSummary(impl, data);
+      const summary = safeSummary(impl, data, { time });
       await store.createSession(session, await sha256(token));
       return {
         url: `${opts.baseUrl}${pathPrefix}${token}`,
@@ -542,7 +561,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         // A load failure was already recorded by open(); here it only means no snapshot.
         const state =
           t === "opened"
-            ? await impl.resolve(session.input as never, ctxOf(session)).then((d) => safeSummary(impl, d), () => undefined)
+            ? await impl.resolve(session.input as never, ctxOf(session)).then((d) => safeSummary(impl, d, { time }), () => undefined)
             : undefined;
         const event = await record(session, {
           type: t,
@@ -586,7 +605,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         payload: visible,
         description: safeDescribe(def, visible, type),
         // The outcome of the action, so the agent knows what the user now sees (e.g. the new ticket number).
-        state: data ? safeSummary(impl, data, { after: { type, payload: visible } }) : undefined,
+        state: data ? safeSummary(impl, data, { after: { type, payload: visible } as never, time }) : undefined,
         wake: (def.wake ?? false) && (await wakesLeft(session)),
         ...(def.includePayload === false ? { payloadForAgent: false } : {}),
       });
@@ -698,15 +717,16 @@ export function createUiCalling(opts: UiCallingOptions) {
           locale: r.locale,
           expiresAt: r.expiresAt,
         };
-        // Minutes left as well as the UTC time: models misread a bare UTC time next to a local "now".
+        // In the business's zone, with its name, and as minutes left: models misread a bare UTC time next to a local "now".
         const expires_in_minutes = Math.round((Date.parse(r.expiresAt) - Date.now()) / 60_000);
+        const expires_at = time(r.expiresAt);
         const content =
           opts.deliverLinks === "message"
-            ? { status: "link_ready", url: r.url, what_they_will_see: r.summary, expires_at: r.expiresAt, expires_in_minutes, note: "Include this URL in your reply; don't change it." }
+            ? { status: "link_ready", url: r.url, what_they_will_see: r.summary, expires_at, expires_in_minutes, note: "Include this URL in your reply; don't change it." }
             : {
                 status: "link_ready",
                 what_they_will_see: r.summary,
-                expires_at: r.expiresAt,
+                expires_at,
                 expires_in_minutes,
                 note: `The link is sent to the user as a "${r.ctaLabel}" button with your next message. Don't write a URL.`,
               };
@@ -759,6 +779,12 @@ export function formatEventsForAgent(events: UiEvent[], opts: { timeZone?: strin
     ...lines,
     `</ui_events>`,
   ].join("\n");
+}
+
+/** "26 Nov 21:00 CET": a time as a model reads it right, in one zone, with the zone's name. */
+function zonedTime(timeZone: string) {
+  const f = new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" });
+  return (date: Date | string | number) => f.format(new Date(date)).replace(",", "");
 }
 
 const isEmpty = (v: unknown) => v == null || (typeof v === "object" && Object.keys(v).length === 0);

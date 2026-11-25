@@ -117,10 +117,47 @@ try {
   assert.match(read("init-next-app", "ui-calling/ui.ts"), /linkAccountImpl,/);
   console.log("generated  init-next-app (+1 surface, +1 block)");
 
-  const vite = project("init-vite", { devDependencies: { vite: "7" } });
-  assert.match(run(vite, "init"), /uiCallingHandler/);
+  // Vite: server code goes in server/ (src/ is bundled for the browser), with a Hono entry, the /api proxy and
+  // the /s/:token route wired into create-vite's files.
+  const vite = project("init-vite", { scripts: { dev: "vite" }, devDependencies: { vite: "7" } }, ["src"], {
+    "vite.config.ts": "import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({\n  plugins: [react()],\n})\n",
+    "src/main.tsx": "import { StrictMode } from 'react'\nimport { createRoot } from 'react-dom/client'\nimport App from './App'\n\ncreateRoot(document.getElementById('root')!).render(\n  <StrictMode>\n    <App />\n  </StrictMode>,\n)\n",
+    "src/App.tsx": "export default function App() {\n  return <p>app</p>;\n}\n",
+    "tsconfig.json": '{\n  "files": [],\n  "references": [\n    { "path": "./tsconfig.app.json" },\n    { "path": "./tsconfig.node.json" }\n  ]\n}\n',
+  });
+  const viteOut = run(vite, "init");
+  assert.match(viteOut, /npm run dev:api/);
+  assert.match(read("init-vite", "server/ui.ts"), /http:\/\/localhost:5173/);
+  assert.match(read("init-vite", "server/store.ts"), /\.ui-calling\/dev\.db/, "a clean install doesn't wipe the dev database");
+  assert.match(read("init-vite", "server/index.ts"), /from "\.\/ui"/);
+  assert.ok(!read("init-vite", "src/ui-calling/surface-screen.tsx").includes("use client"), "no Next.js directive outside Next.js");
+  assert.match(read("init-vite", "vite.config.ts"), /proxy: \{ "\/api": "http:\/\/localhost:8787" \}/);
+  assert.match(read("init-vite", "src/main.tsx"), /import \{ surfaceRoute \} from "\.\/ui-calling\/surface-route";\n[\s\S]*\{surfaceRoute\(\) \?\? <App \/>\}/);
+  assert.match(read("init-vite", "package.json"), /"dev:api": "tsx watch --env-file-if-exists=\.env server\/index\.ts"/);
+  // `tsc -b` covers the server too.
+  assert.match(read("init-vite", "tsconfig.json"), /\{ "path": "\.\/tsconfig\.server\.json" \}/);
+  assert.match(read("init-vite", "tsconfig.server.json"), /"include": \["server"\]/);
+  const viteConfig = JSON.parse(read("init-vite", "ui-calling.json"));
+  assert.equal(viteConfig.serverDir, "server");
+  assert.equal(viteConfig.devUrl, "http://localhost:5173");
+  run(vite, "init"); // again: nothing patched twice
+  assert.equal(read("init-vite", "src/main.tsx").match(/surfaceRoute/g)?.length, 2);
+  assert.equal(read("init-vite", "vite.config.ts").match(/proxy/g)?.length, 1);
   run(vite, "new", "order-tracker");
-  console.log("generated  init-vite (+1 surface)");
+  assert.match(read("init-vite", "server/order-tracker.server.ts"), /from "\.\.\/src\/ui-calling\/order-tracker\.surface"/);
+  assert.match(read("init-vite", "server/ui.ts"), /orderTrackerImpl,/);
+  // The steps template keeps its drafts in init's store.
+  run(vite, "new", "stock-count", "--template", "steps");
+  assert.match(read("init-vite", "server/stock-count.server.ts"), /import \{ store \} from "\.\/store";/);
+  assert.match(read("init-vite", "server/stock-count.server.ts"), /stock_count_drafts/);
+  // link-account for users who type an employee number: registered with it, and again with another replaces it.
+  run(vite, "add", "link-account", "--identifier", "text");
+  assert.match(read("init-vite", "src/ui-calling/surface-screen.tsx"), /link_account: \(\) => <LinkAccount identifier="text" \/>,/);
+  run(vite, "add", "link-account", "--identifier", "tel");
+  assert.equal(read("init-vite", "src/ui-calling/surface-screen.tsx").match(/link_account:/g)?.length, 1);
+  assert.match(read("init-vite", "server/identity.ts"), /from "\.\/store";/);
+  assert.match(fails(vite, "add", "link-account", "--identifier", "fax"), /email, tel, text/);
+  console.log("generated  init-vite (+2 surfaces, +1 block)");
 
   // A monorepo root isn't an app: refuse instead of writing files nothing uses.
   const mono = project("monorepo", { workspaces: ["apps/*"] }, ["apps/web"]);
@@ -148,7 +185,10 @@ try {
       assert.ok(existsSync(onDisk), `${f} links to ${link}, which doesn't exist`);
     }
   }
-  assert.match(fails(tmp, "guide", "no-such-recipe"), /No recipe "no-such-recipe"/);
+  assert.match(fails(tmp, "guide", "no-such-recipe"), /No section or recipe "no-such-recipe"/);
+  // Sections by heading, or by one word of it.
+  assert.match(run(tmp, "guide", "toc"), /testing-without-servers/);
+  assert.match(run(tmp, "guide", "testing"), /^## Testing without servers/);
   console.log(`ok         ${recipes.length} recipes listed, printed, and their links resolve`);
 
   writeFileSync(join(tmp, "tsconfig.json"), JSON.stringify({ extends: "../tsconfig.json", include: ["./**/*.ts", "./**/*.tsx"] }));

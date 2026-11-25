@@ -42,6 +42,8 @@ export type UiEvent = {
   id: string;
   sessionId: string;
   conversationId: string;
+  /** Who the link was issued for: pass it back as `who` when a woken turn runs the tools. */
+  subject: string;
   surface: string;
   type: string;
   kind: "lifecycle" | "domain" | "error";

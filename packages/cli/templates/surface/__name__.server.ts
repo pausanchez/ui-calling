@@ -17,7 +17,8 @@ export const __const__Impl = implement(__const__, {
   on: {
     // Side effects for events. Return fresh data so the screen re-renders and the agent sees the outcome.
     confirmed: async (_payload, ctx) => {
-      // TODO: save the confirmation.
+      // TODO: save the confirmation. Once `resolve` reads what you saved, `return ctx.resolve()` instead of
+      // building the data here: one place loads it, and nothing the screen shows is left out.
       return { id: ctx.input.id, title: "TODO", confirmed: true };
     },
   },

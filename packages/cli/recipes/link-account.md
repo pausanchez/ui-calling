@@ -10,7 +10,13 @@ npx ui-calling add link-account
 
 Then fill the three TODOs in `link-account.server.ts`: `findCustomer` (look the user up by what they typed), `sendCode` (email or SMS, never the chat) and `nameOf`. Replacing a screen of your own? `add link-account --replace` writes the block's server file over yours.
 
-Users who don't sign in with an email type something else: render `<LinkAccount identifier="text" locales={{ en: { identifierLabel: "Employee number", intro: "…" }, es: { identifierLabel: "Número de empleado", intro: "…" } }} />` (`"tel"` for phone numbers). The input's keyboard and autofill follow it; `locales` sets your strings per language.
+Users who don't sign in with an email type something else: `npx ui-calling add link-account --identifier text` (`tel` for phone numbers) registers `<LinkAccount identifier="text" />`, with a label, keyboard and intro to match. Set your own words per language with `locales={{ en: { identifierLabel: "Employee number" }, es: { identifierLabel: "Número de empleado" } }}`. Then check the two places that speak for the server: `findCustomer` looks up what users type, and the contract's `description` is what the model reads about the screen ("a one-time code sent outside this chat"), so it must match how you send the code.
+
+**In development,** link the test user `npx ui-calling link` uses, once at startup, so every screen opens for it:
+
+```ts
+if (process.env.NODE_ENV !== "production") identity.link("dev-user", "C-1001");
+```
 
 ## How it fits
 

@@ -14,10 +14,10 @@ const LINK_ACCOUNT_MESSAGES = {
     sendCode: "Send code",
     codeTitle: "Enter your code",
     // The same words whether or not the account exists, so the screen can't be used to find accounts.
-    codeSent: "If that matches an account, we've sent a code to its email. It works for 10 minutes.",
+    codeSent: "If that matches an account, we've sent you a code. It works for 10 minutes.",
     codeLabel: "Code",
     verify: "Verify",
-    startOver: "Use a different email",
+    startOver: "Start over",
     linked: (name: string | null) => (name ? `You're verified, ${name.split(" ")[0]}` : "You're verified"),
     linkedBody: "Your assistant can help with your account now. Go back to the chat to carry on.",
     backToChat: "Back to chat",
@@ -43,10 +43,10 @@ const LINK_ACCOUNT_MESSAGES = {
     identifierPlaceholder: "tu@ejemplo.com",
     sendCode: "Enviar código",
     codeTitle: "Escribe tu código",
-    codeSent: "Si corresponde a una cuenta, hemos enviado un código a su email. Sirve durante 10 minutos.",
+    codeSent: "Si corresponde a una cuenta, te hemos enviado un código. Sirve durante 10 minutos.",
     codeLabel: "Código",
     verify: "Verificar",
-    startOver: "Usar otro email",
+    startOver: "Empezar de nuevo",
     // Neutral wording: "verificado" would be masculine for everyone.
     linked: (name: string | null) => (name ? `Listo, ${name.split(" ")[0]}: identidad verificada` : "Identidad verificada"),
     linkedBody: "Tu asistente ya puede ayudarte con tu cuenta. Vuelve al chat para seguir.",
@@ -70,6 +70,18 @@ const LINK_ACCOUNT_MESSAGES = {
 
 export type LinkAccountMessages = (typeof LINK_ACCOUNT_MESSAGES)["en"];
 
+/** What changes with what users type: the label, the example and the intro. Email's are the defaults above. */
+const IDENTIFIER_TEXT: Record<string, Partial<Record<"tel" | "text", Partial<LinkAccountMessages>>>> = {
+  en: {
+    tel: { identifierLabel: "Phone number", identifierPlaceholder: "+34 600 000 000", intro: "So your assistant can help with your account, we'll send a code to the phone number you use with us." },
+    text: { identifierLabel: "Customer or employee number", identifierPlaceholder: "", intro: "So your assistant can help with your account, enter your number and we'll send you a code." },
+  },
+  es: {
+    tel: { identifierLabel: "Teléfono", identifierPlaceholder: "+34 600 000 000", intro: "Para que tu asistente pueda ayudarte con tu cuenta, te enviaremos un código al teléfono que usas con nosotros." },
+    text: { identifierLabel: "Número de cliente o de empleado", identifierPlaceholder: "", intro: "Para que tu asistente pueda ayudarte con tu cuenta, escribe tu número y te enviaremos un código." },
+  },
+};
+
 /** What users type to be found: the input's type, keyboard and autofill follow it. */
 const IDENTIFIER = {
   email: { type: "email", inputMode: "email", autoComplete: "email" },
@@ -92,7 +104,8 @@ export function LinkAccount({
   const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(linkAccount);
   // Your strings only for the language they're written in: no English label on a Spanish screen.
   const own = locales?.[locale] ?? locales?.[locale.split("-")[0]];
-  const t: LinkAccountMessages = { ...pickLocalized(LINK_ACCOUNT_MESSAGES, locale)!, ...own, ...messages };
+  const byKind = kind === "email" ? undefined : pickLocalized(IDENTIFIER_TEXT, locale)?.[kind];
+  const t: LinkAccountMessages = { ...pickLocalized(LINK_ACCOUNT_MESSAGES, locale)!, ...byKind, ...own, ...messages };
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
