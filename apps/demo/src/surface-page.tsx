@@ -28,6 +28,9 @@ const TEXT = {
     expired: "This link has expired",
     invalid: "This link isn't valid",
     help: "Ask your assistant for a new one.",
+    loadError: "We couldn't load this page",
+    loadErrorHelp: "Check your connection and try again.",
+    tryAgain: "Try again",
     completed: "All done here",
     completedHelp: "You can go back to the chat. If you need this screen again, ask your assistant.",
     backToChat: "Back to chat",
@@ -36,6 +39,9 @@ const TEXT = {
     expired: "Este enlace ha caducado",
     invalid: "Este enlace no es válido",
     help: "Pídele uno nuevo a tu asistente.",
+    loadError: "No hemos podido cargar esta página",
+    loadErrorHelp: "Comprueba tu conexión e inténtalo de nuevo.",
+    tryAgain: "Reintentar",
     completed: "Ya está hecho",
     completedHelp: "Puedes volver al chat. Si necesitas esta pantalla otra vez, pídesela a tu asistente.",
     backToChat: "Volver al chat",
@@ -43,7 +49,7 @@ const TEXT = {
 };
 
 function Router() {
-  const { status, surface, locale, returnUrl } = useSurfaceName();
+  const { status, surface, locale, errorCode, returnUrl } = useSurfaceName();
   const render = surface ? SURFACES[surface] : undefined;
   if (render) return render();
   // No surface known yet: a neutral skeleton while loading, a neutral message if the link is bad.
@@ -73,6 +79,23 @@ function Router() {
               {t.backToChat}
             </a>
           )}
+        </div>
+      </main>
+    );
+  }
+  // Only an unknown token is a bad link. Anything else (offline, server down) may work on a retry.
+  if (status === "error" && errorCode !== "not_found") {
+    return (
+      <main className="grid min-h-dvh place-items-center bg-background p-6 text-center">
+        <div role="alert">
+          <p className="font-medium">{t.loadError}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t.loadErrorHelp}</p>
+          <button
+            onClick={() => location.reload()}
+            className="mt-4 inline-flex h-11 items-center justify-center rounded-md border border-border bg-card px-4 text-sm font-medium hover:bg-muted"
+          >
+            {t.tryAgain}
+          </button>
         </div>
       </main>
     );

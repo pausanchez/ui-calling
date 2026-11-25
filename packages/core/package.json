@@ -37,7 +37,10 @@
     "target": "es2022",
     "removeNodeProtocol": false
   },
-  "dependencies": {
+  "peerDependencies": {
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
     "zod": "^4.1.0"
   }
 }

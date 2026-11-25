@@ -39,14 +39,18 @@ Run it in your project's root. It detects Next.js or Vite and writes:
 - `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
 - `ui-calling/tokens.css`: design tokens, with shadcn variable names.
 - **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`) and the landing page (`app/s/[token]/page.tsx`).
-- `ui-calling.json`: where things live. With it, `ui-calling new` registers each new surface in `ui.ts` and `surface-screen.tsx` by itself.
+- `ui-calling.json`: where things live. With it, `ui-calling new` and `ui-calling add` register each surface in `ui.ts` and `surface-screen.tsx` by themselves, from any folder of the app. In a monorepo, run `init` in the app that serves the screens, not at the root.
 - **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
 
 Without Next.js, mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
 - **`uiCallingHandler(ui)`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like.
 - **`uiCallingRoutes(ui)`** is a Hono app.
 
-Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`.
+Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
+
+On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`.
+
+Ready-made blocks: `npx ui-calling list`, then `npx ui-calling add order-status`. `add` copies the contract and the screen, and writes `order-status.server.ts` with example data so the screen renders right away. Replace the example with your data. Running `add --force` later updates the contract and screen but never overwrites the server file.
 
 What the generated files amount to, if you'd rather write it by hand:
 
@@ -244,16 +248,17 @@ A surface isn't a page of your website. The user is mid-conversation, on a phone
   | State | What the screen shows |
   |---|---|
   | `loading` | A skeleton in the final layout |
-  | Failed `emit` | A plain message by `reason`; "Try again" only if it can work |
+  | Failed `emit` | A plain message by `reason`; "Try again" only if `retryable`. For `code === "network"` the request never arrived, so say "check your connection", not "your assistant knows" |
   | `errorCode === "upstream_error"` | "Not available right now"; the assistant will follow up in the chat |
-  | After the action | The outcome, "your assistant already knows", and a way back to the chat that calls `complete()` |
+  | After the action | The outcome, "your assistant already knows", and a way back to the chat (or "Finish" without `returnUrl`) that calls `complete()` |
   | `completed` | "All done here" and a way back (`surface-screen.tsx` from `init` handles it) |
   | `expired` | Ask the assistant for a new link |
+  | `error`, not `upstream_error` | `not_found`: the link isn't valid. `network`: couldn't load, try again (`surface-screen.tsx` handles both) |
 
 - **Write like the conversation.** Short, in the user's language and your brand's voice. Never show error codes or upstream messages: the agent gets those, the user gets a plain sentence.
 - **Fit the phone.** Design at 375px first: one column (`max-w-md`), `min-h-dvh` so the browser's bars don't hide the bottom button, and tap targets of at least 44px (`h-11`).
 - **Use the tokens.** `tokens.css` uses shadcn/ui variable names (`--primary`, `--background`, `--card`, `--muted-foreground`, `--success`, `--destructive`, `--radius`). Change their values to match your brand, and every block and generated screen follows. Dark mode follows the phone's setting.
-- **Start from a block or the template.** `npx ui-calling add order-status` and `npx ui-calling new` already handle every state above.
+- **Start from a block or the template.** `npx ui-calling add order-status` and `npx ui-calling new`, together with `surface-screen.tsx` from `init`, handle every state above.
 
 ## WhatsApp: who is the `subject`?
 
@@ -298,7 +303,7 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 - **The webhook.** Answer Meta's `GET` subscription check (`hub.verify_token`, echo `hub.challenge`). On `POST`, check the signature, start the agent turn after responding (Meta retries slow deliveries), and skip message IDs you've already handled. Subscribe to the `messages` field: it carries incoming messages and the statuses of what you sent.
 - **Delivery failures.** A send can fail after Meta accepted it. `parseWhatsAppStatuses(body)` reads `sent`, `delivered`, `read` and `failed` (with its error code) from the same webhook.
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
-- **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`.
+- **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`. On Next.js, `init`'s page reads it from `UI_CALLING_RETURN_URL`.
 
 ## Testing without servers
 
@@ -424,8 +429,8 @@ type UiEvent = {
 |---|---|
 | `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"` |
 | `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `returnUrl` |
-| `useSurfaceName()` | `status`, `surface`, `locale`, `returnUrl`: to pick which screen to render for a token |
-| `SurfaceActionError` | Thrown by a failed `emit`: `code`, `reason`, `retryable` |
+| `useSurfaceName()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
+| `SurfaceActionError` | Thrown by a failed `emit` or `reload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |
 
 ### HTTP
 
@@ -436,7 +441,7 @@ What `@ui-calling/server` serves under your mount point. Any client can use it; 
 | `GET /sessions/:token` | `200 { surface, locale, data, expiresAt }` |
 | `POST /sessions/:token/events` with `{ type, payload }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it |
 
-Errors are `{ error, message, retryable, reason }`:
+Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:
 
 | Status | `error` | Meaning |
 |---|---|---|

@@ -101,7 +101,10 @@ const flaky = createUiCalling({
   onEvent: (e) => agent(e),
   surfaces: [
     implement(booking, {
-      resolve: async () => ({ ref: "none" }),
+      resolve: async () => {
+        if (fail) throw fail;
+        return { ref: "none" };
+      },
       summarize: (d) => {
         if (summarizeBug) throw new Error("summarize bug");
         return `Booking ${d.ref}.`;
@@ -208,6 +211,27 @@ await check("limits: built-in names aren't events, bodies are capped, and so is 
   for (let i = 0; i < 14; i++) statuses.push((await post(t, { type: "book", payload: { slot: String(i), pin: "1" } })).status);
   assert.equal(statuses.filter((s) => s === 200).length, 12);
   assert.equal(statuses.at(-1), 429);
+});
+
+await check("load errors: the screen learns the surface and language, so it can explain in the user's words", async () => {
+  console.error = () => {};
+  const t = token((await flaky.call("show_booking", { locale: "es" }, { conversationId: "c9", subject: "user-2" })).url);
+  fail = new SurfaceError("bookings_down", "Bookings API returned 503", { retryable: true });
+  const down = await flakyHttp(new Request(`https://ui.example.com/api/ui/sessions/${t}`));
+  fail = null;
+  console.error = quiet;
+  assert.equal(down.status, 502);
+  assert.deepEqual(
+    await down.json(),
+    { error: "upstream_error", message: "This screen couldn't load right now", retryable: true, reason: "bookings_down", surface: "booking", locale: "es" },
+  );
+  await flaky.emit(t, "completed");
+  const done = (await (await flakyHttp(new Request(`https://ui.example.com/api/ui/sessions/${t}`))).json()) as { error: string; locale?: string };
+  assert.equal(done.error, "completed");
+  assert.equal(done.locale, "es", "the 'all done' screen is in the user's language");
+  const bad = (await (await flakyHttp(new Request("https://ui.example.com/api/ui/sessions/nope"))).json()) as Record<string, unknown>;
+  assert.equal(bad.error, "not_found");
+  assert.equal(bad.locale, undefined, "an unknown token reveals nothing");
 });
 
 console.log(`\n${passed} checks passed`);

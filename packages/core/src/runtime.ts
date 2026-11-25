@@ -148,10 +148,14 @@ export function createUiCalling(opts: UiCallingOptions) {
   async function sessionFor(token: string) {
     const session = await store.getSessionByTokenHash(await sha256(token));
     if (!session) throw new UiCallingError("not_found", "Unknown link");
-    if (Date.parse(session.expiresAt) < Date.now()) throw new UiCallingError("expired", "This link has expired");
+    if (Date.parse(session.expiresAt) < Date.now()) throw atSession(new UiCallingError("expired", "This link has expired"), session);
     // Once the user finishes, the link stops working: a tab left open, or a forwarded link, can't act again.
-    if (session.status === "completed") throw new UiCallingError("completed", "This screen is already done");
+    if (session.status === "completed") throw atSession(new UiCallingError("completed", "This screen is already done"), session);
     return session;
+  }
+
+  function atSession(err: UiCallingError, session: UiSession) {
+    return Object.assign(err, { surface: session.surface, locale: session.locale });
   }
 
   function ctxOf(session: UiSession): SurfaceContext {
@@ -334,7 +338,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       } catch (err) {
         const info = toErrorInfo(err);
         await recordError(session, info, "load");
-        throw new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable, info.code);
+        throw atSession(new UiCallingError("upstream_error", "This screen couldn't load right now", 502, info.retryable, info.code), session);
       }
       return { surface: session.surface, locale: session.locale, data, expiresAt: session.expiresAt };
     },
@@ -403,7 +407,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         // The intent still matters: the agent learns what the user tried and why it didn't happen.
         const info = toErrorInfo(err);
         await recordError(session, info, "action", type, safeDescribe(def, visible, type));
-        throw new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code);
+        throw atSession(new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code), session);
       }
       const event = await record(session, {
         type,

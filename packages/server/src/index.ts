@@ -36,7 +36,8 @@ export function uiCallingRoutes(ui: UiCalling) {
 
   app.onError((err, c) => {
     if (err instanceof UiCallingError) {
-      return c.json({ error: err.code, message: err.message, retryable: err.retryable, reason: err.reason }, err.status);
+      const { code, message, retryable, reason, surface, locale } = err;
+      return c.json({ error: code, message, retryable, reason, surface, locale }, err.status);
     }
     console.error(err);
     return c.json({ error: "internal" }, 500);

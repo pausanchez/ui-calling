@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { pickLocalized } from "@ui-calling/core";
-import { useSurface } from "@ui-calling/react";
+import { SurfaceActionError, useSurface } from "@ui-calling/react";
 import { __const__ } from "./__name__.surface";
 
 /** Every string on the screen. Add a language by adding a key; override strings with the `messages` prop.
@@ -12,9 +12,11 @@ const __MESSAGES__ = {
     confirmed: "Done",
     assistantKnows: "Your assistant already knows. You can go back to the chat.",
     backToChat: "Back to chat",
+    finish: "Finish",
     actionFailed: "That didn't go through",
     actionFailedBody: "Your assistant already knows. You can try again or go back to the chat.",
     tryAgain: "Try again",
+    offline: "We couldn't reach the server. Check your connection and try again.",
     unavailable: "This page isn't available right now",
     unavailableBody: "Your assistant already knows and will follow up in the chat.",
     expired: "This link has expired",
@@ -27,9 +29,11 @@ const __MESSAGES__ = {
     confirmed: "Hecho",
     assistantKnows: "Tu asistente ya lo sabe. Puedes volver al chat.",
     backToChat: "Volver al chat",
+    finish: "Terminar",
     actionFailed: "No se ha podido completar",
     actionFailedBody: "Tu asistente ya lo sabe. Puedes intentarlo de nuevo o volver al chat.",
     tryAgain: "Reintentar",
+    offline: "No hemos podido conectar. Comprueba tu conexión e inténtalo de nuevo.",
     unavailable: "Esta página no está disponible ahora mismo",
     unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
     expired: "Este enlace ha caducado",
@@ -41,11 +45,13 @@ const __MESSAGES__ = {
 export type __Component__Messages = (typeof __MESSAGES__)["en"];
 
 export function __Component__({ messages }: { messages?: Partial<__Component__Messages> }) {
-  const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(__const__);
+  const { status, data, errorCode, locale, emit, reload, complete, returnUrl } = useSurface(__const__);
   const t: __Component__Messages = { ...pickLocalized(__MESSAGES__, locale)!, ...messages };
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // After a failed action: whether trying again can work (a timeout can, a full slot can't).
+  // `offline`: the request never arrived, so the agent doesn't know either.
+  const [failed, setFailed] = useState<null | { retryable: boolean; offline: boolean }>(null);
 
   if (status === "loading") return <Shell><div className="h-40 animate-pulse rounded-lg bg-muted" /></Shell>;
   if (status !== "ready" || !data) {
@@ -56,6 +62,7 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
         <Card>
           <p className="font-medium">{status === "expired" ? t.expired : upstream ? t.unavailable : t.loadError}</p>
           <p className="mt-1 text-sm text-muted-foreground">{upstream ? t.unavailableBody : t.askNewLink}</p>
+          {upstream && returnUrl && <a href={returnUrl} className={btn("outline", "mt-3 w-full")}>{t.backToChat}</a>}
         </Card>
       </Shell>
     );
@@ -63,12 +70,15 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
 
   async function confirm() {
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
     try {
       await emit("confirmed", { note });
-    } catch {
+    } catch (err) {
       // The server already recorded the failure for the agent; here we only tell the user.
-      setFailed(true);
+      const retryable = !(err instanceof SurfaceActionError) || err.retryable;
+      setFailed({ retryable, offline: !(err instanceof SurfaceActionError) || err.code === "network" });
+      // What's on screen may be out of date (e.g. someone else took the slot): refresh it.
+      if (!retryable) void reload().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -80,10 +90,12 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
       <h1 className="text-2xl font-semibold tracking-tight">{data.title}</h1>
 
       {failed && (
-        <Card className="border-destructive/40 bg-destructive/10">
+        <Card role="alert" className="border-destructive/40 bg-destructive/10">
           <p className="font-medium">{t.actionFailed}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{t.actionFailedBody}</p>
-          <button disabled={busy} onClick={confirm} className={btn("primary", "mt-3 w-full")}>{t.tryAgain}</button>
+          <p className="mt-1 text-sm text-muted-foreground">{failed.offline ? t.offline : failed.retryable ? t.actionFailedBody : t.unavailableBody}</p>
+          {failed.retryable && (
+            <button disabled={busy} onClick={confirm} className={btn("primary", "mt-3 w-full")}>{t.tryAgain}</button>
+          )}
         </Card>
       )}
 
@@ -91,16 +103,21 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
         <Card className="border-success/40 bg-success/10">
           <p className="font-medium">{t.confirmed}</p>
           <p className="mt-1 text-sm text-muted-foreground">{t.assistantKnows}</p>
-          {/* complete() tells the agent the user finished here; call it when they're done, not on every action. */}
-          {returnUrl && (
-            <a href={returnUrl} onClick={() => void complete()} className={btn("primary", "mt-3 w-full")}>
+          {/* complete() tells the agent the user finished here and closes the link; call it when they're done, not on every action. */}
+          {returnUrl ? (
+            <a href={returnUrl} onClick={() => void complete().catch(() => {})} className={btn("primary", "mt-3 w-full")}>
               {t.backToChat}
             </a>
+          ) : (
+            <button onClick={() => void complete().catch(() => {})} className={btn("primary", "mt-3 w-full")}>
+              {t.finish}
+            </button>
           )}
         </Card>
       ) : (
         <Card>
           <textarea
+            aria-label={t.notePlaceholder}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             maxLength={500}
@@ -122,8 +139,8 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-lg border border-border bg-card p-4 text-card-foreground ${className}`}>{children}</section>;
+function Card({ children, className = "", role }: { children: ReactNode; className?: string; role?: string }) {
+  return <section role={role} className={`rounded-lg border border-border bg-card p-4 text-card-foreground ${className}`}>{children}</section>;
 }
 
 function btn(variant: "primary" | "outline", extra = "") {
