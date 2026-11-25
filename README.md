@@ -17,6 +17,23 @@ user acts ──▶ "User rescheduled the delivery to 2026-11-27, 16:00–20:00"
 agent follows up in the chat: "Done ✅ …"
 ```
 
+## Why UI_calling
+
+Other tools let a bot open screens. UI_calling lets your agent know what happens on them.
+
+The usual model is a predesigned flow: a button opens a webview, and when it closes it returns one result that moves the bot to a fixed step. UI_calling works differently:
+
+- **The agent decides to open a screen,** the way it calls a function, in the middle of any conversation. There's no fixed flow.
+- **Events cover the screen's whole life,** written for the model to read: opened, left, came back, the actions the user attempted and their outcomes, errors, completed. It's more than one result on close.
+- **Users who stall get noticed.** If someone opens the screen and does nothing, an `abandoned` event can wake the agent to follow up (turn it on with `abandonAfterMs`).
+- **Failures are explained, not lost.** When an API is down or the slot is gone, the agent learns what the user tried and why it didn't work, and can say so in the chat.
+- **The agent never answers blind.** `summarize` tells it what the user is looking at.
+- **It plugs into the agent you have:** Anthropic, OpenAI, the AI SDK or MCP. There's no new platform or visual flow builder.
+- **Typed end to end.** One `defineSurface` is the tool schema, the server's validation and the screen's types.
+- **You own the code.** Screens are copied into your project, shadcn-style.
+
+Automation tools count the conversations they handled. UI_calling is for the ones that would otherwise be lost: the user who stopped halfway, the payment that failed, the slot that disappeared.
+
 ## Try the demo
 
 ```bash

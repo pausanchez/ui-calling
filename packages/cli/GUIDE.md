@@ -2,6 +2,8 @@
 
 A **surface** is a screen an AI agent can open for a user, the way it calls a function. The agent gets a secure link to send (e.g. as a WhatsApp button). The user opens a real UI, and everything that happens there flows back into the agent's context: what the user saw, what they did, what resulted, and what failed. When the user keeps chatting, the agent can talk about it.
 
+Unlike a webview that returns one result when it closes, the agent decides when to open a surface, and it hears about the screen's whole life: what the user saw, tried, finished or gave up on, and what failed and why. That's what lets it follow up in the chat instead of answering blind.
+
 This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`.
 
 > **Not on npm yet.** Until the first release, install the tarballs built from the UI_calling repo (`npm pack`, see its README), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
