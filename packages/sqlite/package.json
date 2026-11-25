@@ -2,6 +2,21 @@
   "name": "@ui-calling/sqlite",
   "version": "0.0.1",
   "description": "Zero-config persistence for UI_calling sessions and events, on Node's built-in SQLite (node:sqlite). No dependencies.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/sqlite"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "sqlite",
+    "node:sqlite"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +27,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -33,9 +49,12 @@
     "removeNodeProtocol": false
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "@ui-calling/core": "^0.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

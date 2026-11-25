@@ -2,6 +2,21 @@
   "name": "@ui-calling/mcp",
   "version": "0.0.1",
   "description": "Expose UI_calling surfaces as tools on an MCP server, so any MCP client can open screens.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "mcp",
+    "model-context-protocol"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +27,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -39,5 +55,8 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

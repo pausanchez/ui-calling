@@ -20,13 +20,15 @@ export function anthropicTools(ui: UiCalling, filter?: (toolName: string) => boo
 /**
  * Run one `tool_use` block from a manual loop. Returns the `tool_result` block to send back and the
  * run (with `run.link` to deliver when `run.ok`). Failures come back as `is_error` results, never throws.
+ * Pass the `filter` you gave `anthropicTools`, so a tool the model wasn't offered is refused.
  */
 export async function anthropicToolResult(
   ui: UiCalling,
   block: { id: string; name: string; input: unknown },
   who: Who,
+  filter?: (toolName: string) => boolean,
 ): Promise<{ result: Anthropic.ToolResultBlockParam; run: ToolRun }> {
-  const run = await ui.runTool(block.name, block.input, who);
+  const run = await ui.runTool(block.name, block.input, who, filter);
   return {
     result: { type: "tool_result", tool_use_id: block.id, content: run.content, ...(run.ok ? {} : { is_error: true }) },
     run,

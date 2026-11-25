@@ -2,6 +2,24 @@
   "name": "@ui-calling/core",
   "version": "0.0.1",
   "description": "Surfaces, handoff sessions and semantic events: let an AI agent call a UI like a function.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "agents",
+    "llm",
+    "tool-calling",
+    "ui",
+    "whatsapp"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -17,7 +35,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -42,5 +61,8 @@
   },
   "devDependencies": {
     "zod": "^4.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

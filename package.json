@@ -11,13 +11,15 @@
     "dev:whatsapp": "npm run dev:whatsapp -w @ui-calling/demo",
     "typecheck": "tsc -p tsconfig.json",
     "test": "npm run typecheck && node scripts/test-cli.mjs && tsx -C ui-calling-source scripts/test-adapters.ts && tsx -C ui-calling-source scripts/test-store.ts && tsx -C ui-calling-source scripts/test-runtime.ts && npm run smoke -w @ui-calling/demo",
-    "build": "npm run build --workspace=packages --if-present"
+    "build": "npm run build --workspace=packages --if-present",
+    "docs": "node scripts/build-docs.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "concurrently": "^9.2.0",
+    "marked": "^15.0.12",
     "tsup": "^9.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"

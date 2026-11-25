@@ -78,6 +78,12 @@ app.get("/api/whatsapp/webhook", (c) => {
 app.post("/api/whatsapp/webhook", async (c) => {
   const raw = await c.req.text();
   const secret = process.env.WHATSAPP_APP_SECRET;
+  // Demo only: without a secret, unsigned webhooks are accepted in development so the tests can post them.
+  // A real app always verifies: an unsigned webhook can claim any sender and phone number.
+  if (!secret && process.env.NODE_ENV === "production") {
+    console.warn("[whatsapp] webhook rejected: WHATSAPP_APP_SECRET isn't set");
+    return c.text("Invalid signature", 401);
+  }
   if (secret && !(await verifyWhatsAppSignature(raw, c.req.header("x-hub-signature-256"), secret))) {
     // Otherwise a wrong WHATSAPP_APP_SECRET looks exactly like Meta sending nothing.
     console.warn("[whatsapp] webhook rejected: invalid signature (check WHATSAPP_APP_SECRET)");

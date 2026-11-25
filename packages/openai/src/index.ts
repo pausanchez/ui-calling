@@ -29,8 +29,10 @@ export async function runResponsesFunctionCall(
   ui: UiCalling,
   call: { call_id: string; name: string; arguments: string },
   who: Who,
+  /** The filter you gave `openaiResponsesTools`: a tool the model wasn't offered is refused. */
+  filter?: Filter,
 ): Promise<{ item: { type: "function_call_output"; call_id: string; output: string }; run: ToolRun }> {
-  const run = await runWithArguments(ui, call.name, call.arguments, who);
+  const run = await runWithArguments(ui, call.name, call.arguments, who, filter);
   return { item: { type: "function_call_output", call_id: call.call_id, output: run.content }, run };
 }
 
@@ -39,13 +41,15 @@ export async function runChatToolCall(
   ui: UiCalling,
   call: { id: string; function: { name: string; arguments: string } },
   who: Who,
+  /** The filter you gave `openaiChatTools`: a tool the model wasn't offered is refused. */
+  filter?: Filter,
 ): Promise<{ message: { role: "tool"; tool_call_id: string; content: string }; run: ToolRun }> {
-  const run = await runWithArguments(ui, call.function.name, call.function.arguments, who);
+  const run = await runWithArguments(ui, call.function.name, call.function.arguments, who, filter);
   return { message: { role: "tool", tool_call_id: call.id, content: run.content }, run };
 }
 
 // OpenAI sends arguments as a JSON string; malformed JSON becomes an error result the model can fix.
-async function runWithArguments(ui: UiCalling, name: string, args: string, who: Who): Promise<ToolRun> {
+async function runWithArguments(ui: UiCalling, name: string, args: string, who: Who, filter?: Filter): Promise<ToolRun> {
   let input: unknown;
   try {
     input = JSON.parse(args || "{}");
@@ -53,5 +57,5 @@ async function runWithArguments(ui: UiCalling, name: string, args: string, who: 
     const error = { code: "invalid_arguments", message: "Tool arguments were not valid JSON" };
     return { ok: false, content: JSON.stringify({ status: "error", ...error }), error };
   }
-  return ui.runTool(name, input, who);
+  return ui.runTool(name, input, who, filter);
 }

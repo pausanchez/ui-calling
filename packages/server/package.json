@@ -2,6 +2,22 @@
   "name": "@ui-calling/server",
   "version": "0.0.1",
   "description": "HTTP routes that serve UI_calling surfaces and collect their events (Hono, runs on Node, Bun, Workers).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "hono",
+    "agents",
+    "ui"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +28,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -33,6 +50,9 @@
   },
   "dependencies": {
     "@ui-calling/core": "^0.0.1",
-    "hono": "^4.9.0"
+    "hono": "^4.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -2,6 +2,23 @@
   "name": "ui-calling",
   "version": "0.0.1",
   "description": "Copy UI_calling surfaces and design tokens into your project, shadcn style.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "cli",
+    "shadcn",
+    "agents",
+    "ui"
+  ],
   "type": "module",
   "bin": {
     "ui-calling": "./bin/ui-calling.mjs"
@@ -11,6 +28,7 @@
     "registry",
     "templates",
     "recipes",
-    "GUIDE.md"
+    "GUIDE.md",
+    "LICENSE"
   ]
 }

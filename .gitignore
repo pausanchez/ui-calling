@@ -7,3 +7,6 @@ dist
 .ui-calling/
 research_notes/
 reports/
+
+# Built docs site (npm run docs)
+docs-site/

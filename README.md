@@ -255,6 +255,11 @@ The demo keeps its own state in the same file, so you can restart it mid-convers
 
 - The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
 - **A link is a bearer token.** Anyone holding it can open it until it expires or is completed, as with a password-reset link. `subject` decides *whose* data the screen shows, not *who* may open it. So send links only to the user, and keep sensitive screens short-lived.
+- **Keep tokens out of logs.** The token is in the page's path (`/s/<token>`) and the API's, so access logs, APM and analytics that record full URLs store live tokens. Strip or hash the path there, or keep links short-lived.
+- **One subject per person.** Files and drafts follow the subject: a newer link can show the same user's earlier uploads (never delete them). Never use a shared subject (a household account, "anonymous") for screens with personal data.
+- **Only offered tools run.** Pass the `filter` you gave the tool list to the manual-loop helpers (`anthropicToolResult`, `runResponsesFunctionCall`, `runChatToolCall`) or to `ui.runTool(name, input, who, filter)`; a tool the model wasn't offered is refused even if it calls it by name.
+- **A link can wake the agent a few times a minute at most** (`maxWakesPerMinute`, default 6); after that its events are recorded quietly.
+- **Dev routes answer on localhost only,** and never when `NODE_ENV` is `"production"`.
 - Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
 - Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks).
 - API responses are `no-store` and send `Referrer-Policy: no-referrer`. The `/s/[token]` page from `init` on Next.js sets it too; on other frameworks, set it on `/s/*` yourself so the token doesn't leak to sites the screen links to.

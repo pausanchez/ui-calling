@@ -8,7 +8,7 @@ Full example: the demo's `link_account`, with `server/identity.ts`.
 
 1. The webhook gives you a BSUID. The session subject is `whatsappSubject(portfolioId, bsuid)`.
 2. If Meta shared a phone number that matches a customer, link by phone and skip the screen.
-3. Otherwise the agent only gets one tool, `show_link_account`, until the chat is linked. The adapters take a filter: `anthropicTools(ui, (name) => (name === "show_link_account") !== linked)`.
+3. Otherwise the agent only gets one tool, `show_link_account`, until the chat is linked. The adapters take a filter: `anthropicTools(ui, (name) => (name === "show_link_account") !== linked)`. Pass the same filter when you run a tool call (`anthropicToolResult(ui, block, who, filter)`), so a tool the model wasn't offered is refused.
 4. Every other surface calls `requireCustomer(ctx.subject)` before loading anything.
 
 ## Contract
@@ -54,6 +54,7 @@ verify_identity: async ({ email, code }, ctx) => {
 
 - **Check access by customer, not by phone number.** Phone numbers change and may be hidden; the link from subject to customer is what counts.
 - **BSUIDs change when the user changes number.** Meta sends the old one; move the link (`identityChange` from `parseWhatsAppWebhook`).
+- **Limit attempts.** Count wrong codes per customer and per email, not per link: the agent can open a new link on request, and each link allows hundreds of events. Lock the code after a few misses and send a new one.
 - **Restrict tools until linked.** Giving the agent every tool and hoping it asks first leaks data the first time it doesn't.
 
 ## In the UI_calling repo
