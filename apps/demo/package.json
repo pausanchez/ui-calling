@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"tsx watch -C ui-calling-source --env-file-if-exists=../../.env server/index.ts\" \"vite\"",
+    "dev:whatsapp": "tsx -C ui-calling-source --env-file-if-exists=../../.env server/tunnel.ts",
     "build": "vite build",
     "smoke": "tsx -C ui-calling-source server/smoke.ts",
     "start": "NODE_ENV=production PUBLIC_URL=${PUBLIC_URL:-http://localhost:8787} tsx -C ui-calling-source --env-file-if-exists=../../.env server/index.ts",

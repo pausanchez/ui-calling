@@ -280,6 +280,7 @@ One surface, with the steps inside the screen. The demo's `order_return` (items,
 - **Each step is a quiet event that saves a draft.** Its handler validates the step, saves it, and returns fresh data. The agent sees how far the user got, and reopening the link resumes there.
 - **Only the last step wakes the agent.** Give `wake: true` to the event that finishes (e.g. `return_submitted`). `abandoned` treats it as the finish line: a user who saves a few steps and then goes quiet for `abandonAfterMs` gets an `abandoned` event that names the last step they saved.
 - **Let the agent fill in what it knows.** Put what the user already said in `input` (an item, a reason), and start the draft with it.
+- **The user's choice beats the prefill.** The user can change what the agent preselected, so `summarize` reports what was saved, never the tool's `input`. In the demo, the agent opened a return for the cracked blender and the user returned the bowls instead. The agent's reply named the bowls, because it read the outcome from `summarize`.
 - **Keep the answers when going back.** Hold them in component state and move between steps without losing them. Push a history entry per step, so the phone's back button goes to the previous step instead of closing the screen.
 - **Skip steps that don't apply** (no photos unless an item is damaged), and say "Step 2 of 4" for the steps the user will actually see.
 

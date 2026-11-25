@@ -195,6 +195,20 @@ await check("returns: a Spanish chat opens the return in Spanish, with the item 
   assert.equal(open.data.draft.lines[0].sku, "GB-3");
 });
 
+await check("reset data: the return starts over, and chats and account links stay", async () => {
+  const before = await chat();
+  assert.ok(before.identity.customer, "the chat is linked");
+  const who = { conversationId: "reset-data", subject: before.inbound!.subject };
+  const t = token((await ui.call("show_order_return", { order_id: "A-0987", sku: "GB-3" }, who)).url);
+  await event(t, "items_chosen", { lines: [{ sku: "GB-3", qty: 2 }] });
+  await call("POST", "/api/demo/reset-data");
+  const after = await chat();
+  assert.equal(after.chat.length, before.chat.length);
+  assert.equal(after.identity.customer?.id, before.identity.customer!.id);
+  const fresh = (await call("GET", `/api/ui/sessions/${token((await ui.call("show_order_return", { order_id: "A-0987" }, who)).url)}`)).json;
+  assert.deepEqual(fresh.data.draft.lines, []);
+});
+
 await check("identity: a shared phone number links the BSUID, and replies go to the phone", async () => {
   await call("POST", "/api/chat/reset");
   await say("Where is my order?");
@@ -337,6 +351,7 @@ await check("security: through a tunnel, the console's API refuses; screens and 
   assert.equal((await via("/api/chat?conversation=wa:PF-1000000001:ES.real-sender-1")).status, 403);
   assert.equal((await via("/api/chat/reset", "POST")).status, 403);
   assert.equal((await via("/api/demo/failures")).status, 403);
+  assert.equal((await via("/api/demo/reset-data", "POST")).status, 403);
   assert.equal((await via("/api/ui/sessions/not-a-real-token")).status, 404, "screens are public");
   assert.equal((await via("/api/whatsapp/webhook", "POST")).status, 200, "Meta can still reach the webhook");
   assert.equal((await call("GET", "/api/chat")).status, 200, "on localhost the console works");

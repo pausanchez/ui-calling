@@ -27,6 +27,7 @@ npm install
 npm test                   # typecheck + generator test + in-process demo smoke test (no ports, no API key)
 npm run typecheck          # the whole monorepo, including registry blocks and templates
 npm run dev                # demo at http://localhost:5173 (API on 8787); reads ANTHROPIC_API_KEY from .env
+npm run dev:whatsapp       # the same, reachable from a real WhatsApp number: tunnel + Meta webhook (README, "Try it on your own WhatsApp")
 ```
 
 Without an API key the demo runs a scripted agent, which is enough to test the screen-to-agent loop.
@@ -67,14 +68,14 @@ The demo keeps UI_calling's sessions and events, and its own state, in `apps/dem
 - mock orders, returns and shifts;
 - the simulated user.
 
-Restarting the dev server keeps all of it. **Reset** in the UI (or `POST /api/chat/reset`) clears it. Module state that should survive exposes a `{ save, load }` object, registered in `STATE` in `server/app.ts`. The smoke test runs on `:memory:`.
+Restarting the dev server keeps all of it. **Reset all** in the UI (or `POST /api/chat/reset`) clears it, real WhatsApp chats included, so ask before using it on a demo someone is testing from their phone. **Reset data** (`POST /api/demo/reset-data`) only puts the mock data back to the start. Module state that should survive exposes a `{ save, load }` object, registered in `STATE` in `server/app.ts`. The smoke test runs on `:memory:`.
 
 ## Adding a surface to the demo
 
 1. `cd apps/demo && npx ui-calling new <name> --server-dir server`, then follow [GUIDE.md](packages/cli/GUIDE.md).
 2. Put mock data in `server/<topic>.ts` with a `seed…()` function, and add an outage switch to `server/failures.ts` if the surface calls a "third party". Owners are customer IDs: check access with `requireCustomer(subject)` from `server/identity.ts`, never by comparing phone numbers.
 3. In `server/ui.ts`, register the implementation in `createUiCalling({ surfaces })`.
-4. In `server/app.ts`, call your `seed…()` on reset and reset your outage switch there; accept the switch in `POST /api/demo/failures`.
+4. In `server/app.ts`, call your `seed…()` and reset your outage switch in `seedData()`; accept the switch in `POST /api/demo/failures`.
 5. In `server/agent.ts`:
    - Put the IDs the agent needs in the system prompt.
    - Teach the scripted agent: the topic regex, an `SCRIPT` entry in en/es, and the follow-up in `scriptedFollowUp`.
@@ -97,5 +98,6 @@ Restarting the dev server keeps all of it. **Reset** in the UI (or `POST /api/ch
    ```
 
 3. For UI changes, open the link at a 375px width and check both locales.
+4. If a real WhatsApp number gets no reply, read the `WhatsApp` line the API prints at startup first: it names an expired token or a webhook pointing at an old tunnel. A webhook with a bad signature logs `webhook rejected`.
 
 `POST /api/demo/failures` with `{"ordersApi":true}`, `{"carrierApi":true}` or `{"schedulingApi":true}` simulates outages.

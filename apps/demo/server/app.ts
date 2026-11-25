@@ -98,14 +98,25 @@ app.post("/api/chat", async (c) => {
   return c.json(snapshot(getConversation(CONVERSATION)));
 });
 
-app.post("/api/chat/reset", (c) => {
-  resetConversations();
+/** Mock orders, returns and shifts back to the start, outages off. */
+function seedData() {
   seedOrders();
   seedReturns();
   seedShifts();
+  failures.ordersApi = failures.carrierApi = failures.schedulingApi = false;
+}
+
+app.post("/api/chat/reset", (c) => {
+  resetConversations();
+  seedData();
   seedIdentity();
   seedDemoUser();
-  failures.ordersApi = failures.carrierApi = failures.schedulingApi = false;
+  return c.json(snapshot(getConversation(CONVERSATION)));
+});
+
+/** Fresh mock data for another test, keeping every chat and account link, real WhatsApp ones included. */
+app.post("/api/demo/reset-data", (c) => {
+  seedData();
   return c.json(snapshot(getConversation(CONVERSATION)));
 });
 

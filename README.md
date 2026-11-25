@@ -53,6 +53,34 @@ Open http://localhost:5173 and ask "¿Dónde está mi pedido?", "The blender arr
 - `ABANDON_AFTER_MS` (default 90000) controls when an opened-but-untouched screen wakes the agent.
 - `npm install` may warn about unapproved install scripts (esbuild, fsevents); it still works.
 
+**Reset data** puts orders, returns and shifts back to the start and keeps chats and account links. **Reset all** clears everything, real WhatsApp chats included.
+
+### Try it on your own WhatsApp
+
+The demo also answers a real WhatsApp number, using a Meta test number on the WhatsApp Cloud API.
+
+1. In a Meta app with the WhatsApp product, open WhatsApp → API Setup. Add your phone as a recipient of the test number.
+2. Put four keys in `.env`:
+
+   | Key | Where it comes from |
+   |---|---|
+   | `WHATSAPP_TOKEN` | WhatsApp → API Setup → access token. The temporary one lasts about a day; a system user's token (Meta Business settings → System users) doesn't expire. |
+   | `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp → API Setup, under the test number |
+   | `WHATSAPP_APP_SECRET` | App settings → Basic → App secret. Signed webhooks are checked against it. |
+   | `WHATSAPP_VERIFY_TOKEN` | Any string you choose. Meta sends it back when it verifies the webhook. |
+
+3. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (`brew install cloudflared`), then run:
+
+   ```bash
+   npm run dev:whatsapp
+   ```
+
+   It opens a tunnel, starts the demo with `PUBLIC_URL` set to it, and points the Meta app's webhook there through the API. A quick tunnel gets a new address on every start, so don't set the callback URL by hand. Then it checks the setup and prints `Ready`.
+
+4. Message the test number. Your number isn't linked to a demo customer, so the agent first sends a linking screen: use `lucia.romero@example.com` and code `246810`.
+
+At every start, the demo checks the WhatsApp setup and prints one line. It catches the problems that are otherwise silent: an expired token (replies stop going out) and Meta delivering to an old address (messages never arrive).
+
 Run the tests: typecheck, the generator in several layouts, and an in-process smoke test of the whole loop. No ports or API key needed:
 
 ```bash
