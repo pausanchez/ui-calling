@@ -6,6 +6,8 @@ Unlike a webview that returns one result when it closes, the agent decides when 
 
 This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`.
 
+**Starting from a task?** The recipes give the whole answer for one job: a form with several steps, a photo upload, picking a slot that can fill up, linking a WhatsApp user, and more. List them with `npx ui-calling guide recipes` and print one with `npx ui-calling guide <recipe>`. This guide holds the rules and the reference they build on.
+
 > **Not on npm yet.** Until the first release, install the tarballs built from the UI_calling repo (`npm pack`, see its README), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
 
 ## Mental model: three files per surface
@@ -275,7 +277,7 @@ A surface isn't a page of your website. The user is mid-conversation, on a phone
 
 ### Screens with several steps
 
-One surface, with the steps inside the screen. The demo's `order_return` (items, reasons, photos, pickup, review) is a full example.
+One surface, with the steps inside the screen. The demo's `order_return` (items, reasons, photos, pickup, review) is a full example; `npx ui-calling guide multistep-form` walks through it.
 
 - **Each step is a quiet event that saves a draft.** Its handler validates the step, saves it, and returns fresh data. The agent sees how far the user got, and reopening the link resumes there.
 - **Only the last step wakes the agent.** Give `wake: true` to the event that finishes (e.g. `return_submitted`). `abandoned` treats it as the finish line: a user who saves a few steps and then goes quiet for `abandonAfterMs` gets an `abandoned` event that names the last step they saved.
@@ -286,7 +288,7 @@ One surface, with the steps inside the screen. The demo's `order_return` (items,
 
 ### File uploads
 
-Declare slots in the contract. The screen uploads into them; events carry only the file IDs.
+Declare slots in the contract. The screen uploads into them; events carry only the file IDs. Recipe: `npx ui-calling guide file-upload`.
 
 ```ts
 defineSurface({

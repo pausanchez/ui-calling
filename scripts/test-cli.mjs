@@ -2,7 +2,7 @@
 // Layouts deliberately differ in depth: an import path that's only right by accident fails here.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -93,6 +93,21 @@ try {
   run(join(mono, "apps/web"), "add", "order-status");
   assert.match(read("monorepo", "apps/web/ui-calling/ui.ts"), /orderStatusImpl,/);
   console.log("generated  monorepo/apps/web (+1 block)");
+
+  // Recipes: every one is listed and prints, and every link in them still points at a real file.
+  const recipesDir = join(root, "packages/cli/recipes");
+  const recipes = readdirSync(recipesDir).filter((f) => f.endsWith(".md") && f !== "README.md");
+  const index = run(tmp, "guide", "recipes");
+  for (const f of recipes) {
+    const name = f.slice(0, -3);
+    assert.ok(index.includes(`(${f})`), `recipes/README.md lists ${name}`);
+    const text = run(tmp, "guide", name);
+    for (const [, link] of text.matchAll(/\]\(([^)#]+\.(?:md|ts|tsx))\)/g)) {
+      assert.ok(existsSync(join(recipesDir, link)), `${f} links to ${link}, which doesn't exist`);
+    }
+  }
+  assert.match(fails(tmp, "guide", "no-such-recipe"), /No recipe "no-such-recipe"/);
+  console.log(`ok         ${recipes.length} recipes listed, printed, and their links resolve`);
 
   writeFileSync(join(tmp, "tsconfig.json"), JSON.stringify({ extends: "../tsconfig.json", include: ["./**/*.ts", "./**/*.tsx"] }));
   execFileSync("npx", ["tsc", "-p", join(tmp, "tsconfig.json")], { cwd: root, stdio: "inherit" });

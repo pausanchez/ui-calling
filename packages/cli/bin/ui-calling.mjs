@@ -270,9 +270,20 @@ switch (cmd) {
     }
     newSurface(names[0]);
     break;
-  case "guide":
-    process.stdout.write(readFileSync(join(pkgDir, "GUIDE.md"), "utf8"));
+  case "guide": {
+    // `guide` is the whole guide; `guide recipes` lists the recipes; `guide <recipe>` prints one.
+    const recipesDir = join(pkgDir, "recipes");
+    const recipes = readdirSync(recipesDir).filter((f) => f.endsWith(".md") && f !== "README.md").map((f) => f.slice(0, -3));
+    const [topic] = names;
+    if (!topic) process.stdout.write(readFileSync(join(pkgDir, "GUIDE.md"), "utf8"));
+    else if (topic === "recipes") process.stdout.write(readFileSync(join(recipesDir, "README.md"), "utf8"));
+    else if (recipes.includes(topic)) process.stdout.write(readFileSync(join(recipesDir, `${topic}.md`), "utf8"));
+    else {
+      console.error(`No recipe "${topic}". Recipes: ${recipes.join(", ")}`);
+      process.exit(1);
+    }
     break;
+  }
   default:
     console.log(`ui-calling <command>
 
@@ -285,5 +296,6 @@ switch (cmd) {
                     never overwritten (--dir, --server-dir, --force)
   list              show available blocks
   tokens            copy the design tokens only
-  guide             print the guide for building surfaces (for people and coding agents)`);
+  guide [recipe]    print the guide for building surfaces (for people and coding agents);
+                    "guide recipes" lists task-shaped recipes, "guide <recipe>" prints one`);
 }

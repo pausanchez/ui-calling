@@ -10,6 +10,7 @@
     "bin",
     "registry",
     "templates",
+    "recipes",
     "GUIDE.md"
   ]
 }

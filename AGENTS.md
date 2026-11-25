@@ -17,7 +17,7 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
 | `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
 | `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |
-| `packages/cli` | `ui-calling` CLI, `registry/` (ready-made blocks + tokens), `templates/` (`ui-calling new`), `GUIDE.md` |
+| `packages/cli` | `ui-calling` CLI, `registry/` (ready-made blocks + tokens), `templates/` (`ui-calling new`), `GUIDE.md`, `recipes/` (`ui-calling guide <recipe>`) |
 | `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
 
 ## Commands
@@ -46,6 +46,7 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
   - A surface goes in `packages/cli/registry` only when it's generic enough that products would use it unchanged apart from their data and tokens.
   - Everything else is demo-only: create it with `ui-calling new` inside `apps/demo`.
   - The registry is the source of truth for its blocks. After editing one, copy it into the demo with `cd apps/demo && npx ui-calling add <block> --force --server-dir server`; never edit the demo copy alone. That keeps the demo's own `server/<block>.server.ts` (mock data, outage switches): `add` never overwrites a server file.
+- **Recipes** (`packages/cli/recipes/`): one task per file, each pointing to demo code that runs and a check that proves it. When you change a pattern the demo shows (a contract, a handler, a screen flow), update its recipe in the same change. A new recipe needs a row in `recipes/README.md`. `scripts/test-cli.mjs` checks that every recipe is listed and that its links point at real files.
 - **Templates:** `packages/cli/templates/surface` must stay valid TypeScript. Placeholders (`__name__`, `__surface__`, `__const__`, `__Component__`, `__MESSAGES__`) are real identifiers, so the typecheck covers generated code.
 - **Strings:**
   - Text the user sees goes in en/es message objects.
@@ -82,6 +83,7 @@ Restarting the dev server keeps all of it. **Reset all** in the UI (or `POST /ap
 6. In `src/surface-page.tsx`, add the surface to `SURFACES`.
 7. In `src/chat.tsx`, add a suggestion chip and, if you added one, the outage switch.
 8. In `server/smoke.ts`, add checks: the outcome reaches the agent, failures carry a `reason`, and the locale is right.
+9. If the surface shows a pattern no recipe covers yet, write one in `packages/cli/recipes/`.
 
 ## Verifying changes
 
