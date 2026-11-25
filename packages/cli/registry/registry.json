@@ -18,6 +18,25 @@
         "@ui-calling/react",
         "zod"
       ]
+    },
+    "link-account": {
+      "description": "Verify who a chat user is with a one-time code and link them to your customer record (attempt limits, survives reloads).",
+      "files": [
+        "blocks/link-account/link-account.surface.ts",
+        "blocks/link-account/link-account.tsx"
+      ],
+      "server": "blocks/link-account/link-account.server.ts",
+      "register": {
+        "impl": "linkAccountImpl",
+        "component": "LinkAccount",
+        "surface": "link_account"
+      },
+      "dependencies": [
+        "@ui-calling/core",
+        "@ui-calling/react",
+        "@ui-calling/sqlite",
+        "zod"
+      ]
     }
   },
   "parts": {

@@ -54,6 +54,8 @@ export type UiEvent = {
   state?: string;
   wake: boolean;
   at: string;
+  /** False when the event's definition leaves its payload out of what the agent reads (`includePayload: false`). */
+  payloadForAgent?: boolean;
 };
 
 export class UiCallingError extends Error {

@@ -27,7 +27,7 @@ export const linkAccountImpl = implement(linkAccount, {
         linked: true,
         customerId: c.id,
         customerName: c.name,
-        continueWith: String(ctx.session.input.continue_with),
+        continueWith: ctx.input.continue_with,
         demoCode: null,
       };
     },

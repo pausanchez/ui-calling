@@ -25,11 +25,11 @@ export const orderStatusImpl = implement(orderStatus, {
     reschedule_delivery: async (slot, ctx) => {
       // TODO: book the slot with your carrier. Throw SurfaceError("slot_unavailable", …) if it's gone,
       // or with { retryable: true } for timeouts, so the screen only offers "Try again" when it can work.
-      return { ...exampleOrder(String(ctx.session.input.order_id)), eta: slot };
+      return { ...exampleOrder(ctx.input.order_id), eta: slot };
     },
     report_problem: async (p, ctx) => {
       // TODO: open a ticket in your support tool.
-      return { ...exampleOrder(String(ctx.session.input.order_id)), status: "issue" as const, issue: { reason: p.reason, ticket: "TODO-1" } };
+      return { ...exampleOrder(ctx.input.order_id), status: "issue" as const, issue: { reason: p.reason, ticket: "TODO-1" } };
     },
   },
 });

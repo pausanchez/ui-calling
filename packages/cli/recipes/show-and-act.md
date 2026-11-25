@@ -34,7 +34,7 @@ export const orderStatusImpl = implement(orderStatus, {
   resolve: async ({ order_id }, ctx) => getOrder(order_id, ctx.subject),
   summarize: (o) => `Order ${o.id}: ${o.status}, delivery ${o.eta.date} ${o.eta.window} to ${o.address}. ...`,
   on: {
-    reschedule_delivery: async (slot, ctx) => updateOrder(String(ctx.session.input.order_id), ctx.subject, { eta: slot }),
+    reschedule_delivery: async (slot, ctx) => updateOrder(ctx.input.order_id, ctx.subject, { eta: slot }),
   },
 });
 ```

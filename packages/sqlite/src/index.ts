@@ -150,3 +150,4 @@ function open(path: string) {
   };
   return store;
 }
+export { sqliteIdentity, type SqliteIdentity, type VerifyResult } from "./identity";

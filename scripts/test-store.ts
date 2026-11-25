@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { MemoryStore, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
-import { sqliteStore } from "@ui-calling/sqlite";
+import { sqliteIdentity, sqliteStore } from "@ui-calling/sqlite";
 
 const dir = mkdtempSync(join(tmpdir(), "ui-calling-store-"));
 let passed = 0;
@@ -110,6 +110,34 @@ const boot = (store: UiStore, abandonAfterMs?: number) => {
   });
   return { ui, woke };
 };
+
+await check("identity: codes link a subject once, expire, survive a reload, and lock per customer across chats", async () => {
+  const store = sqliteStore(":memory:");
+  const identity = sqliteIdentity(store, { maxAttempts: 3, codeTtlMs: 60_000 });
+  assert.equal(identity.customerFor("wa:1"), undefined);
+  const code = identity.startVerification("wa:1", "E-100")!;
+  assert.match(code, /^\d{6}$/);
+  assert.equal(identity.pending("wa:1")?.customerId, "E-100", "still waiting after a reload");
+  assert.deepEqual(identity.verify("wa:1", "000000" === code ? "111111" : "000000"), { ok: false, reason: "wrong_code", attemptsLeft: 2 });
+  assert.deepEqual(identity.verify("wa:1", code), { ok: true, customerId: "E-100" });
+  assert.equal(identity.customerFor("wa:1"), "E-100");
+  assert.equal(identity.verify("wa:1", code).ok, false, "a code works once");
+  // Another chat guessing the same customer's code shares the attempt count, and gets locked out.
+  identity.startVerification("wa:2", "E-200");
+  identity.startVerification("wa:3", "E-200");
+  identity.verify("wa:2", "x");
+  identity.verify("wa:3", "y");
+  assert.equal(identity.startVerification("wa:4", "E-200") !== undefined, true);
+  assert.deepEqual(identity.verify("wa:4", "z"), { ok: false, reason: "locked" });
+  assert.equal(identity.startVerification("wa:5", "E-200"), undefined, "no new codes while locked");
+  // An expired code says so, and a phone-number change keeps the link.
+  const short = sqliteIdentity(store, { codeTtlMs: -1 });
+  const old = short.startVerification("wa:6", "E-300")!;
+  assert.deepEqual(short.verify("wa:6", old), { ok: false, reason: "expired" });
+  assert.equal(identity.moveLink("wa:1", "wa:1-new"), true);
+  assert.equal(identity.customerFor("wa:1-new"), "E-100");
+  assert.equal(identity.customerFor("wa:1"), undefined);
+});
 
 await check("restart: a link sent before a restart still opens, and the agent's context is still there", async () => {
   const file = join(dir, "restart.db");

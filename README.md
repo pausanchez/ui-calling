@@ -102,7 +102,7 @@ npm test
 | `@ui-calling/anthropic` | Surfaces as Anthropic SDK tools: tool runner (`anthropicRunnableTools`) or manual loop (`anthropicTools`, `anthropicToolResult`) |
 | `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
-| `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts |
+| `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts. Also `sqliteIdentity`: account links and one-time codes with attempt limits |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
 | `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes |
 
@@ -298,5 +298,6 @@ Before the first publish, decide:
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
-- More blocks: payslip viewer, document signing, availability calendar (a shift picker and a multistep return with photo upload exist in the demo)
+- More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
+- Binding a sensitive link to the first device that opens it, or a PIN step before it shows its data (today a forwarded link works for anyone until it expires)
 - More languages in the blocks (en and es today)

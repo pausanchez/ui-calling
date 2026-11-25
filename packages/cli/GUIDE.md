@@ -200,7 +200,8 @@ async function runTurn(conversationId: string, userText?: string) {
 }
 ```
 
-- **Which events wake the agent:** domain events with `wake: true`, `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`).
+- **Which events wake the agent:** domain events with `wake: true` (at most `maxWakesPerMinute` per link), `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`).
+- **Screens that are only read** (a rota, an address) shouldn't nudge: closing them without tapping anything is finishing. Set `abandonAfterMs: false` on their contract; a surface can also set its own wait, e.g. `abandonAfterMs: 30 * 60_000`.
 - **A woken turn may say nothing.** The agent gets events without a new message. Let it answer `NO_REPLY` when a follow-up wouldn't help.
 - **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
 - **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Instead of the in-memory `pending`, save the ID of the last event each turn handled, and read what's new with the cursor (below). Use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
@@ -252,13 +253,18 @@ Events of type "error" mean something failed on the screen, usually a system beh
 
 **Prompt injection.** Free text the user types on a screen (a problem description, a note) reaches the model. `formatEventsForAgent` wraps it in `<ui_events>` with a note that payload values are user data, and the prompt line above says it again. Also keep free-text fields short in the contract (`z.string().max(500)`), and don't let a tool with side effects run only because event text asked for it.
 
-**Context cost.** Every event is a line in the transcript, plus a `→ screen now shows` line when there's state. Keep `summarize` to one line, and filter events you don't use before formatting them (for example `left` and `returned`). In long conversations, summarize old events like any other old messages.
+**Context cost.** Every event is a line in the transcript, plus a `→ screen now shows` line when there's state.
+- **After an event, say what changed.** `summarize(data, moment)` gets `moment.after` (the event) when it runs after one. The agent already has the full screen from the tool result and `opened`, so return just the outcome there ("Swap SW-302 requested") when the screen is long, like a two-week rota.
+- **Don't repeat the payload.** Each domain event shows its payload as JSON after `describe` (empty ones are left out). When `describe` already quotes it, set `includePayload: false` on the event.
+- **Filter events you don't use** before formatting them (for example `left` and `returned`). In long conversations, summarize old events like any other old messages.
+- **Times carry their zone.** `formatEventsForAgent(events, { timeZone: "Europe/Madrid" })` writes `25 Nov 17:04:35 CET`; without it, UTC. Use the zone the rest of your prompt uses.
 
 ## Rules that keep context right
 
 - **Every action returns fresh data.** The outcome (a ticket number, a new date) reaches the agent through `summarize`, so an action that changes something must return the new data.
 - **`describe` says what the user asked for, not the outcome.** Write "User asked to move the delivery to…" or "Worker picked shift S-12", never "Delivery was moved". The outcome comes from `summarize`. If the handler fails, the agent reads your line as "did NOT go through. Attempted: …", so it must read right in both cases. Set `wake: true` only when the agent should react right away.
-- **Secrets never reach the agent.** Add `redact: ["code"]` to an event that carries a one-time code, password or similar. The handler still gets the value, but the event log, `describe` and the agent see `"[redacted]"`.
+- **Secrets never reach the agent.** Add `redact: ["code"]` to an event that carries a one-time code, password or similar. The handler still gets the value, but the event log, `describe` and the agent see `"[redacted]"`. For secrets in the screen's **data** (an access code, alarm instructions), list the fields in the contract, `secret: ["access"]`: the screen still gets them, and every value inside them is replaced with `[secret]` in whatever `summarize` returns, before it reaches the tool result or an event. Keep them out of `summarize` anyway, and keep such screens short-lived (`ttlSeconds`).
+- **Read IDs from `ctx.input`.** It's what the agent passed, typed by the contract, so a typo in the field that scopes the data is a compile error.
 - **Quote what the user typed.** In `describe` and `summarize`, write user text with `JSON.stringify(p.details)`, and give every string field a `.max()`. The runtime also puts what the screen reports on one line and escapes `<` and `>` before the agent reads it, so typed text can't close `<ui_events>` or fake a line.
 - **Keep payloads small and don't trust them.** The payload comes from the browser. Send IDs and the user's choices; let `summarize` give the agent the readable detail (dates, places, prices) from your own data. If the payload repeats what the user saw (e.g. a time), check it against your data in the handler and throw `SurfaceError` if it changed.
 - **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
@@ -456,10 +462,10 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 
 | API | Fields |
 |---|---|
-| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `files?` (slots: `{ accept, maxBytes, maxFiles? }`) |
-| `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent) |
-| `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data) => string`, `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
-| `ctx` | `{ subject, conversationId, locale, session, files(ids?) }`; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface |
+| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
+| `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent), `includePayload?` (default `true`; `false` leaves the JSON out of what the agent reads when `describe` already says it) |
+| `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any), `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
+| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?) }`; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface |
 | `new SurfaceError(code, message, { retryable? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason` |
 
 ### `UiEvent`
