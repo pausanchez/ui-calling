@@ -4,6 +4,8 @@ A **surface** is a screen an AI agent can open for a user, the way it calls a fu
 
 This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`.
 
+> **Not on npm yet.** Until the first release, install the tarballs built from the UI_calling repo (`npm pack`, see its README), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
+
 ## Mental model: three files per surface
 
 | File | Runs on | What it holds |
@@ -37,13 +39,13 @@ npx ui-calling init
 Run it in your project's root. It detects Next.js or Vite and writes:
 - `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and a SQLite store so links and context survive restarts.
 - `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
-- `ui-calling/tokens.css`: design tokens, with shadcn variable names.
+- `ui-calling/tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4: import it after `@import "tailwindcss";`. `npx ui-calling tokens` copies only this file.
 - **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`) and the landing page (`app/s/[token]/page.tsx`).
 - `ui-calling.json`: where things live. With it, `ui-calling new` and `ui-calling add` register each surface in `ui.ts` and `surface-screen.tsx` by themselves, from any folder of the app. In a monorepo, run `init` in the app that serves the screens, not at the root.
 - **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
 
 Without Next.js, mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
-- **`uiCallingHandler(ui)`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like.
+- **`uiCallingHandler(ui, { basePath })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`.
 - **`uiCallingRoutes(ui)`** is a Hono app.
 
 Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
@@ -108,6 +110,8 @@ const result = await generateText({
 - Chat Completions: `openaiChatTools(ui)` and `runChatToolCall(ui, toolCall, who)`.
 
 **Any MCP client** (`@ui-calling/mcp`): `createUiCallingMcpServer(ui, { who: (extra) => … })`, connected to any transport. MCP knows nothing of your end user, so `who` derives the user from the request (e.g. `extra.authInfo`).
+
+**Only some surfaces for this agent:** every adapter takes a `filter`, e.g. `anthropicRunnableTools(ui, who, { filter: (name) => name !== "show_link_account" })`. The OpenAI and `anthropicTools` helpers take it as their second argument. Use it to offer a sign-in surface until the user is identified, and the rest after.
 
 **Anything else:** `ui.tools()` gives JSON Schema tools, and `ui.runTool(name, input, who)` returns `{ ok, content, link }`. `content` is what goes back to the model, and errors come back as results, not exceptions.
 
@@ -311,7 +315,7 @@ Every route is a plain Hono app, so you can drive the whole loop in-process with
 
 ```ts
 const routes = uiCallingRoutes(ui);
-const link = await ui.call("show_shift_picker", { worker_id: "W-207", locale: "es" }, { conversationId: "t", subject: "+34600000000" });
+const link = await ui.call("show_shift_picker", { worker_id: "W-207", locale: "es" }, { conversationId: "t", subject: "wa:PF-1:test-user" });
 const token = link.url.split("/s/")[1];
 
 const open = await routes.request(`/sessions/${token}`);                  // what the screen loads
@@ -323,7 +327,7 @@ await routes.request(`/sessions/${token}/events`, {
 console.log(formatEventsForAgent(await ui.events("t")));                  // exactly what the agent will read
 ```
 
-Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and another `subject` can't open the link. The demo's `apps/demo/server/smoke.ts` is a full example.
+Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and `resolve` refuses data the `subject` doesn't own (call with someone else's ID and expect a `SurfaceError`). The link itself is a bearer token: anyone holding it can open it, so what protects the data is that scoping in `resolve`. The demo's `apps/demo/server/smoke.ts` is a full example.
 
 ## Done checklist
 
@@ -366,7 +370,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
 | `toolPrefix` | `"show_"` | Tool name is `toolPrefix + surface name` |
 | `defaultLocale` | `"en"` | Used when a call doesn't pass `locale` |
-| `wakeOnError` | `true` | Wake the agent on the first error of each kind in a session |
+| `wakeOnError` | `true` | Wake the agent on the first error of each kind in a session; errors reported by the screen wake once per session |
 | `describeError` | generic `unexpected` | Turns unexpected errors into `{ code, message, retryable }` for the agent; by default the real error is only logged. `SurfaceError`s pass as they are |
 | `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
 | `maxEventsPerSession` | `500` | Events one link may record; after that the screen gets 429 |
@@ -390,7 +394,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 |---|---|
 | `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?` |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent) |
-| `implement(surface, { … })` | `resolve(input, ctx)`, `summarize(data)`, `on?: { [event]: (payload, ctx) => data \| void }` |
+| `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data) => string`, `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
 | `ctx` | `{ subject, conversationId, locale, session }` |
 | `new SurfaceError(code, message, { retryable? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason` |
 
@@ -434,7 +438,7 @@ type UiEvent = {
 
 ### HTTP
 
-What `@ui-calling/server` serves under your mount point. Any client can use it; React is optional. Every response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+What `@ui-calling/server` serves under your mount point. Any client can use it; React is optional. Every API response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Your `/s/:token` page is served by your app: set `Referrer-Policy: no-referrer` there too, so the token in its URL doesn't leak to sites the screen links to. The Next.js page from `init` already does, with a `<meta name="referrer">`.
 
 | Request | Success |
 |---|---|

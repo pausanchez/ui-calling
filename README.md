@@ -54,9 +54,11 @@ npm test
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
-| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it; `add <block>` copies ready-made ones; `guide` prints the building guide |
+| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it; `add <block>` copies ready-made ones (`list` shows them); `tokens` copies only the design tokens; `guide` prints the building guide |
 
 ## Add it to your project
+
+> **Not on npm yet.** Until the first release, build the tarballs in this repo (see [Building and publishing](#building-and-publishing)) and install them in your app, `ui-calling` included. `npx ui-calling` then runs the installed CLI.
 
 ```bash
 npx ui-calling init
@@ -66,7 +68,7 @@ npx ui-calling init
 npx ui-calling new shift-picker
 ```
 
-`init` detects Next.js or Vite and writes the runtime, the API route, the `/s/[token]` page and the tokens. It also leaves a `ui-calling.json` so that `new` registers each surface by itself. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
+`init` detects Next.js or Vite and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page; elsewhere it tells you how to mount them. Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
 
 ## The primitives
 
@@ -92,12 +94,12 @@ export const orderStatus = defineSurface({
 ```ts
 const ui = createUiCalling({
   baseUrl: "https://ui.acme.com",
-  onEvent: (e) => /* append to the conversation; if e.wake, run the agent */,
+  onEvent: (e) => handleUiEvent(e),            // append to the conversation; if e.wake, run the agent
   surfaces: [
     implement(orderStatus, {
       resolve: ({ order_id }, ctx) => getOrder(order_id, ctx.subject),  // access check lives here
       summarize: (o) => `Order ${o.id}: ${o.status}…`,                 // what the agent is told
-      on: { reschedule_delivery: (slot, ctx) => updateEta(…) },        // side effects; return fresh data
+      on: { reschedule_delivery: async (slot, ctx) => updateEta(slot, ctx.subject) }, // side effects; return fresh data
     }),
   ],
 });
@@ -200,8 +202,10 @@ The demo keeps its own state in the same file, so you can restart it mid-convers
 ## Security model
 
 - The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
+- **A link is a bearer token.** Anyone holding it can open it until it expires or is completed, as with a password-reset link. `subject` decides *whose* data the screen shows, not *who* may open it. So send links only to the user, and keep sensitive screens short-lived.
 - Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
-- Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks). Responses are `no-store` and the page sets `Referrer-Policy: no-referrer`.
+- Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks).
+- API responses are `no-store` and send `Referrer-Policy: no-referrer`. The `/s/[token]` page from `init` on Next.js sets it too; on other frameworks, set it on `/s/*` yourself so the token doesn't leak to sites the screen links to.
 - Once the user finishes (`complete()`), the link is closed: reads and actions are refused, so a tab left open or a forwarded link can't act again.
 - Link-preview crawlers don't run JavaScript, so they never fetch data or trigger `opened`.
 - Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
