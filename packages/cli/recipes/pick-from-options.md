@@ -42,6 +42,13 @@ shift_selected: async (p, ctx) => {
 
 ## Screen
 
+Each option is a `choice-card` part (`npx ui-calling add choice-card`), with what's left on the right:
+
+```tsx
+<ChoiceCard type="radio" name="shift" checked={selected?.id === s.id} onChange={() => setSelected(s)}
+  title={`${s.start}–${s.end} · ${s.location}`} aside={t.spotsLeft(s.spotsLeft)} disabled={s.spotsLeft === 0} note={s.spotsLeft === 0 ? t.full : undefined} />
+```
+
 When the option is gone, retrying can't help: say so, and reload the list.
 
 ```tsx
@@ -64,7 +71,9 @@ try {
 - **Show what's left** ("2 of 5 spots left") and put it in `summarize` too, so the agent can suggest another option when one fills up.
 - **No `retryable` on "full".** Only mark errors retryable when trying again can work (a timeout, a 503).
 
-## In the repo
+## In the UI_calling repo
+
+Not in the package; for reading if you have the repo.
 
 - Contract: [`shift-picker.surface.ts`](../../../apps/demo/src/components/ui-calling/shift-picker.surface.ts)
 - Server: [`shift-picker.server.ts`](../../../apps/demo/server/shift-picker.server.ts)

@@ -31,8 +31,9 @@ export type SurfaceContext = {
   conversationId: string;
   locale: string;
   /**
-   * Files uploaded on this screen, in upload order; pass IDs from an event's payload to get only those.
-   * IDs from another link are left out, so compare lengths to reject them.
+   * Files uploaded through this link, in upload order. Pass IDs from an event's payload to get only those:
+   * by ID, files this user uploaded through an earlier link to the same surface count too (a saved draft
+   * keeps their IDs). Anything else is left out, so compare lengths to reject it.
    */
   files: (ids?: string[]) => Promise<UiFileRef[]>;
 };
@@ -181,16 +182,30 @@ export function createUiCalling(opts: UiCallingOptions) {
       conversationId: session.conversationId,
       locale: session.locale,
       files: async (ids) => {
-        const all = (await store.listFiles?.(session.id)) ?? [];
-        return (ids ? all.filter((f) => ids.includes(f.id)) : all).map(fileRef);
+        const own = (await store.listFiles?.(session.id)) ?? [];
+        if (!ids) return own.map(fileRef);
+        // By ID, files from this user's earlier links to the same screen count too: a draft outlives its link.
+        const found = await Promise.all(ids.map(async (id) => own.find((f) => f.id === id) ?? (await usableFile(session, id))?.file));
+        return found.filter((f): f is UiFile => Boolean(f)).map(fileRef);
       },
     };
   }
 
-  /** A file of this link's session, or not_found: a file ID alone never opens another user's upload. */
-  async function sessionFile(session: UiSession, id: string) {
+  /**
+   * A file this link may use: uploaded through it, or through an earlier link of the same user (subject) to
+   * the same surface. Anything else is invisible, so a file ID alone never opens another user's upload.
+   */
+  async function usableFile(session: UiSession, id: string) {
     const found = await store.getFile?.(id);
-    if (!found || found.file.sessionId !== session.id) throw atSession(new UiCallingError("not_found", "Unknown file"), session);
+    if (!found) return undefined;
+    if (found.file.sessionId === session.id) return found;
+    const owner = await store.getSession(found.file.sessionId);
+    return owner && owner.subject === session.subject && owner.surface === session.surface ? found : undefined;
+  }
+
+  async function sessionFile(session: UiSession, id: string) {
+    const found = await usableFile(session, id);
+    if (!found) throw atSession(new UiCallingError("not_found", "Unknown file"), session);
     return found;
   }
 

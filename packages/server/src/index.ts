@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { UiCallingError, type UiCalling } from "@ui-calling/core";
+import { UiCallingError, formatEventsForAgent, type UiCalling } from "@ui-calling/core";
 
 /**
  * Routes the screen talks to (session, events, and files for surfaces that declare them). Mount them under any prefix:
@@ -10,7 +10,7 @@ import { UiCallingError, type UiCalling } from "@ui-calling/core";
  * its JavaScript, so they never hit these routes. That keeps previews from
  * leaking data or counting as "opened".
  */
-export function uiCallingRoutes(ui: UiCalling) {
+export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
@@ -21,6 +21,22 @@ export function uiCallingRoutes(ui: UiCalling) {
   });
 
   app.get("/sessions/:token", async (c) => c.json(await ui.open(c.req.param("token"))));
+
+  // Development only: open a screen for a test user without an agent, and see what the agent would read.
+  // `npx ui-calling link` and `npx ui-calling events` call these. Never mounted in production.
+  if (opts.dev && process.env.NODE_ENV !== "production") {
+    app.post("/dev/links", async (c) => {
+      const body = await c.req.json<{ surface?: string; input?: Record<string, unknown>; subject?: string; conversationId?: string; locale?: string }>();
+      const tool = ui.tools().find((t) => t.name === body.surface || t.name.endsWith(`_${body.surface}`))?.name;
+      if (!tool) return c.json({ error: "unknown_surface", message: `No surface "${body.surface}". Surfaces: ${ui.tools().map((t) => t.name).join(", ")}` }, 404);
+      const subject = body.subject ?? "dev-user";
+      const conversationId = body.conversationId ?? `dev:${subject}`;
+      const run = await ui.runTool(tool, { ...body.input, ...(body.locale ? { locale: body.locale } : {}) }, { conversationId, subject });
+      if (!run.ok) return c.json({ error: "tool_failed", message: run.content }, 400);
+      return c.json({ url: run.link?.url, conversationId, toolResult: run.content });
+    });
+    app.get("/dev/events/:conversationId", async (c) => c.text(formatEventsForAgent(await ui.events(c.req.param("conversationId"))) || "(no events yet)"));
+  }
 
   app.post(
     "/sessions/:token/events",
@@ -83,6 +99,14 @@ export function uiCallingRoutes(ui: UiCalling) {
   return app;
 }
 
+export type RouteOptions = {
+  /**
+   * Add development routes: `POST /dev/links` opens a screen for a test user, `GET /dev/events/:conversationId`
+   * shows what the agent would read. Ignored when NODE_ENV is "production". `init` sets it for `next dev`.
+   */
+  dev?: boolean;
+};
+
 /**
  * The same routes as a plain `(Request) => Response` handler, for frameworks that take one:
  * Next.js route handlers, Remix/React Router actions, Bun.serve, Deno, Workers…
@@ -91,8 +115,8 @@ export function uiCallingRoutes(ui: UiCalling) {
  *   const handler = uiCallingHandler(ui);
  *   export { handler as GET, handler as POST };
  */
-export function uiCallingHandler(ui: UiCalling, opts: { basePath?: string } = {}) {
+export function uiCallingHandler(ui: UiCalling, opts: RouteOptions & { basePath?: string } = {}) {
   const app = new Hono().basePath(opts.basePath ?? "/api/ui");
-  app.route("/", uiCallingRoutes(ui));
+  app.route("/", uiCallingRoutes(ui, opts));
   return (request: Request) => app.fetch(request);
 }

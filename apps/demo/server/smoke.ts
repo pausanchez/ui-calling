@@ -140,7 +140,7 @@ await check("returns: what the user said starts the draft, and each step is save
   assert.ok(quiet.every((e) => !e.wake), "steps don't wake the agent");
 });
 
-await check("returns: photos upload through the link, and the files a step reports must be this link's", async () => {
+await check("returns: photos upload through the link, a step only takes this user's files, and a new link still shows them", async () => {
   const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
   const body = new FormData();
   body.append("file", new Blob([new Uint8Array(200).fill(9)], { type: "image/jpeg" }), "lid.jpg");
@@ -152,6 +152,10 @@ await check("returns: photos upload through the link, and the files a step repor
   assert.equal(ok.json.data.draft.step, "pickup");
   assert.deepEqual(ok.json.data.uploaded.map((f: Json) => f.id), [file.id]);
   assert.match((await lastEvent("photos_added")).state ?? "", /Photos: 1/);
+  // The agent opens the screen again: the draft's photo is still there, through the new link.
+  const again = token((await ui.call("show_order_return", { order_id: "A-0987" }, { conversationId: "again", subject: (await chat()).inbound!.subject })).url);
+  assert.deepEqual((await call("GET", `/api/ui/sessions/${again}`)).json.data.uploaded.map((f: Json) => f.id), [file.id]);
+  assert.equal((await app.request(`/api/ui/sessions/${again}/files/${file.id}`)).status, 200);
 });
 
 await check("returns: a failed pickup keeps the draft and says why; submitting reaches the agent with the outcome", async () => {

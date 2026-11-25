@@ -2,90 +2,149 @@
 
 Use it when the user has to give several answers in order (a return, a claim, an application) and may stop halfway and come back. It's one surface with the steps inside the screen, not one surface per step.
 
-Full example: the demo's `order_return` (items, reasons, photos, pickup, review).
+Start from the template. It writes a working three-step screen (details, a choice, review) with everything below, and compiles as-is:
+
+```bash
+npx ui-calling new claim --template steps
+```
+
+Then change the steps to yours. The demo's `order_return` (items, reasons, photos, pickup, review) is the same pattern with five steps.
 
 ## Contract
 
 One quiet event per step saves a draft. Only the last step wakes the agent. `data` holds the draft, including the furthest step reached.
 
 ```ts
-export const RETURN_STEPS = ["items", "reasons", "photos", "pickup", "review"] as const;
+export const claimSteps = ["details", "choice", "review"] as const;
 
-export const orderReturn = defineSurface({
-  name: "order_return",
-  // ...
+export const claim = defineSurface({
+  name: "claim",
+  description: "...",
+  input: z.object({
+    id: z.string().describe("The record this is about"),
+    choice: z.string().optional().describe("The option to preselect, if the user already named one"),
+  }),
   data: z.object({
-    // ...the order...
-    draft: z.object({ step: z.enum(RETURN_STEPS), lines: z.array(line), refund: refund.nullable(), pickup: slot.nullable() }),
-    submitted: z.object({ returnId: z.string(), refundAmount: z.number() }).nullable(),
+    id: z.string(),
+    options: z.array(z.object({ id: z.string(), label: z.string() })),
+    draft: z.object({ step: z.enum(claimSteps), details: z.string(), choice: z.string().nullable() }),
+    submitted: z.object({ reference: z.string() }).nullable(),
   }),
   events: {
-    items_chosen: event(z.object({ lines: z.array(z.object({ sku: z.string(), qty: z.number().int().min(1) })).min(1) }), {
-      describe: (p) => `Step 1 of 5: chose items to return: ${p.lines.map((l) => `${l.qty}× ${l.sku}`).join(", ")}`,
-    }),
-    // reasons_given, photos_added, pickup_chosen: same shape, no wake
-    return_submitted: event(z.object({}), { describe: () => "Step 5 of 5: submitted the return", wake: true }),
+    details_saved: event(z.object({ details: z.string().max(500) }), { describe: (p) => `Step 1 of 3: entered details "${p.details}"` }),
+    choice_saved: event(z.object({ choice: z.string() }), { describe: (p) => `Step 2 of 3: chose ${p.choice}` }),
+    submitted: event(z.object({}), { describe: () => "Step 3 of 3: submitted", wake: true }),
   },
 });
 ```
 
 ## Server
 
-Each handler validates its step, saves it, and returns the fresh draft. Save "the furthest step reached" forward only, so going back to edit doesn't lose progress. The last handler checks everything again before acting.
+Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and submits once even on a double tap.
 
 ```ts
-items_chosen: async ({ lines }, ctx) => {
-  const r = getReturn(orderId(ctx), ctx.subject);
-  for (const l of lines) {
-    const item = r.items.find((i) => i.sku === l.sku);
-    if (!item?.returnable || l.qty > item.qty) throw new SurfaceError("item_not_returnable", `${l.sku} can't be returned in that quantity`);
-  }
-  return saveDraft(r.orderId, ctx.subject, { lines: withPreviousReasons(lines, r) }, "reasons");
-},
-return_submitted: async (_p, ctx) => {
-  const r = getReturn(orderId(ctx), ctx.subject);
-  if (r.submitted) return r; // a double tap submits once
-  if (!r.draft.lines.length || !r.draft.refund || !r.draft.pickup) throw new SurfaceError("return_incomplete", "The return is missing items, refund or pickup");
-  return submitReturn(r.orderId, ctx.subject);
-},
-```
+// Your drafts table. With sqliteStore(), store.db is a node:sqlite DatabaseSync you can use for it.
+store.db.exec("CREATE TABLE IF NOT EXISTS claim_drafts (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
 
-`summarize` describes the draft while it's in progress ("Draft, reached step 3 of 5. Items: …") and the outcome once submitted ("Submitted as R-5327: … Refund of 79.00 EUR …").
+function save(id: string, subject: string, patch: Partial<Draft>, reached: Step) {
+  const d = load(id, subject);
+  const step = claimSteps.indexOf(reached) > claimSteps.indexOf(d.draft.step) ? reached : d.draft.step;
+  writeDraft(`${subject}:${id}`, { draft: { ...d.draft, ...patch, step }, submitted: d.submitted });
+  return load(id, subject);
+}
+
+export const claimImpl = implement(claim, {
+  resolve: async ({ id, choice }, ctx) => load(id, ctx.subject, choice), // applies the prefill, see the prefill recipe
+  summarize: (d) =>
+    d.submitted
+      ? `Submitted as ${d.submitted.reference}: details "${d.draft.details}", choice ${d.draft.choice}.`
+      : `Draft for ${d.id}, reached step ${claimSteps.indexOf(d.draft.step) + 1} of 3. Details: ${d.draft.details || "none yet"}.`,
+  on: {
+    details_saved: async ({ details }, ctx) => {
+      if (!details.trim()) throw new SurfaceError("details_missing", "The details are empty");
+      return save(String(ctx.session.input.id), ctx.subject, { details: details.trim() }, "choice");
+    },
+    choice_saved: async ({ choice }, ctx) => save(String(ctx.session.input.id), ctx.subject, { choice }, "review"),
+    submitted: async (_p, ctx) => {
+      const d = load(String(ctx.session.input.id), ctx.subject);
+      if (d.submitted) return d; // a double tap submits once
+      if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing");
+      return submitClaim(d); // your system; throw SurfaceError(..., { retryable: true }) if it fails
+    },
+  },
+});
+```
 
 ## Screen
 
-Keep the answers in component state, start from `data.draft`, and save with `emit` on **Continue**. Push a history entry per step, so the phone's back button goes to the previous step instead of closing the screen.
+Two components. The outer one handles loading and errors; the inner one only renders once `data` is there, so its state can start from the draft. `useSurfaceSteps` keeps the step in the browser's history: the phone's back button goes to the previous step, a reload keeps the step, and a link opened straight onto step 3 gets steps 1 and 2 behind it.
 
 ```tsx
-const [lines, setLines] = useState(data.draft.lines);
-const [step, setStep] = useState(data.draft.step); // resume where they stopped
+import { SurfaceActionError, useSurface, useSurfaceSteps } from "@ui-calling/react";
+import { ActionBar } from "./parts/action-bar";
+import { StepBar } from "./parts/step-bar";
 
-useEffect(() => {
-  const onPop = (e: PopStateEvent) => e.state?.returnStep && setStep(e.state.returnStep);
-  // Opened fresh on a later step: add the earlier steps behind it, or Back would leave the screen.
-  if (!history.state?.returnStep) {
-    history.replaceState({ ...history.state, returnStep: path[0] }, "");
-    for (const s of path.slice(1, at + 1)) history.pushState({ ...history.state, returnStep: s }, "");
+export function Claim() {
+  const { status, data } = useSurface(claim);
+  if (status === "loading") return <Skeleton />;
+  if (status !== "ready" || !data) return <Unavailable />; // expired, upstream_error...: see the template
+  return data.submitted ? <Done reference={data.submitted.reference} /> : <Steps data={data} />;
+}
+
+function Steps({ data }: { data: Data }) {
+  const { emit, locale } = useSurface(claim);
+  const [details, setDetails] = useState(data.draft.details); // answers live here until each step is saved
+  const [choice, setChoice] = useState(data.draft.choice);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<null | { message: string }>(null);
+
+  const path = [...claimSteps]; // leave out steps that don't apply to this user
+  const nav = useSurfaceSteps(path, { initial: data.draft.step });
+
+  async function next() {
+    setBusy(true);
+    setProblem(null);
+    try {
+      if (nav.step === "details") await emit("details_saved", { details });
+      if (nav.step === "choice") await emit("choice_saved", { choice: choice! });
+      if (nav.step === "review") await emit("submitted", {});
+      nav.next();
+    } catch (err) {
+      const e = err instanceof SurfaceActionError ? err : null;
+      setProblem({ message: (e?.reason && t.errors[e.reason]) || (e?.code === "network" ? t.offline : t.failed) });
+    } finally {
+      setBusy(false);
+    }
   }
-  window.addEventListener("popstate", onPop);
-  return () => window.removeEventListener("popstate", onPop);
-}, []);
 
-async function next() {
-  if (current === "items") await emit("items_chosen", { lines: lines.map(({ sku, qty }) => ({ sku, qty })) });
-  // ...one emit per step...
-  go(path[at + 1]); // setStep + history.pushState
+  return (
+    <>
+      <StepBar steps={path.map((s) => ({ key: s, label: t.steps[s] }))} index={nav.index} reached={path.indexOf(data.draft.step)} onSelect={nav.go} locale={locale} />
+      {nav.step === "details" && <textarea value={details} onChange={(e) => setDetails(e.target.value)} />}
+      {/* ...one block per step... */}
+      <ActionBar
+        back={nav.isFirst ? undefined : { label: t.back, onClick: nav.back }}
+        primary={{ label: nav.isLast ? t.submit : t.next, onClick: () => void next(), busy }}
+        problem={problem}
+      />
+    </>
+  );
 }
 ```
 
+`t` is the screen's messages object in the user's language (`pickLocalized(MESSAGES, locale)`); the template has it in full, in English and Spanish.
+
 ## Watch out
 
-- **Skip steps that don't apply** (no photos unless an item is damaged), and number them for the path the user will actually see.
+- **Skip steps that don't apply** (no photos unless an item is damaged): pass only the steps the user will see, so "Step 2 of 4" is right. If a step drops out while the user is on it, `useSurfaceSteps` shows the one that took its place.
 - **`abandoned` treats the waking event as the finish line.** A user who saves two steps and goes quiet gets "User stopped partway without finishing. Last step: …". See [follow-up-abandoned](follow-up-abandoned.md).
 - **Resuming must not re-apply a prefill** over the user's own choice. See [prefill](prefill.md).
-- **Double submit:** make the last handler idempotent (return the submitted result if it already exists).
+- **Photos in a draft:** a draft outlives its link. `ctx.files(ids)` accepts this user's uploads from earlier links to the same surface, so the draft's photo IDs still work when the agent opens the screen again. See [file-upload](file-upload.md).
+- **Where drafts live:** in your database. In memory, a restart loses them; in a JSON file inside the project, `next dev` reloads the page on every save.
 
-## In the repo
+## In the UI_calling repo
+
+Not in the package; for reading if you have the repo.
 
 - Contract: [`order-return.surface.ts`](../../../apps/demo/src/components/ui-calling/order-return.surface.ts)
 - Server: [`order-return.server.ts`](../../../apps/demo/server/order-return.server.ts), drafts in [`returns.ts`](../../../apps/demo/server/returns.ts)

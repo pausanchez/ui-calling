@@ -65,7 +65,9 @@ Events of type "error" mean something failed on the screen, usually a system beh
 - **Keep the user's work.** A failed submit in a [multistep form](multistep-form.md) keeps the saved draft; say "your return is saved, try again in a minute".
 - **Test it.** Give each third party an outage switch in development, as the demo does, and check that the agent's reply never claims success.
 
-## In the repo
+## In the UI_calling repo
+
+Not in the package; for reading if you have the repo.
 
 - Switches: [`failures.ts`](../../../apps/demo/server/failures.ts), toggled by `POST /api/demo/failures`
 - Server: [`order-status.server.ts`](../../../apps/demo/server/order-status.server.ts), [`order-return.server.ts`](../../../apps/demo/server/order-return.server.ts)

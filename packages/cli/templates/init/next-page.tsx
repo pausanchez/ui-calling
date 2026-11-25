@@ -16,6 +16,6 @@ export default function SurfacePage({ params }: { params: Promise<{ token: strin
 
 async function Screen({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  // Where "Back to chat" goes, e.g. https://wa.me/<your number>. Without it, screens show a "Done" button instead.
+  // Where "Back to chat" goes, e.g. https://wa.me/<your number>. Without it, screens show a "Finish" button instead.
   return <SurfaceScreen token={token} returnUrl={process.env.UI_CALLING_RETURN_URL} />;
 }

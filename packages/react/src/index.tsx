@@ -276,3 +276,80 @@ export function useSurfaceName() {
     returnUrl: ctx?.returnUrl,
   };
 }
+
+/**
+ * The steps of a screen with several steps, kept in the browser's history so the phone's back button
+ * goes to the previous step instead of closing the screen.
+ *
+ * - `steps` is the path the user will see now (leave out steps that don't apply). If the current step
+ *   drops out of it, the step that took its place is shown.
+ * - `initial` is where to start, usually the furthest step saved in your draft (`data.draft.step`).
+ * - After a reload the step comes back from history. Opened fresh on a later step, the earlier steps are
+ *   added behind it, so Back goes to them.
+ *
+ *   const { step, index, count, go, next, back } = useSurfaceSteps(path, { initial: data.draft.step });
+ */
+export function useSurfaceSteps<S extends string>(steps: readonly S[], options: { initial: S; key?: string }) {
+  const key = options.key ?? "uiCallingStep";
+  // The step, and where it sat in the path: if the step drops out of the path, its place is shown instead.
+  const [pos, setPos] = useState(() => {
+    const restored = typeof window === "undefined" ? undefined : historyStep<S>(key);
+    const step = restored ?? options.initial;
+    return { step, index: Math.max(0, steps.indexOf(step)) };
+  });
+  const found = steps.indexOf(pos.step);
+  const index = found === -1 ? Math.min(pos.index, steps.length - 1) : found;
+  const step = steps[index];
+
+  const path = useRef(steps);
+  useEffect(() => {
+    path.current = steps;
+  });
+  // Where the screen opened, for the mount effect below (only read there).
+  const opened = useRef(index);
+  useEffect(() => {
+    if (!historyStep(key)) {
+      const at = opened.current;
+      window.history.replaceState({ ...window.history.state, [key]: path.current[0] }, "");
+      for (const s of path.current.slice(1, at + 1)) window.history.pushState({ ...window.history.state, [key]: s }, "");
+    }
+    const onPop = () => {
+      const s = historyStep<S>(key);
+      if (!s) return;
+      // A step that no longer applies (say, photos after the reason changed) gives way to the one before it.
+      const found = path.current.indexOf(s);
+      setPos((prev) => ({ step: s, index: found === -1 ? Math.max(0, prev.index - 1) : found }));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [key]);
+
+  const go = useCallback(
+    (to: S) => {
+      setPos({ step: to, index: Math.max(0, path.current.indexOf(to)) });
+      window.history.pushState({ ...window.history.state, [key]: to }, "");
+    },
+    [key],
+  );
+
+  return {
+    step,
+    index,
+    count: steps.length,
+    isFirst: index === 0,
+    isLast: index === steps.length - 1,
+    /** Show a step and add it to history. */
+    go,
+    next: () => {
+      if (index < steps.length - 1) go(steps[index + 1]);
+    },
+    /** Like the phone's back button: the previous step in history. */
+    back: () => {
+      if (index > 0) window.history.back();
+    },
+  };
+}
+
+function historyStep<S extends string>(key: string) {
+  return (window.history.state as Record<string, unknown> | null)?.[key] as S | undefined;
+}

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { pickLocalized, type SurfaceData } from "@ui-calling/core";
-import { SurfaceActionError, useSurface } from "@ui-calling/react";
+import { SurfaceActionError, useSurface, useSurfaceSteps } from "@ui-calling/react";
 import { NEEDS_PHOTOS, RETURN_REASONS, RETURN_STEPS, orderReturn } from "./order-return.surface";
 
 type Return = SurfaceData<typeof orderReturn>;
@@ -179,8 +179,6 @@ function Wizard({ data, t }: { data: Return; t: OrderReturnMessages }) {
   const [uploading, setUploading] = useState(0);
   const [refund, setRefund] = useState<Refund | null>(data.draft.refund);
   const [pickup, setPickup] = useState(data.draft.pickup);
-  // Resume where the user stopped: the furthest step they reached.
-  const [step, setStep] = useState<Step>(data.draft.step);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<null | { message: string; retry?: () => void }>(null);
   const top = useRef<HTMLDivElement>(null);
@@ -188,34 +186,18 @@ function Wizard({ data, t }: { data: Return; t: OrderReturnMessages }) {
   const needsPhotos = lines.some((l) => l.reason && NEEDS_PHOTOS.includes(l.reason));
   // The photos step only exists when a reason calls for it.
   const path = RETURN_STEPS.filter((s) => s !== "photos" || needsPhotos);
-  const at = path.indexOf(step) === -1 ? path.indexOf("pickup") : path.indexOf(step);
+  // Resume where the user stopped (the furthest step saved); Back and the phone's back button go to the step before.
+  const nav = useSurfaceSteps(path, { initial: path.includes(data.draft.step) ? data.draft.step : "pickup", key: "returnStep" });
+  const at = nav.index;
   const reached = Math.max(at, path.indexOf(data.draft.step));
   const item = (sku: string) => data.items.find((i) => i.sku === sku)!;
   const day = (iso: string) => new Date(iso + "T12:00:00").toLocaleDateString(locale, { weekday: "long", day: "numeric", month: "long" });
   const money = (n: number) => n.toLocaleString(locale, { style: "currency", currency: data.currency });
   const total = lines.reduce((sum, l) => sum + l.qty * item(l.sku).price, 0);
 
-  // The phone's back button moves between steps instead of leaving the screen.
-  useEffect(() => {
-    const onPop = (e: PopStateEvent) => {
-      const s = (e.state as { returnStep?: Step } | null)?.returnStep;
-      if (s) setStep(s);
-    };
-    // Opened fresh on a later step (resuming a draft): add the earlier steps behind it, so Back goes
-    // to them instead of leaving. A reload already has them in its history.
-    if (!(history.state as { returnStep?: Step } | null)?.returnStep) {
-      history.replaceState({ ...history.state, returnStep: path[0] }, "");
-      for (const s of path.slice(1, at + 1)) history.pushState({ ...history.state, returnStep: s }, "");
-    }
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function go(to: Step, push = true) {
+  function go(to: Step) {
     setProblem(null);
-    setStep(to);
-    if (push) history.pushState({ ...history.state, returnStep: to }, "");
+    nav.go(to);
     top.current?.scrollIntoView({ block: "start" });
   }
 
@@ -486,7 +468,7 @@ function Wizard({ data, t }: { data: Return; t: OrderReturnMessages }) {
 
       <div className={`sticky bottom-0 -mx-4 mt-auto grid gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur ${at > 0 ? "grid-cols-[auto_1fr]" : ""}`}>
         {at > 0 && (
-          <button type="button" onClick={() => history.back()} disabled={busy} className={btn("outline")}>
+          <button type="button" onClick={nav.back} disabled={busy} className={btn("outline")}>
             {t.back}
           </button>
         )}
