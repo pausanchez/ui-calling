@@ -360,6 +360,8 @@ npx ui-calling whatsapp check             # is the token valid, and where does M
 
 `whatsapp dev` runs `npm run dev` unless you pass your own after `--` (`npx ui-calling whatsapp dev -- pnpm dev`), and expects the webhook at `/api/whatsapp/webhook` (`--webhook-path`). One Meta app delivers to one address at a time: pointing it here takes it from any other app.
 
+**Next.js:** `next dev` serves its own scripts only to `localhost`, so a screen opened on a phone through the tunnel stays blank unless the tunnel's host is in `allowedDevOrigins`. `init` adds `allowedDevOrigins: process.env.PUBLIC_URL ? [new URL(process.env.PUBLIC_URL).hostname] : []` to `next.config`; `whatsapp dev` warns if it's missing. (Vite doesn't need it.)
+
 ### Sending on WhatsApp
 
 UI_calling builds the message; your server sends it through the Cloud API:

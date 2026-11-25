@@ -181,6 +181,27 @@ Next:
 Patterns and rules: npx ui-calling guide`);
 }
 
+/**
+ * `next dev` serves its own scripts only to localhost unless a host is listed in `allowedDevOrigins`: a screen opened
+ * on a phone through a tunnel (PUBLIC_URL) stays blank. Add PUBLIC_URL's host there, once.
+ */
+const ALLOW_TUNNEL = `  // UI_calling: screens open on phones through a tunnel (PUBLIC_URL). \`next dev\` refuses its own scripts to any
+  // host but localhost unless it's listed here, and the screen stays blank.
+  allowedDevOrigins: process.env.PUBLIC_URL ? [new URL(process.env.PUBLIC_URL).hostname] : [],
+`;
+function allowTunnelInNextDev(done) {
+  const file = ["next.config.ts", "next.config.mjs", "next.config.js"].find((f) => existsSync(f));
+  const manual = `in next.config, add allowedDevOrigins: [<PUBLIC_URL's host>], or screens opened on a phone through a tunnel stay blank in next dev`;
+  if (!file) return done.push(manual);
+  const s = readFileSync(file, "utf8");
+  if (s.includes("allowedDevOrigins")) return; // already handled, by you or a previous init
+  // create-next-app's shape: `const nextConfig: NextConfig = {` (TypeScript) or `const nextConfig = {`.
+  const opening = s.match(/const nextConfig(?::\s*NextConfig)?\s*=\s*\{\n/);
+  if (!opening) return done.push(manual);
+  writeFileSync(file, s.replace(opening[0], opening[0] + ALLOW_TUNNEL));
+  console.log(`  update ${file}`);
+}
+
 function init() {
   if (!existsSync("package.json")) {
     console.error("No package.json here. Run `npx ui-calling init` in your project's root.");
@@ -224,6 +245,7 @@ function init() {
     write(route, fill("next-route.ts", { __UI_IMPORT__: importPath(route, runtime) }));
     write(page, fill("next-page.tsx", { __SCREEN_IMPORT__: importPath(page, screen) }));
     done.push(`API routes at /api/ui (${route})`, `surface page at /s/[token] (${page})`);
+    allowTunnelInNextDev(done);
   }
 
   writeFileSync(CONFIG_FILE, JSON.stringify({ framework, runtime, screen, surfacesDir: lib, serverDir: lib }, null, 2) + "\n");

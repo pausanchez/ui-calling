@@ -44,6 +44,8 @@ try {
     "AGENTS.md": "# Agents\n",
     ".gitignore": "node_modules\n",
     "src/app/globals.css": '@import "tailwindcss";\n\n:root {\n  --background: #ffffff;\n}\n',
+    // .mjs: the generated .ts files are typechecked, and the repo doesn't install next.
+    "next.config.mjs": "/** @type {import('next').NextConfig} */\nconst nextConfig = {\n  reactStrictMode: true,\n};\n\nexport default nextConfig;\n",
   });
   const out = run(next, "init");
   assert.match(out, /Next\.js/);
@@ -68,6 +70,8 @@ try {
   assert.equal(read("init-next-src", "AGENTS.md").match(/<!-- ui-calling -->/g)?.length, 1);
   assert.equal(read("init-next-src", "src/app/globals.css").match(/tokens\.css/g)?.length, 1);
   assert.equal(read("init-next-src", ".gitignore").match(/\.ui-calling/g)?.length, 1);
+  // A phone opens screens through a tunnel: next dev must serve its scripts to PUBLIC_URL's host. Added once.
+  assert.equal(read("init-next-src", "next.config.mjs").match(/allowedDevOrigins: process\.env\.PUBLIC_URL/g)?.length, 1);
   assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /shiftPickerImpl,/, "init without --force keeps registrations");
   // A block brings its server file and is registered; re-adding it updates the screen, never your data code.
   run(next, "add", "order-status");
