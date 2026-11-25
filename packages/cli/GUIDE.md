@@ -171,7 +171,8 @@ async function runTurn(conversationId: string, userText?: string) {
 
 - **Which events wake the agent:** domain events with `wake: true`, `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`).
 - **A woken turn may say nothing.** The agent gets events without a new message. Let it answer `NO_REPLY` when a follow-up wouldn't help.
-- **Several instances or serverless:** `onEvent` runs inside the screen's `POST /events` request, on whichever instance got it. Keep `pending` in your database (or read it back with `ui.events(conversationId)`), use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
+- **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
+- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Keep `pending` in your database (or read it back with `ui.events(conversationId)`), use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
 
 The demo's `apps/demo/server/agent.ts` does all of this with Claude (`enqueue`, `handleUiEvent`, `NO_REPLY`).
 
@@ -361,8 +362,9 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `toolPrefix` | `"show_"` | Tool name is `toolPrefix + surface name` |
 | `defaultLocale` | `"en"` | Used when a call doesn't pass `locale` |
 | `wakeOnError` | `true` | Wake the agent on the first error of each kind in a session |
-| `describeError` | message, trimmed | Turns unexpected errors into `{ code, message, retryable }`; `SurfaceError`s pass as they are |
+| `describeError` | generic `unexpected` | Turns unexpected errors into `{ code, message, retryable }` for the agent; by default the real error is only logged. `SurfaceError`s pass as they are |
 | `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
+| `maxEventsPerSession` | `500` | Events one link may record; after that the screen gets 429 |
 
 ### The runtime
 
@@ -441,4 +443,6 @@ Errors are `{ error, message, retryable, reason }`:
 | 400 | `invalid_payload`, `unknown_event` | The body didn't match the contract |
 | 404 | `not_found` | No such link |
 | 410 | `expired`, `completed` | The link ran out, or the user already finished |
+| 413 | `payload_too_large` | The event body is over 64 KB |
+| 429 | `too_many_events` | The link reached `maxEventsPerSession` |
 | 502 | `upstream_error` | `resolve` or a handler threw; `reason` is your `SurfaceError` code |

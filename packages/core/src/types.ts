@@ -42,15 +42,25 @@ export type UiEvent = {
 
 export class UiCallingError extends Error {
   constructor(
-    public code: "not_found" | "expired" | "completed" | "unknown_surface" | "unknown_event" | "invalid_payload" | "upstream_error",
+    public code:
+      | "not_found"
+      | "expired"
+      | "completed"
+      | "unknown_surface"
+      | "unknown_event"
+      | "invalid_payload"
+      | "upstream_error"
+      | "too_many_events",
     message: string,
-    public status: 400 | 404 | 410 | 502 = code === "not_found"
+    public status: 400 | 404 | 410 | 429 | 502 = code === "not_found"
       ? 404
       : code === "expired" || code === "completed"
         ? 410
         : code === "upstream_error"
           ? 502
-          : 400,
+          : code === "too_many_events"
+            ? 429
+            : 400,
     public retryable = false,
     /** For `upstream_error`: the `SurfaceError` code (e.g. "shift_full"), so the screen can explain it in the user's language. */
     public reason?: string,

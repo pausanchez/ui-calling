@@ -149,7 +149,7 @@ When something behind the screen fails, the agent hears about it as an `error` e
 throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { retryable: true });
 ```
 
-- Throw `SurfaceError` for failures you expect. Its code and message go to the agent as written, so keep them free of secrets. Other errors go through `describeError` (default: message trimmed to 300 characters).
+- Throw `SurfaceError` for failures you expect. Its code and message go to the agent as written, so keep them free of secrets. Other errors go through `describeError`. By default the agent gets a generic `unexpected` error and the real one is only logged on your server, since raw messages can carry secrets.
 - The first error of each kind in a session wakes the agent. Retries are still recorded, but they don't trigger a new message (`wakeOnError: false` turns waking off).
 - The screen shows the user a generic message in their language, never the upstream error.
 
