@@ -79,6 +79,8 @@ app.post("/api/whatsapp/webhook", async (c) => {
   const raw = await c.req.text();
   const secret = process.env.WHATSAPP_APP_SECRET;
   if (secret && !(await verifyWhatsAppSignature(raw, c.req.header("x-hub-signature-256"), secret))) {
+    // Otherwise a wrong WHATSAPP_APP_SECRET looks exactly like Meta sending nothing.
+    console.warn("[whatsapp] webhook rejected: invalid signature (check WHATSAPP_APP_SECRET)");
     return c.text("Invalid signature", 401);
   }
   void receiveWebhook(JSON.parse(raw));
