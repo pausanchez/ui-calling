@@ -157,22 +157,26 @@ function safeSummary(impl: SurfaceImpl<any>, data: unknown, moment: SummaryMomen
     return undefined;
   }
 }
-/** Every string or number inside the contract's `secret` fields of `data`, longest first. */
-function secretValues(keys: string[] | undefined, data: unknown): string[] {
-  if (!keys?.length || !data || typeof data !== "object") return [];
+/** Every string or number inside the contract's `secret` fields (or paths, "access.secret") of `data`, longest first. */
+function secretValues(paths: string[] | undefined, data: unknown): string[] {
+  if (!paths?.length || !data || typeof data !== "object") return [];
   const found: string[] = [];
   const walk = (v: unknown) => {
     if (typeof v === "string" || typeof v === "number") {
-      // Very short values ("1", "no") would blank out ordinary words; codes and IDs are longer.
-      if (String(v).length >= 3) found.push(String(v));
+      // A single character would blank out ordinary text; a two-digit PIN still counts.
+      if (String(v).trim().length >= 2) found.push(String(v).trim());
     } else if (v && typeof v === "object") Object.values(v).forEach(walk);
   };
-  for (const k of keys) walk((data as Record<string, unknown>)[k]);
+  for (const path of paths) walk(path.split(".").reduce<unknown>((v, k) => (v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined), data));
   return [...new Set(found)].sort((a, b) => b.length - a.length);
 }
 
-function scrubSecrets(text: string, keys: string[] | undefined, data: unknown): string {
-  return secretValues(keys, data).reduce((t, v) => t.split(v).join("[secret]"), text);
+/** Replace each secret value where it stands as a whole word, so "200" doesn't blank "1200" or "200m". */
+function scrubSecrets(text: string, paths: string[] | undefined, data: unknown): string {
+  return secretValues(paths, data).reduce((t, v) => {
+    const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return t.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "gu"), "[secret]");
+  }, text);
 }
 
 function safeDescribe(def: { describe: (p: any) => string }, payload: unknown, type: string): string {
@@ -602,13 +606,16 @@ export function createUiCalling(opts: UiCallingOptions) {
           locale: r.locale,
           expiresAt: r.expiresAt,
         };
+        // Minutes left as well as the UTC time: models misread a bare UTC time next to a local "now".
+        const expires_in_minutes = Math.round((Date.parse(r.expiresAt) - Date.now()) / 60_000);
         const content =
           opts.deliverLinks === "message"
-            ? { status: "link_ready", url: r.url, what_they_will_see: r.summary, expires_at: r.expiresAt, note: "Include this URL in your reply; don't change it." }
+            ? { status: "link_ready", url: r.url, what_they_will_see: r.summary, expires_at: r.expiresAt, expires_in_minutes, note: "Include this URL in your reply; don't change it." }
             : {
                 status: "link_ready",
                 what_they_will_see: r.summary,
                 expires_at: r.expiresAt,
+                expires_in_minutes,
                 note: `The link is sent to the user as a "${r.ctaLabel}" button with your next message. Don't write a URL.`,
               };
         return { ok: true, content: JSON.stringify(content), link, summary: r.summary };

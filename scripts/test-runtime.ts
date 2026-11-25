@@ -446,6 +446,9 @@ await check("agent text: no empty payloads, optional payloads, a short line afte
   });
   const link = await ui.call("show_report", {}, { conversationId: "c40", subject: "u" });
   assert.equal(link.summary, "Full: a very long screen");
+  // The tool result says how long the link lasts in minutes, not only as a UTC time a model can misread.
+  const run = await ui.runTool("show_report", {}, { conversationId: "c41", subject: "u" });
+  assert.equal(JSON.parse(run.content).expires_in_minutes, 60);
   const t = token(link.url);
   const sent = (await ui.emit(t, "sent", { text: "Door forced" })).event;
   const seen = (await ui.emit(t, "seen", {})).event;
@@ -488,6 +491,28 @@ await check("secret data: a careless summarize can't put the code in the tool re
   const everything = JSON.stringify(await store.listEvents({ conversationId: "c50" }));
   assert.doesNotMatch(everything, /1958#|panel B/);
   assert.match(everything, /\[secret\]/);
+});
+
+await check("secret data: a path keeps the rest of the field visible, and only whole words are scrubbed", async () => {
+  const site = defineSurface({
+    name: "site",
+    description: "x",
+    input: z.object({}),
+    data: z.object({ access: z.object({ status: z.string(), secret: z.object({ pin: z.string(), floor: z.string() }) }) }),
+    events: {},
+    secret: ["access.secret"],
+  });
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    surfaces: [
+      implement(site, {
+        resolve: async () => ({ access: { status: "open until 22:00", secret: { pin: "42", floor: "200" } } }),
+        summarize: (d) => `Access ${d.access.status}, PIN ${d.access.secret.pin}, floor ${d.access.secret.floor}, site 1200, 42nd street.`,
+      }),
+    ],
+  });
+  const { summary } = await ui.call("show_site", {}, { conversationId: "c60", subject: "u" });
+  assert.equal(summary, "Access open until 22:00, PIN [secret], floor [secret], site 1200, 42nd street.");
 });
 
 await check("files: a surface with files needs a store that can keep them", async () => {

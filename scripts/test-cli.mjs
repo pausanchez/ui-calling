@@ -99,7 +99,13 @@ try {
   assert.match(read("init-next-app", "ui-calling/ui.ts"), /deliverLinks: "message"/);
   // The link-account block's server uses init's store; its import is pointed at this project's store.ts.
   run(nextRoot, "add", "link-account", "--server-dir", "server");
-  assert.match(read("init-next-app", "server/link-account.server.ts"), /from "\.\.\/ui-calling\/store";/);
+  assert.match(read("init-next-app", "server/link-account.server.ts"), /from "\.\.\/ui-calling\/identity";/);
+  assert.match(read("init-next-app", "ui-calling/identity.ts"), /from "\.\/store";/);
+  // --replace swaps your own server file for the block's; without it, yours stays.
+  writeFileSync(join(nextRoot, "server/link-account.server.ts"), "// mine\n");
+  assert.match(run(nextRoot, "add", "link-account", "--server-dir", "server"), /keep .*link-account\.server\.ts/);
+  run(nextRoot, "add", "link-account", "--server-dir", "server", "--replace");
+  assert.match(read("init-next-app", "server/link-account.server.ts"), /linkAccountImpl/);
   assert.match(read("init-next-app", "ui-calling/ui.ts"), /linkAccountImpl,/);
   console.log("generated  init-next-app (+1 surface, +1 block)");
 

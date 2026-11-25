@@ -1,10 +1,6 @@
 import { SurfaceError, implement, type SurfaceData } from "@ui-calling/core";
-import { sqliteIdentity } from "@ui-calling/sqlite";
-import { store } from "../../../templates/init/store";
+import { identity } from "./identity";
 import { linkAccount } from "./link-account.surface";
-
-// Links and one-time codes, with attempt limits per customer, in your UI_calling database.
-export const identity = sqliteIdentity(store);
 
 type Customer = { id: string; name: string; email: string };
 
@@ -44,8 +40,8 @@ export const linkAccountImpl = implement(linkAccount, {
   // Never include the code or the email: this line goes to the agent.
   summarize: (d) =>
     d.stage === "linked"
-      ? `This chat is now linked to ${d.name ?? "the user's account"}. They wanted: ${d.continueWith}.`
-      : `Not linked yet (${d.stage === "code_sent" ? "a code was sent" : "no code sent yet"}). They wanted: ${d.continueWith}.`,
+      ? `This chat is now linked to ${d.name ?? "the user's account"}. They wanted: ${JSON.stringify(d.continueWith)}.`
+      : `Not linked yet (${d.stage === "code_sent" ? "a code was sent" : "no code sent yet"}). They wanted: ${JSON.stringify(d.continueWith)}.`,
   on: {
     code_requested: async ({ identifier }, ctx) => {
       const customer = await findCustomer(identifier);

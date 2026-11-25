@@ -34,6 +34,7 @@ export const linkAccount = defineSurface({
       // The code never reaches the agent or the event log; the handler still gets it.
       redact: ["code"],
       describe: () => "User entered their verification code",
+      includePayload: false,
       wake: true,
     }),
     start_over: event(z.object({}), { describe: () => "User started over" }),

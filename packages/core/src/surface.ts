@@ -71,15 +71,17 @@ export type SurfaceContract<
    */
   abandonAfterMs?: number | false;
   /**
-   * Fields of `data` that must never reach the agent: an access code, alarm instructions, an ID number. The screen
-   * still gets them. Every value inside them is removed from what `summarize` returns (as "[secret]") before it goes
-   * into the tool result or an event, so a careless `summarize` can't leak them. Keep them out of `summarize` anyway.
+   * Fields of `data` that must never reach the agent: an access code, alarm instructions, an ID number. A top-level
+   * field (`"access"`) or a path into one (`"access.secret"`), so the rest of `access` (its status, when it opens)
+   * still reaches the agent. The screen still gets them. Every value inside them is removed from what `summarize`
+   * returns (as "[secret]"), wherever it appears as a whole word, before it goes into the tool result or an event,
+   * so a careless `summarize` can't leak them. Keep them out of `summarize` anyway; single characters aren't scrubbed.
    */
   secret?: SecretKey<D>[];
 };
 
 /** A top-level field of the data, when the data is an object; any name otherwise (so any surface fits `AnySurface`). */
-type SecretKey<D extends z.ZodType> = D extends z.ZodObject ? keyof z.infer<D> & string : string;
+type SecretKey<D extends z.ZodType> = D extends z.ZodObject ? (keyof z.infer<D> & string) | `${keyof z.infer<D> & string}.${string}` : string;
 
 export function defineSurface<
   const N extends string,
