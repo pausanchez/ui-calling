@@ -43,7 +43,8 @@ export const claim = defineSurface({
 Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and submits once even on a double tap.
 
 ```ts
-// Your drafts table. With sqliteStore(), store.db is a node:sqlite DatabaseSync you can use for it.
+// Your drafts table, in the store `init` wrote (ui-calling/store.ts): store.db is a node:sqlite DatabaseSync.
+import { store } from "./store";
 store.db.exec("CREATE TABLE IF NOT EXISTS claim_drafts (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
 
 function save(id: string, subject: string, patch: Partial<Draft>, reached: Step) {
@@ -99,7 +100,12 @@ function Steps({ data }: { data: Data }) {
   const [problem, setProblem] = useState<null | { message: string }>(null);
 
   const path = [...claimSteps]; // leave out steps that don't apply to this user
-  const nav = useSurfaceSteps(path, { initial: data.draft.step });
+  const valid = { details: details.trim().length > 0, choice: Boolean(choice), review: true };
+  // How far the user may go: the furthest step saved, but never past a step whose answer is missing now.
+  const saved = path.reduce((at, s, i) => (claimSteps.indexOf(s) <= claimSteps.indexOf(data.draft.step) ? i : at), 0);
+  const firstMissing = path.findIndex((s) => !valid[s]);
+  const reached = firstMissing === -1 ? saved : Math.min(saved, firstMissing);
+  const nav = useSurfaceSteps(path, { initial: path[reached] });
 
   async function next() {
     setBusy(true);
@@ -108,7 +114,10 @@ function Steps({ data }: { data: Data }) {
       if (nav.step === "details") await emit("details_saved", { details });
       if (nav.step === "choice") await emit("choice_saved", { choice: choice! });
       if (nav.step === "review") await emit("submitted", {});
-      nav.next();
+      if (!nav.isLast) {
+        nav.next();
+        window.scrollTo({ top: 0 });
+      }
     } catch (err) {
       const e = err instanceof SurfaceActionError ? err : null;
       setProblem({ message: (e?.reason && t.errors[e.reason]) || (e?.code === "network" ? t.offline : t.failed) });
@@ -119,7 +128,7 @@ function Steps({ data }: { data: Data }) {
 
   return (
     <>
-      <StepBar steps={path.map((s) => ({ key: s, label: t.steps[s] }))} index={nav.index} reached={path.indexOf(data.draft.step)} onSelect={nav.go} locale={locale} />
+      <StepBar steps={path.map((s) => ({ key: s, label: t.steps[s] }))} index={nav.index} reached={reached} onSelect={nav.go} locale={locale} />
       {nav.step === "details" && <textarea value={details} onChange={(e) => setDetails(e.target.value)} />}
       {/* ...one block per step... */}
       <ActionBar
@@ -138,6 +147,8 @@ function Steps({ data }: { data: Data }) {
 
 - **Skip steps that don't apply** (no photos unless an item is damaged): pass only the steps the user will see, so "Step 2 of 4" is right. If a step drops out while the user is on it, `useSurfaceSteps` shows the one that took its place.
 - **`abandoned` treats the waking event as the finish line.** A user who saves two steps and goes quiet gets "User stopped partway without finishing. Last step: …". See [follow-up-abandoned](follow-up-abandoned.md).
+- **The furthest step isn't a free pass.** A user can go back and change an answer so a later step is needed again (a reason changed to "damaged" now needs photos). Cap how far they can jump at the first step with a missing answer, as above, and check everything again in the last handler.
+- **A skipped step can be the saved one.** If the draft's step dropped out of the path, `path.indexOf` gives -1; count it by its place in the full order, as `saved` does above.
 - **Resuming must not re-apply a prefill** over the user's own choice. See [prefill](prefill.md).
 - **Photos in a draft:** a draft outlives its link. `ctx.files(ids)` accepts this user's uploads from earlier links to the same surface, so the draft's photo IDs still work when the agent opens the screen again. See [file-upload](file-upload.md).
 - **Where drafts live:** in your database. In memory, a restart loses them; in a JSON file inside the project, `next dev` reloads the page on every save.

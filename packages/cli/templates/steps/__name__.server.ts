@@ -4,8 +4,8 @@ import { __const__, __const__Steps } from "./__name__.surface";
 type Data = SurfaceData<typeof __const__>;
 type Step = Data["draft"]["step"];
 
-// TODO: keep drafts in your database. For a prototype, sqliteStore()'s `store.db` can hold a table.
-// In memory, a restart loses them.
+// TODO: keep drafts in your database. In memory, a restart loses them. For a prototype, the store `init`
+// wrote can hold a table: import { store } from "<your ui-calling folder>/store", then use store.db.
 const drafts = new Map<string, Pick<Data, "draft" | "submitted">>();
 
 /** Load the record, start the draft, and apply what the agent already knows until the user saves their own choice. */

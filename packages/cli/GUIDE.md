@@ -33,7 +33,7 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 3. **Screen.** Render `data`, call `emit(event, payload)`, call `complete()` when the user is done, and keep every string in the messages object.
 4. **Register** the implementation in `createUiCalling({ surfaces: [...] })` and render the component on your surface route.
 5. **Typecheck.**
-6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back.
+6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back. The test user's `subject` is `dev-user` (change it with `--subject`): in development, have `resolve` map it to a test customer, the way a WhatsApp subject maps to a real one.
 
 **A screen with several steps** (a return, a claim, an application): `npx ui-calling new <name> --template steps`. It writes a working three-step screen with a saved draft, resume, and the phone's back button, built on `useSurfaceSteps` and the parts below. Change the steps to yours.
 
@@ -56,7 +56,10 @@ npx ui-calling init
 ```
 
 Run it in your project's root. It detects Next.js or Vite and writes:
-- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and a SQLite store so links and context survive restarts.
+- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
+- `ui-calling/store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
+
+These paths are under the folder `init` picked: `src/ui-calling/` when your app has a `src` folder, `ui-calling/` otherwise, or `--dir`.
 - `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
 - `ui-calling/tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use UI_calling's). `npx ui-calling tokens` copies only this file.
 - **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
@@ -70,7 +73,7 @@ Without Next.js, mount the API yourself, then route `/s/:token` to `<SurfaceScre
 
 Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
 
-On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`.
+On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`. Set `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise it shows your layout's title.
 
 Ready-made blocks: `npx ui-calling list`, then `npx ui-calling add order-status`. `add` copies the contract and the screen, and writes `order-status.server.ts` with example data so the screen renders right away. Replace the example with your data. Running `add --force` later updates the contract and screen but never overwrites the server file.
 

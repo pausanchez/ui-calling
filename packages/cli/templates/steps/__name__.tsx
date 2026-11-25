@@ -95,10 +95,14 @@ function Steps({ data, t }: { data: Data; t: __Component__Messages }) {
 
   // TODO: leave out steps that don't apply to this user, e.g. __const__Steps.filter((s) => s !== "choice" || needsChoice).
   const path: Step[] = [...__const__Steps];
-  // Resumes on the furthest step saved; Back and the phone's back button go to the step before.
-  const nav = useSurfaceSteps(path, { initial: data.draft.step });
-  const reached = path.indexOf(data.draft.step);
   const valid: Record<Step, boolean> = { details: details.trim().length > 0, choice: Boolean(choice), review: true };
+  // How far the user may go: the furthest step saved, but never past a step whose answer is missing now
+  // (they went back and changed something). Steps that dropped out of the path count by their place in the order.
+  const saved = path.reduce((at, s, i) => (__const__Steps.indexOf(s) <= __const__Steps.indexOf(data.draft.step) ? i : at), 0);
+  const firstMissing = path.findIndex((s) => !valid[s]);
+  const reached = firstMissing === -1 ? saved : Math.min(saved, firstMissing);
+  // Resumes there; Back and the phone's back button go to the step before.
+  const nav = useSurfaceSteps(path, { initial: path[reached] });
 
   function go(to: Step) {
     setProblem(null);
@@ -114,7 +118,10 @@ function Steps({ data, t }: { data: Data; t: __Component__Messages }) {
       if (nav.step === "details") await emit("details_saved", { details });
       if (nav.step === "choice") await emit("choice_saved", { choice: choice! });
       if (nav.step === "review") await emit("submitted", {});
-      if (!nav.isLast) go(path[nav.index + 1]);
+      if (!nav.isLast) {
+        nav.next();
+        window.scrollTo({ top: 0 });
+      }
     } catch (err) {
       // The server already told the agent; here we only tell the user.
       const e = err instanceof SurfaceActionError ? err : null;

@@ -74,8 +74,8 @@ function addPart(name) {
   const part = registry.parts[name];
   for (const rel of part.files) {
     const target = join(outDir, "parts", basename(rel));
-    if (existsSync(target) && !force) continue;
-    write(target, readFileSync(join(registryDir, rel)));
+    if (existsSync(target) && !force) console.log(`  keep   ${shown(target)} (already there; --force replaces it)`);
+    else write(target, readFileSync(join(registryDir, rel)));
   }
   return part;
 }
@@ -193,6 +193,7 @@ function init() {
 
   write(runtime, fill("ui.ts", { __BASE_URL__: flag("--base-url", framework === "vite" ? "http://localhost:5173" : "http://localhost:3000"), __DELIVER__: deliver }));
   write(screen, fill("surface-screen.tsx", {}));
+  write(join(lib, "store.ts"), fill("store.ts", {}));
   write(join(lib, "tokens.css"), readFileSync(join(registryDir, registry.tokens)));
 
   const done = [];
@@ -409,7 +410,8 @@ switch (cmd) {
   tokens            copy the design tokens only
   link <surface> [key=value...]
                     open a screen for a test user on your running dev server and print its link,
-                    e.g. link order-return order_id=A-0987 (--subject, --locale, --url)
+                    e.g. link order-return order_id=A-0987. The test user's subject is
+                    dev-user unless you pass --subject (also --locale, --url)
   events            print what the agent would read from that test user's screens (--subject, --url)
   guide [recipe]    print the guide for building surfaces (for people and coding agents);
                     "guide recipes" lists task-shaped recipes, "guide <recipe>" prints one`);

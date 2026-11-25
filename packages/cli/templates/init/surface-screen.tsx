@@ -49,7 +49,16 @@ function Router() {
   // Once the surface is known, it renders its own states, including "your data source is down".
   const render = surface ? SURFACES[surface] : undefined;
   if (render) return render();
-  if (status === "loading") return <main style={{ minHeight: "100dvh" }} aria-busy="true" />;
+  // Until the surface is known: a quiet placeholder, so the first load doesn't look like a blank page.
+  if (status === "loading") {
+    return (
+      <main aria-busy="true" style={{ minHeight: "100dvh", maxWidth: 448, margin: "0 auto", padding: "24px 16px", display: "grid", gap: 12, alignContent: "start" }}>
+        {[40, 112, 64].map((h, i) => (
+          <div key={i} style={{ height: h, borderRadius: 8, background: "var(--muted, #eee)", opacity: 0.8 }} />
+        ))}
+      </main>
+    );
+  }
   const t = TEXT[(locale ?? "en").startsWith("es") ? "es" : "en"];
   // "completed": the user already finished here and the link is closed.
   const done = status === "completed";

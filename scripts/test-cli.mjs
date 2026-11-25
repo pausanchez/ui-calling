@@ -51,6 +51,9 @@ try {
   assert.match(read("init-next-src", "src/app/globals.css"), /@import "tailwindcss";\n@import "\.\.\/ui-calling\/tokens\.css";/);
   assert.match(out, /override them/);
   assert.match(read("init-next-src", ".gitignore"), /^\.ui-calling\/$/m);
+  // The store is its own file, so server code can use store.db without importing ui.ts.
+  assert.match(read("init-next-src", "src/ui-calling/store.ts"), /export const store = sqliteStore\(\)/);
+  assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /import \{ store \} from "\.\/store";/);
   run(next, "new", "shift-picker");
   run(next, "new", "link-account");
   run(next, "new", "shift-picker"); // again: files are skipped, registration stays single
@@ -83,7 +86,7 @@ try {
   assert.match(read("init-next-src", "src/ui-calling/claim-form.tsx"), /from "\.\/parts\/step-bar"/);
   assert.match(read("init-next-src", "src/ui-calling/parts/action-bar.tsx"), /export function ActionBar/);
   assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /claimFormImpl,/);
-  run(next, "add", "photo-picker", "quantity-stepper");
+  assert.match(run(next, "add", "step-bar", "photo-picker", "quantity-stepper"), /keep .*step-bar\.tsx/);
   assert.match(read("init-next-src", "src/ui-calling/parts/photo-picker.tsx"), /export function PhotoPicker/);
   assert.match(fails(next, "new", "x", "--template", "nope"), /Unknown template/);
   // Setting up again somewhere else would leave the registrations behind.
