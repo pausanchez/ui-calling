@@ -33,7 +33,7 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 3. **Screen.** Render `data`, call `emit(event, payload)`, call `complete()` when the user is done, and keep every string in the messages object.
 4. **Register** the implementation in `createUiCalling({ surfaces: [...] })` and render the component on your surface route.
 5. **Typecheck.**
-6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back. `events --time-zone Europe/Madrid` uses the clock you give `formatEventsForAgent`. The test user's `subject` is `dev-user` (change it with `--subject`): in development, have `resolve` map it to a test customer, the way a WhatsApp subject maps to a real one.
+6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back. Add `--conversation <id>` to put the screen in your agent's conversation, so its events reach your agent end to end; `--url http://localhost:3100` if your app isn't on the default port. `events --time-zone Europe/Madrid` uses the clock you give `formatEventsForAgent`. The test user's `subject` is `dev-user` (change it with `--subject`): in development, have `resolve` map it to a test customer, the way a WhatsApp subject maps to a real one.
 
 **A screen with several steps** (a return, a claim, an application): `npx ui-calling new <name> --template steps`. It writes a working three-step screen with a saved draft, resume, and the phone's back button, built on `useSurfaceSteps` and the parts below. Change the steps to yours.
 
@@ -110,10 +110,14 @@ Use the adapter for the SDK you already have. Each one turns your surfaces into 
 
 ```ts
 const links: SurfaceLink[] = [];
-const final = await client.beta.messages.toolRunner({
-  model: "claude-opus-5-5", max_tokens: 16000, messages,
+const runner = client.beta.messages.toolRunner({
+  model: "claude-opus-5-5", max_tokens: 16000, messages: convo.messages,
   tools: anthropicRunnableTools(ui, { conversationId, subject }, { onLink: (l) => links.push(l) }),
 });
+const final = await runner;
+// Keep the whole turn for the next one: the tool calls and results (what the screen shows) are in
+// runner.params.messages; the final reply isn't, so add it.
+convo.messages = [...runner.params.messages, { role: "assistant", content: final.content }];
 // send final's text, with each link as a button
 ```
 
@@ -174,13 +178,10 @@ function enqueue(conversationId: string, turn: () => Promise<void>) {
 }
 const pending = new Map<string, UiEvent[]>();   // quiet events wait here for the next turn
 
-export const ui = createUiCalling({
-  // ...
-  abandonAfterMs: 10 * 60_000,
-  onEvent: (e) => {
-    pending.set(e.conversationId, [...(pending.get(e.conversationId) ?? []), e]);
-    if (e.wake) void enqueue(e.conversationId, () => runTurn(e.conversationId));
-  },
+// In your agent's module, which imports `ui` (so ui.ts never imports the agent):
+ui.onEvent((e) => {
+  pending.set(e.conversationId, [...(pending.get(e.conversationId) ?? []), e]);
+  if (e.wake) void enqueue(e.conversationId, () => runTurn(e.conversationId));
 });
 
 // Your webhook calls this for every message the user writes.
@@ -267,9 +268,11 @@ Events of type "error" mean something failed on the screen, usually a system beh
 - **Read IDs from `ctx.input`.** It's what the agent passed, typed by the contract, so a typo in the field that scopes the data is a compile error.
 - **Quote what the user typed.** In `describe` and `summarize`, write user text with `JSON.stringify(p.details)`, and give every string field a `.max()`. The runtime also puts what the screen reports on one line and escapes `<` and `>` before the agent reads it, so typed text can't close `<ui_events>` or fake a line.
 - **Keep payloads small and don't trust them.** The payload comes from the browser. Send IDs and the user's choices; let `summarize` give the agent the readable detail (dates, places, prices) from your own data. If the payload repeats what the user saw (e.g. a time), check it against your data in the handler and throw `SurfaceError` if it changed.
-- **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
+- **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. When it's a business refusal (the shift filled up, the code was wrong) rather than an outage, add `refused: true`: the screen gets 422 `refused` instead of 502 `upstream_error`, so monitoring doesn't read it as your back office being down. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
 - **The screen can explain failures.** A failed `emit` throws `SurfaceActionError`, and its `reason` is your `SurfaceError` code. Map known reasons to messages in the user's language ("that shift just filled up"), call `reload()` when the screen may be stale, and only offer "try again" for retryable failures.
 - **`complete()` means "the user is done here", and it closes the link.** Call it on the "back to chat" link or a final button, not after every action. It records a `completed` event and stops the screen counting as abandoned. From then on the link refuses everything (410, `error: "completed"`), so a tab left open or a forwarded link can't act again. The screen gets `status: "completed"`: show "all done" and a way back to the chat. `surface-screen.tsx` from `init` already does. If the user needs the screen again, the agent opens a new link.
+- **Delete what you don't need to keep.** Events hold what users typed, and files what they uploaded. `ui.forget({ subject })` answers a deletion request; run `ui.forget({ expiredBefore })` on a schedule for a retention policy. Your own tables (drafts, account links) are yours to clear.
+- **Bind sensitive links to one device.** A link is a bearer token: forwarded, it works for anyone. Set `bindToDevice: true` on screens that show secrets: the first browser to open it gets a cookie, and any other device sees "this link was already opened on another device" (403 `other_device`). Link previews don't count as opening. It needs `@ui-calling/server`, which sets the cookie.
 - **Short-lived links for sensitive screens.** Set `ttlSeconds` on the contract (e.g. `10 * 60` for identity checks or payments). It overrides `createUiCalling`'s default of 1 hour, and the agent is told the real expiry.
 - **The URL carries only the token.** Never put personal data in `input`; load it in `resolve`.
 - **Strings live in the messages object.** Use `locale` from `useSurface()` for dates and currency (`toLocaleDateString(locale)`, `toLocaleString(locale, { style: "currency" })`).
@@ -345,6 +348,17 @@ On WhatsApp, Meta identifies each user with a **BSUID** (business-scoped user ID
 6. **Send to the BSUID.** `whatsappCtaMessage({ recipient: bsuid, … })`. Use `to: phone` instead when you have it; if both are set, Meta uses `to`.
 
 The demo implements all of this (`apps/demo/server/identity.ts`, `agent.ts` → `receiveWebhook`), and its panel lets you hide the number or change it.
+
+### Developing against a real WhatsApp number
+
+Put the four keys in `.env` (README, "Try it on your own WhatsApp"), then:
+
+```bash
+npx ui-calling whatsapp dev               # tunnel, your dev server with PUBLIC_URL set to it, Meta's webhook pointed there
+npx ui-calling whatsapp check             # is the token valid, and where does Meta deliver?
+```
+
+`whatsapp dev` runs `npm run dev` unless you pass your own after `--` (`npx ui-calling whatsapp dev -- pnpm dev`), and expects the webhook at `/api/whatsapp/webhook` (`--webhook-path`). One Meta app delivers to one address at a time: pointing it here takes it from any other app.
 
 ### Sending on WhatsApp
 
@@ -454,6 +468,8 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `ui.runTool(name, input, who)` | `{ ok: true, content, link, summary }` or `{ ok: false, content, error }`; never throws for bad input |
 | `ui.call(name, input, who)` | `{ url, sessionId, surface, locale, ctaLabel, expiresAt, summary }`; throws on bad input |
 | `ui.events(conversationId, { after?, limit? })` | The conversation's events, oldest first; with `after` (an event ID), only newer ones. Throws `UnknownEventError` for an unknown `after` |
+| `ui.onEvent(handler)` | Get every event from code that imports `ui` (your agent module), like the `onEvent` option. Returns an unsubscribe function |
+| `ui.forget({ conversationId } \| { subject } \| { expiredBefore })` | Deletes matching sessions with their events and files: a deletion request, or a retention policy run on a schedule. Returns the counts |
 | `ui.ready` | Resolves once abandon timers from before a restart are re-armed |
 
 `who` is `{ conversationId, subject }`: the conversation events report to, and the user the data is scoped to.
@@ -462,7 +478,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 
 | API | Fields |
 |---|---|
-| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
+| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `bindToDevice?` (only the first device that opens the link can use it), `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent), `includePayload?` (default `true`; `false` leaves the JSON out of what the agent reads when `describe` already says it) |
 | `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any), `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
 | `ctx` | `{ subject, input, conversationId, locale, session, files(ids?) }`; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface |
@@ -518,7 +534,7 @@ What `@ui-calling/server` serves under your mount point. Any client can use it; 
 | `POST /sessions/:token/files/:slot`, multipart with a `file` field | `200 { file: { id, slot, name, type, size } }` |
 | `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
 | `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
-| `POST /dev/links` with `{ surface, input?, subject?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it |
+| `POST /dev/links` with `{ surface, input?, subject?, conversationId?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it |
 | `GET /dev/events/:conversationId` | Only with `dev: true`. What the agent would read, as text |
 
 Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:
@@ -530,5 +546,7 @@ Errors are `{ error, message, retryable, reason }`. Once the link is known (`exp
 | 404 | `not_found` | No such link |
 | 410 | `expired`, `completed` | The link ran out, or the user already finished |
 | 413 | `payload_too_large`, `invalid_file` | The event body is over 64 KB, or an upload is bigger than any slot accepts |
+| 403 | `other_device` | A `bindToDevice` link was already opened on another device |
+| 422 | `refused` | A handler or `resolve` threw `SurfaceError(..., { refused: true })`: a business refusal, not an outage; `reason` is its code |
 | 429 | `too_many_events` | The link reached `maxEventsPerSession` |
 | 502 | `upstream_error` | `resolve` or a handler threw; `reason` is your `SurfaceError` code |

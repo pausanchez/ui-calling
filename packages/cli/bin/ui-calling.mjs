@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ui-calling: set up UI_calling in a project and copy surfaces into it. You own the code afterwards.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkgDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,8 +26,12 @@ const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")
 const fromRoot = (p) => (p ? resolve(root, p) : undefined);
 const config = raw && { ...raw, runtime: fromRoot(raw.runtime), screen: fromRoot(raw.screen), surfacesDir: fromRoot(raw.surfacesDir), serverDir: fromRoot(raw.serverDir) };
 
-const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone"];
-const [cmd, ...rest] = process.argv.slice(2);
+const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone", "--conversation", "--port", "--webhook-path"];
+const [cmd, ...all] = process.argv.slice(2);
+// Everything after a bare "--" is passed through (e.g. the dev command for `whatsapp dev`).
+const dashDash = all.indexOf("--");
+const rest = dashDash === -1 ? all : all.slice(0, dashDash);
+const passThrough = dashDash === -1 ? [] : all.slice(dashDash + 1);
 const flag = (name, fallback) => {
   const i = rest.indexOf(name);
   return i >= 0 ? rest[i + 1] : fallback;
@@ -262,7 +266,17 @@ function init() {
   }
 
   const pm = existsSync("pnpm-lock.yaml") ? "pnpm add" : existsSync("yarn.lock") ? "yarn add" : existsSync("bun.lockb") || existsSync("bun.lock") ? "bun add" : "npm install";
-  const steps = [`${pm} @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite zod`];
+  // Only what's missing. zod must be a direct dependency: contracts import it.
+  const missing = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", "@ui-calling/sqlite", "zod"].filter((d) => !deps[d]);
+  const steps = [];
+  if (missing.length) {
+    const ours = missing.filter((d) => d.startsWith("@ui-calling/"));
+    steps.push(
+      `${pm} ${missing.join(" ")}` +
+        // Until the first release, an install from the registry would fail, or find someone else's package.
+        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the tarballs built in the UI_calling repo (README, "Building and publishing").` : ""),
+    );
+  }
   if (tokensStep) steps.push(tokensStep);
   if (framework !== "next") {
     steps.push(
@@ -283,8 +297,12 @@ function init() {
  */
 async function devCommand(which) {
   const port = config?.framework === "vite" ? 5173 : 3000;
-  const base = flag("--url", `http://localhost:${port}/api/ui`).replace(/\/$/, "");
+  // --url can be the app (http://localhost:3100) or its API (http://localhost:3100/api/ui).
+  const given = new URL(flag("--url", `http://localhost:${port}`));
+  const base = (given.pathname === "/" ? `${given.origin}/api/ui` : given.href).replace(/\/$/, "");
   const subject = flag("--subject", "dev-user");
+  // Your agent's conversation, so the screen's events reach it (default: a conversation of its own, dev:<subject>).
+  const conversationId = flag("--conversation", `dev:${subject}`);
   const reach = async (path, init) => {
     const res = await fetch(base + path, init).catch(() => null);
     if (!res) {
@@ -300,13 +318,13 @@ async function devCommand(which) {
   if (which === "events") {
     // Same clock as your agent: pass the zone you give formatEventsForAgent (e.g. --time-zone Europe/Madrid).
     const tz = flag("--time-zone");
-    const res = await reach(`/dev/events/${encodeURIComponent(`dev:${subject}`)}${tz ? `?timeZone=${encodeURIComponent(tz)}` : ""}`);
+    const res = await reach(`/dev/events/${encodeURIComponent(conversationId)}${tz ? `?timeZone=${encodeURIComponent(tz)}` : ""}`);
     process.stdout.write((await res.text()) + "\n");
     return;
   }
   const [surface, ...pairs] = names;
   if (!surface) {
-    console.error("Usage: ui-calling link <surface> [key=value...] [--subject id] [--locale es] [--url http://localhost:3000/api/ui]");
+    console.error("Usage: ui-calling link <surface> [key=value...] [--subject id] [--conversation id] [--locale es] [--url http://localhost:3000]");
     process.exit(1);
   }
   // key=value pairs become the tool input; numbers and true/false keep their type.
@@ -320,14 +338,28 @@ async function devCommand(which) {
   const res = await reach("/dev/links", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ surface: surface.replaceAll("-", "_"), input, subject, locale: flag("--locale") }),
+    body: JSON.stringify({ surface: surface.replaceAll("-", "_"), input, subject, conversationId, locale: flag("--locale") }),
   });
   const json = await res.json().catch(() => ({ message: `${base}/dev/links isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js).` }));
   if (!res.ok) {
     console.error(json.message ?? json.error ?? `HTTP ${res.status}`);
     process.exit(1);
   }
-  console.log(`${json.url}\n\nOpened for subject "${subject}". What the agent reads back: npx ui-calling events${subject === "dev-user" ? "" : ` --subject ${subject}`}`);
+  console.log(json.url);
+  // The link's address comes from the app's baseUrl (PUBLIC_URL): say so when it isn't the server we just talked to.
+  if (new URL(json.url).origin !== new URL(base).origin) {
+    console.log(`\nNote: this link points at ${new URL(json.url).origin}, but your dev server answered at ${new URL(base).origin}. Set PUBLIC_URL=${new URL(base).origin} for the app, or open it at ${new URL(base).origin}${new URL(json.url).pathname}.`);
+  }
+  const again = [conversationId !== `dev:${subject}` ? `--conversation ${conversationId}` : subject !== "dev-user" ? `--subject ${subject}` : ""].filter(Boolean).join(" ");
+  console.log(`\nOpened for subject "${subject}" in conversation "${conversationId}". What the agent reads back: npx ui-calling events${again ? ` ${again}` : ""}`);
+}
+
+/**
+ * Recipes link to demo and package files by relative path, which works in the repo but goes nowhere from the
+ * CLI: print them as GitHub links instead. Links to other recipes (x.md) stay as they are.
+ */
+function repoLinks(md) {
+  return md.replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui_calling/blob/main/${posix.normalize(posix.join("packages/cli/recipes", rel))})`);
 }
 
 switch (cmd) {
@@ -407,6 +439,11 @@ switch (cmd) {
     }
     newSurface(names[0]);
     break;
+  case "whatsapp": {
+    const { whatsapp } = await import("./whatsapp.mjs");
+    await whatsapp(names[0], { flag, devCommand: passThrough, defaultPort: config?.framework === "vite" ? "5173" : "3000" });
+    break;
+  }
   case "link":
   case "events":
     await devCommand(cmd);
@@ -418,7 +455,7 @@ switch (cmd) {
     const [topic] = names;
     if (!topic) process.stdout.write(readFileSync(join(pkgDir, "GUIDE.md"), "utf8"));
     else if (topic === "recipes") process.stdout.write(readFileSync(join(recipesDir, "README.md"), "utf8"));
-    else if (recipes.includes(topic)) process.stdout.write(readFileSync(join(recipesDir, `${topic}.md`), "utf8"));
+    else if (recipes.includes(topic)) process.stdout.write(repoLinks(readFileSync(join(recipesDir, `${topic}.md`), "utf8")));
     else {
       console.error(`No recipe "${topic}". Recipes: ${recipes.join(", ")}`);
       process.exit(1);
@@ -442,9 +479,13 @@ switch (cmd) {
   link <surface> [key=value...]
                     open a screen for a test user on your running dev server and print its link,
                     e.g. link order-return order_id=A-0987. The test user's subject is
-                    dev-user unless you pass --subject (also --locale, --url)
+                    dev-user unless you pass --subject. --url is your app (http://localhost:3100)
+                    or its API; --conversation puts the screen in your agent's conversation
   events            print what the agent would read from that test user's screens
-                    (--subject, --url, --time-zone Europe/Madrid)
+                    (--subject, --conversation, --url, --time-zone Europe/Madrid)
+  whatsapp check    is the WhatsApp setup right? (token, where Meta delivers; --url, --webhook-path)
+  whatsapp dev      tunnel + your dev server with PUBLIC_URL + point Meta's webhook there
+                    (--port 3000, --webhook-path /api/whatsapp/webhook, -- your dev command)
   guide [recipe]    print the guide for building surfaces (for people and coding agents);
                     "guide recipes" lists task-shaped recipes, "guide <recipe>" prints one`);
 }

@@ -29,12 +29,13 @@ shift_selected: async (p, ctx) => {
   const workerId = ctx.input.worker_id;
   const shown = getShiftBoard(workerId, ctx.subject).open.find((s) => s.id === p.shift_id);
   if (shown && (shown.date !== p.date || shown.start !== p.start)) {
-    throw new SurfaceError("shift_changed", `Shift ${p.shift_id} changed after the screen loaded`);
+    throw new SurfaceError("shift_changed", `Shift ${p.shift_id} changed after the screen loaded`, { refused: true });
   }
   try {
     return bookShift(workerId, ctx.subject, p.shift_id);
   } catch (err) {
-    if (err instanceof ShiftUnavailable) throw new SurfaceError(`shift_${err.reason}`, err.message); // shift_full, shift_not_found
+    // A refusal, not an outage: 422 "refused", not 502, so monitoring doesn't page anyone.
+    if (err instanceof ShiftUnavailable) throw new SurfaceError(`shift_${err.reason}`, err.message, { refused: true }); // shift_full, shift_not_found
     throw err;
   }
 },

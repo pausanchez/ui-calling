@@ -134,7 +134,10 @@ try {
     assert.ok(index.includes(`(${f})`), `recipes/README.md lists ${name}`);
     const text = run(tmp, "guide", name);
     for (const [, link] of text.matchAll(/\]\(([^)#]+\.(?:md|ts|tsx))\)/g)) {
-      assert.ok(existsSync(join(recipesDir, link)), `${f} links to ${link}, which doesn't exist`);
+      // From the CLI, repo files are GitHub links (the repo has no other address for someone with only the package).
+      const repoPath = link.replace("https://github.com/pausanchez/ui_calling/blob/main/", "");
+      const onDisk = repoPath === link ? join(recipesDir, link) : join(root, repoPath);
+      assert.ok(existsSync(onDisk), `${f} links to ${link}, which doesn't exist`);
     }
   }
   assert.match(fails(tmp, "guide", "no-such-recipe"), /No recipe "no-such-recipe"/);

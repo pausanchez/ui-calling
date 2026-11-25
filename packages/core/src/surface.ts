@@ -78,6 +78,12 @@ export type SurfaceContract<
    * so a careless `summarize` can't leak them. Keep them out of `summarize` anyway; single characters aren't scrubbed.
    */
   secret?: SecretKey<D>[];
+  /**
+   * Only the first device that opens the link can use it: it gets a cookie, and any other device (a forwarded
+   * WhatsApp message, someone else's phone) gets "opened on another device". For screens that show secrets.
+   * Needs `@ui-calling/server` (it sets the cookie); link previews don't count as opening.
+   */
+  bindToDevice?: boolean;
 };
 
 /** A top-level field of the data, when the data is an object; any name otherwise (so any surface fits `AnySurface`). */

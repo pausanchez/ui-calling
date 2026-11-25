@@ -1,4 +1,5 @@
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
 import { UiCallingError, formatEventsForAgent, type UiCalling } from "@ui-calling/core";
 
@@ -10,6 +11,8 @@ import { UiCallingError, formatEventsForAgent, type UiCalling } from "@ui-callin
  * its JavaScript, so they never hit these routes. That keeps previews from
  * leaking data or counting as "opened".
  */
+const DEVICE_COOKIE = "uic_device";
+
 export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
   const app = new Hono();
 
@@ -19,6 +22,21 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     c.header("Cache-Control", "no-store");
     c.header("Referrer-Policy", "no-referrer");
   });
+
+  // Surfaces with `bindToDevice`: the first browser to open the link gets a cookie scoped to this link's routes,
+  // and every later request must carry it. Other surfaces pass straight through.
+  const bindDevice = async (c: Context, next: Next) => {
+    const token = c.req.param("token")!;
+    const { issue } = await ui.device(token, getCookie(c, DEVICE_COOKIE));
+    if (issue) {
+      const path = c.req.path.slice(0, c.req.path.indexOf(`/sessions/${token}`) + `/sessions/${token}`.length);
+      setCookie(c, DEVICE_COOKIE, issue, { path, httpOnly: true, sameSite: "Strict", secure: new URL(c.req.url).protocol === "https:" });
+    }
+    await next();
+  };
+  // One registration: in Hono "/sessions/:token/*" also matches "/sessions/:token", and a second pass would refuse
+  // the cookie the first one just issued (the browser hasn't sent it yet).
+  app.use("/sessions/:token/*", bindDevice);
 
   app.get("/sessions/:token", async (c) => c.json(await ui.open(c.req.param("token"))));
 

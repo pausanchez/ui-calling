@@ -18,9 +18,14 @@ export const ui = createUiCalling({
   // Wake the agent if a user opens a screen and does nothing for 10 minutes.
   abandonAfterMs: 10 * 60_000,
   onEvent: async (event) => {
-    // The return path to your agent. Store the event with conversation `event.conversationId`;
-    // if `event.wake`, run an agent turn with `formatEventsForAgent([...])` from "@ui-calling/core"
-    // as a user message, so it can follow up on what happened on the screen.
     console.log(`[ui_calling] ${event.surface} ${event.type}: ${event.description}`);
   },
 });
+
+// The return path to your agent lives in your agent's module, which imports `ui`. Subscribe from there, so this
+// file doesn't import the agent (an import cycle):
+//
+//   ui.onEvent((event) => {
+//     // Store it with conversation `event.conversationId`; if `event.wake`, run a turn with
+//     // formatEventsForAgent([...]) from "@ui-calling/core" as a user message.
+//   });

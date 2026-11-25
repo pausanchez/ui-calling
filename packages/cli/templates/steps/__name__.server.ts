@@ -47,19 +47,19 @@ export const __const__Impl = implement(__const__, {
         `Details: ${d.draft.details || "none yet"}. Choice: ${d.draft.choice ?? "none yet"}.`,
   on: {
     details_saved: async ({ details }, ctx) => {
-      if (!details.trim()) throw new SurfaceError("details_missing", "The details are empty");
+      if (!details.trim()) throw new SurfaceError("details_missing", "The details are empty", { refused: true });
       return save(ctx.input.id, ctx.subject, { details: details.trim() }, "choice");
     },
     choice_saved: async ({ choice }, ctx) => {
       const id = ctx.input.id;
-      if (!load(id, ctx.subject).options.some((o) => o.id === choice)) throw new SurfaceError("unknown_choice", `No option ${choice}`);
+      if (!load(id, ctx.subject).options.some((o) => o.id === choice)) throw new SurfaceError("unknown_choice", `No option ${choice}`, { refused: true });
       return save(id, ctx.subject, { choice }, "review");
     },
     submitted: async (_p, ctx) => {
       const id = ctx.input.id;
       const d = load(id, ctx.subject);
       if (d.submitted) return d; // a double tap submits once
-      if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing");
+      if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing", { refused: true });
       // TODO: do the real thing here. Throw SurfaceError(code, message, { retryable: true }) if a system behind it fails.
       drafts.set(`${ctx.subject}:${id}`, { draft: d.draft, submitted: { reference: `R-${Math.floor(1000 + Math.random() * 9000)}` } });
       return load(id, ctx.subject);

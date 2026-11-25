@@ -106,7 +106,7 @@ await check("shifts: Spanish chat opens the picker in Spanish", async () => {
   assert.equal((await call("GET", `/api/ui/sessions/${token(reply.cta!.url)}`)).json.locale, "es");
 });
 
-await check("shifts: a full shift fails with a reason; a free one books and the code reaches the agent", async () => {
+await check("shifts: a full shift is refused with a reason (422, not an outage); a free one books and the code reaches the agent", async () => {
   const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
   const board = (await call("GET", `/api/ui/sessions/${t}`)).json.data;
   const pick = (s: Json) => ({ shift_id: s.id, date: s.date, start: s.start, end: s.end, location: s.location });
@@ -114,7 +114,9 @@ await check("shifts: a full shift fails with a reason; a free one books and the 
   const free = board.open.find((s: Json) => s.spotsLeft > 0);
   assert.ok(full && free, "mock data has full and free shifts");
   const fail = await event(t, "shift_selected", pick(full));
-  assert.equal(fail.status, 502);
+  // A refusal, not an outage: 422 "refused", so monitoring doesn't read it as the scheduling system being down.
+  assert.equal(fail.status, 422);
+  assert.equal(fail.json.error, "refused");
   assert.equal(fail.json.reason, "shift_full");
   const ok = await event(t, "shift_selected", pick(free));
   assert.equal(ok.status, 200);
@@ -246,7 +248,7 @@ await check("identity: a wrong code fails with a reason and is never stored", as
   const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
   await event(t, "opened");
   const r = await event(t, "verify_identity", { email: "lucia.romero@example.com", code: "999999" });
-  assert.equal(r.status, 502);
+  assert.equal(r.status, 422);
   assert.equal(r.json.reason, "invalid_code");
   assert.doesNotMatch(JSON.stringify((await chat()).timeline), /999999/);
 });

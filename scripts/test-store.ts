@@ -80,6 +80,25 @@ async function contract(name: string, store: UiStore) {
     assert.equal(await store.getFile!("f1"), undefined);
     assert.deepEqual((await store.listFiles!("s-a")).map((f) => f.id), ["f3"]);
   });
+
+  await check(`${name}: forget deletes a conversation's, a user's or expired sessions with their events and files`, async () => {
+    const mine = { ...session("fg-1", "conv-forget"), subject: "user-9" };
+    const other = { ...session("fg-2", "conv-keep"), subject: "user-9" };
+    const old = { ...session("fg-3", "conv-old"), subject: "user-8", expiresAt: "2020-01-01T00:00:00.000Z" };
+    for (const [s, hash] of [[mine, "h-fg-1"], [other, "h-fg-2"], [old, "h-fg-3"]] as const) {
+      await store.createSession(s, hash);
+      await store.appendEvent(ev(`e-${s.id}`, s, "opened"));
+    }
+    await store.putFile!({ id: "f-fg-1", sessionId: "fg-1", slot: "photos", name: "x.png", type: "image/png", size: 1, at: new Date().toISOString() }, new Uint8Array([1]));
+    assert.deepEqual(await store.forget!({ conversationId: "conv-forget" }), { sessions: 1, events: 1, files: 1 });
+    assert.equal(await store.getSessionByTokenHash("h-fg-1"), undefined, "its link no longer opens");
+    assert.equal(await store.getFile!("f-fg-1"), undefined);
+    assert.equal((await store.listEvents({ conversationId: "conv-keep" })).length, 1, "other conversations stay");
+    assert.equal((await store.forget!({ expiredBefore: new Date().toISOString() })).sessions, 1);
+    assert.equal(await store.getSession("fg-3"), undefined);
+    assert.equal((await store.forget!({ subject: "user-9" })).sessions, 1);
+    assert.equal(await store.getSession("fg-2"), undefined);
+  });
 }
 
 await contract("memory", new MemoryStore());
