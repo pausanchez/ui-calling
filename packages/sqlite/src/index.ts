@@ -14,9 +14,36 @@ import { UnknownEventError, matchesForget, type EventQuery, type ForgetFilter, t
  *
  * `store.db` is the open `DatabaseSync`: keep your own tables (drafts, mock data) next to UI_calling's.
  */
-export function sqliteStore(path = DEFAULT_PATH()) {
-  return open(path);
+export function sqliteStore(path = DEFAULT_PATH()): SqliteStore {
+  // Opened on first use, not on import: `next build` imports route modules to collect page data, and would
+  // otherwise create the production database in the project (or a Docker build layer) every time.
+  let opened: SqliteStore | undefined;
+  const get = () => (opened ??= open(path));
+  const lazy =
+    <K extends keyof UiStore>(key: K) =>
+    (...args: unknown[]) =>
+      (get()[key] as (...a: unknown[]) => unknown)(...args);
+  return {
+    get db() {
+      return get().db;
+    },
+    close: () => opened?.close(),
+    createSession: lazy("createSession"),
+    getSessionByTokenHash: lazy("getSessionByTokenHash"),
+    getSession: lazy("getSession"),
+    updateSession: lazy("updateSession"),
+    appendEvent: lazy("appendEvent"),
+    listEvents: lazy("listEvents"),
+    listSessions: lazy("listSessions"),
+    putFile: lazy("putFile"),
+    getFile: lazy("getFile"),
+    listFiles: lazy("listFiles"),
+    deleteFile: lazy("deleteFile"),
+    forget: lazy("forget"),
+  } as SqliteStore;
 }
+
+export type SqliteStore = UiStore & { db: DatabaseSync; close(): void };
 
 /**
  * `.ui-calling/ui-calling.db` in production. In development, `node_modules/.cache/ui-calling/`: Next's dev
@@ -89,7 +116,7 @@ function open(path: string) {
   const one = <T>(row: unknown) => (row ? (JSON.parse((row as { json: string }).json) as T) : undefined);
   const many = <T>(rows: unknown[]) => rows.map((r) => JSON.parse((r as { json: string }).json) as T);
 
-  const store: UiStore & { db: DatabaseSync; close(): void } = {
+  const store: SqliteStore = {
     /** The underlying database, if your app wants its own tables in the same file. */
     db,
     close: () => db.close(),

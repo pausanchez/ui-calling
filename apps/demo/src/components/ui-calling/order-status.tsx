@@ -155,7 +155,7 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
   const total = data.items.reduce((s, i) => s + i.qty * i.price, 0);
   const currentStep = data.steps.findLastIndex((s) => s.at);
 
-  async function run(fn: () => Promise<void>, message: string) {
+  async function run(fn: () => Promise<unknown>, message: string) {
     setBusy(true);
     setFailed(null);
     try {

@@ -1,7 +1,7 @@
 // The UiStore contract, run against every store, plus what persistence is for: surviving a restart.
 // Run: npx tsx scripts/test-store.ts
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -129,6 +129,17 @@ const boot = (store: UiStore, abandonAfterMs?: number) => {
   });
   return { ui, woke };
 };
+
+await check("lazy: creating the store, an identity and a runtime opens nothing until the first request (next build imports them)", async () => {
+  const path = join(dir, "lazy", "app.db");
+  const store = sqliteStore(path);
+  sqliteIdentity(store);
+  const ui = createUiCalling({ baseUrl: "https://ui.example.com", store, abandonAfterMs: 1000, surfaces: [implement(ticket, { resolve: async () => ({ id: "T-1", closed: false }), summarize: () => "" })] });
+  assert.equal(existsSync(path), false, "importing ui.ts must not create the database");
+  await ui.call("show_ticket", { ticket_id: "T-1" }, { conversationId: "c", subject: "u" });
+  assert.equal(existsSync(path), true, "the first request opens it");
+  store.close();
+});
 
 await check("identity: codes link a subject once, expire, survive a reload, and lock per customer across chats", async () => {
   const store = sqliteStore(":memory:");
