@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @ui-calling/demo",
+    "dev:whatsapp": "npm run dev:whatsapp -w @ui-calling/demo",
     "typecheck": "tsc -p tsconfig.json",
     "test": "npm run typecheck && node scripts/test-cli.mjs && tsx -C ui-calling-source scripts/test-adapters.ts && tsx -C ui-calling-source scripts/test-store.ts && tsx -C ui-calling-source scripts/test-runtime.ts && npm run smoke -w @ui-calling/demo",
     "build": "npm run build --workspace=packages --if-present"

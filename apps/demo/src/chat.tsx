@@ -116,6 +116,11 @@ export function Chat() {
     setPhoneShared(true);
   }
 
+  async function resetData() {
+    setState(await (await fetch("/api/demo/reset-data", { method: "POST" })).json());
+    setFailures(NO_FAILURES);
+  }
+
   return (
     <div className="min-h-dvh bg-muted/60">
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[400px_1fr] lg:py-10">
@@ -191,8 +196,19 @@ export function Chat() {
               <span className="rounded-full border border-border bg-card px-3 py-1 text-xs">
                 agent: <b>{state?.mode ?? "…"}</b>
               </span>
-              <button onClick={reset} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted">
-                Reset
+              <button
+                onClick={resetData}
+                title="Orders, returns and shifts back to the start. Chats and account links stay, real WhatsApp ones included."
+                className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted"
+              >
+                Reset data
+              </button>
+              <button
+                onClick={reset}
+                title="Everything, including real WhatsApp chats and account links."
+                className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted"
+              >
+                Reset all
               </button>
             </div>
           </div>
