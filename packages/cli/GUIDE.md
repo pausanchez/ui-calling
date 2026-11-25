@@ -390,7 +390,7 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 - **The webhook.** Answer Meta's `GET` subscription check (`hub.verify_token`, echo `hub.challenge`). On `POST`, check the signature, start the agent turn after responding (Meta retries slow deliveries), and skip message IDs you've already handled. Subscribe to the `messages` field: it carries incoming messages and the statuses of what you sent.
 - **Delivery failures.** A send can fail after Meta accepted it. `parseWhatsAppStatuses(body)` reads `sent`, `delivered`, `read` and `failed` (with its error code) from the same webhook.
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
-- **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`. On Next.js, `init`'s page reads it from `UI_CALLING_RETURN_URL`.
+- **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`. On Next.js, `init`'s page reads it from `UI_CALLING_RETURN_URL`. On a phone, a link to it opens the WhatsApp app. On a computer (WhatsApp Web), the chat is still open in the tab the screen came from, so `SurfaceProvider` closes this tab instead of opening WhatsApp's "open the app" page; if the browser won't close it, it shows "All done. Close this tab to go back to the chat."
 
 ## Testing without servers
 
@@ -519,7 +519,7 @@ type UiEvent = {
 
 | API | What it gives you |
 |---|---|
-| `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"` |
+| `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"`. On a computer, links to `returnUrl` close the tab instead |
 | `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
 | `useSurfaceName()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
 | `useSurfaceSteps(steps, { initial, key? })` | `step`, `index`, `count`, `isFirst`, `isLast`, `go(step)`, `next()`, `back()`: the steps of a screen in the browser's history, so Back and reloads work |
