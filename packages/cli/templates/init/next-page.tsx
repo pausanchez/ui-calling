@@ -1,6 +1,9 @@
 import { Suspense } from "react";
 import { SurfaceScreen } from "__SCREEN_IMPORT__";
 
+// The token is in this page's URL: don't send it to sites the screen links to.
+export const metadata = { referrer: "no-referrer" as const };
+
 // Where surface links land: /s/<token>. The token is opaque; data is loaded server-side by the surface.
 // `params` is read inside <Suspense> so Next.js can still prerender the page shell (required from Next 16).
 export default function SurfacePage({ params }: { params: Promise<{ token: string }> }) {
