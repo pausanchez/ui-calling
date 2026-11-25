@@ -9,6 +9,14 @@ const root = resolve(import.meta.dirname, "..");
 const tmp = join(root, ".tmp-cli-test");
 const cli = join(root, "packages/cli/bin/ui-calling.mjs");
 const run = (cwd, ...args) => execFileSync("node", [cli, ...args], { cwd, stdio: "pipe" }).toString();
+const fails = (cwd, ...args) => {
+  try {
+    run(cwd, ...args);
+  } catch (e) {
+    return e.stderr.toString();
+  }
+  assert.fail(`expected "ui-calling ${args.join(" ")}" to fail`);
+};
 const read = (...p) => readFileSync(join(tmp, ...p), "utf8");
 
 function project(name, pkg, dirs = [], files = {}) {
@@ -48,7 +56,21 @@ try {
   run(next, "init"); // re-running init doesn't clobber or duplicate
   assert.equal(read("init-next-src", "AGENTS.md").match(/<!-- ui-calling -->/g)?.length, 1);
   assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /shiftPickerImpl,/, "init without --force keeps registrations");
-  console.log("generated  init-next-src (+2 surfaces)");
+  // A block brings its server file and is registered; re-adding it updates the screen, never your data code.
+  run(next, "add", "order-status");
+  assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /orderStatusImpl,/);
+  assert.match(read("init-next-src", "src/ui-calling/surface-screen.tsx"), /order_status: \(\) => <OrderStatus \/>/);
+  writeFileSync(join(next, "src/ui-calling/order-status.server.ts"), read("init-next-src", "src/ui-calling/order-status.server.ts") + "// mine\n");
+  assert.match(run(next, "add", "order-status", "--force"), /keep/);
+  assert.match(read("init-next-src", "src/ui-calling/order-status.server.ts"), /\/\/ mine/);
+  assert.equal(read("init-next-src", "src/ui-calling/ui.ts").match(/orderStatusImpl,/g)?.length, 1, "registered once");
+  // From a subfolder, `new` still finds ui-calling.json and registers in the files it names.
+  run(join(next, "src/app"), "new", "payslip");
+  assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /payslipImpl,/);
+  assert.match(read("init-next-src", "src/ui-calling/payslip.tsx"), /Payslip/);
+  // Setting up again somewhere else would leave the registrations behind.
+  assert.match(fails(next, "init", "--dir", "lib/ui"), /Already set up in src\/ui-calling/);
+  console.log("generated  init-next-src (+4 surfaces)");
 
   const nextRoot = project("init-next-app", { dependencies: { next: "15" } }, ["app"]);
   run(nextRoot, "init", "--deliver", "message");
@@ -60,6 +82,17 @@ try {
   assert.match(run(vite, "init"), /uiCallingHandler/);
   run(vite, "new", "order-tracker");
   console.log("generated  init-vite (+1 surface)");
+
+  // A monorepo root isn't an app: refuse instead of writing files nothing uses.
+  const mono = project("monorepo", { workspaces: ["apps/*"] }, ["apps/web"]);
+  assert.match(fails(mono, "init"), /monorepo root/);
+  assert.match(fails(mono, "new", "payslip"), /monorepo root/);
+  writeFileSync(join(mono, "apps/web/package.json"), JSON.stringify({ dependencies: { next: "15" } }));
+  mkdirSync(join(mono, "apps/web/app"));
+  run(join(mono, "apps/web"), "init");
+  run(join(mono, "apps/web"), "add", "order-status");
+  assert.match(read("monorepo", "apps/web/ui-calling/ui.ts"), /orderStatusImpl,/);
+  console.log("generated  monorepo/apps/web (+1 block)");
 
   writeFileSync(join(tmp, "tsconfig.json"), JSON.stringify({ extends: "../tsconfig.json", include: ["./**/*.ts", "./**/*.tsx"] }));
   execFileSync("npx", ["tsc", "-p", join(tmp, "tsconfig.json")], { cwd: root, stdio: "inherit" });

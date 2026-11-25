@@ -22,7 +22,8 @@ type ContextValue = {
   locale: string;
   data: unknown;
   error?: string;
-  /** e.g. "upstream_error" when the data source failed: the agent already knows. */
+  /** e.g. "upstream_error" when the data source failed (the agent already knows), "not_found" for a bad
+   * link, or "network" when the server couldn't be reached. */
   errorCode?: string;
   emit: (type: string, payload?: unknown) => Promise<void>;
   reload: () => Promise<void>;
@@ -33,6 +34,7 @@ type ContextValue = {
 /**
  * Error thrown by `emit` and `reload`. For `code === "upstream_error"`, `reason` is the server's
  * `SurfaceError` code (e.g. "shift_full"): map it to a message in the user's language.
+ * `retryable` says whether trying the same thing again can work; `code === "network"` always is.
  */
 export class SurfaceActionError extends Error {
   constructor(
@@ -73,12 +75,16 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         body: JSON.stringify({ type, payload }),
         // `complete()` usually runs as the user follows "Back to chat": let it finish after the page goes.
         keepalive: true,
+      }).catch(() => {
+        throw new SurfaceActionError("Couldn't reach the server", "network", true);
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (json.error === "completed") setState((s) => ({ status: "completed", locale: s.locale }));
         throw new SurfaceActionError(json.message ?? json.error ?? res.statusText, json.error, json.retryable, json.reason);
       }
+      // The link is closed now: show the "done" screen if the user is still here.
+      if (type === "completed") return setState((s) => ({ status: "completed", locale: s.locale }));
       if (json.data !== undefined && json.data !== null) setState((s) => ({ ...s, data: json.data }));
     },
     [base],
@@ -86,7 +92,9 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
 
   /** Fetch fresh data, e.g. after a failed action when what's on screen may be stale. */
   const reload = useCallback(async () => {
-    const res = await fetch(base);
+    const res = await fetch(base).catch(() => {
+      throw new SurfaceActionError("Couldn't reach the server", "network", true);
+    });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (json.error === "completed") setState((s) => ({ status: "completed", locale: s.locale }));
@@ -118,18 +126,24 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     let cancelled = false;
     fetch(base)
       .then(async (res) => {
-        const json = await res.json();
+        // A proxy or host error page isn't JSON: treat it like an unreachable server.
+        const json = await res.json().catch(() => ({ error: "network" }));
         if (cancelled) return;
-        if (json.error === "completed") return setState({ status: "completed" });
-        if (res.status === 410) return setState({ status: "expired", error: json.message });
-        if (!res.ok) return setState({ status: "error", error: json.message ?? json.error, errorCode: json.error });
+        // Errors for a known link carry its surface and language, so the screen can explain in the user's words.
+        const { locale } = json;
+        if (json.error === "completed") return setState({ status: "completed", locale });
+        if (res.status === 410) return setState({ status: "expired", locale, error: json.message });
+        if (!res.ok) {
+          const errorCode = res.status >= 500 && !json.surface ? "network" : (json.error ?? "network");
+          return setState({ status: "error", surface: json.surface, locale, error: json.message ?? json.error, errorCode });
+        }
         setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
         if (!opened.current) {
           opened.current = true;
           void emit("opened").catch(() => {});
         }
       })
-      .catch((e) => !cancelled && setState({ status: "error", error: String(e) }));
+      .catch((e) => !cancelled && setState({ status: "error", error: String(e), errorCode: "network" }));
     return () => {
       cancelled = true;
     };
@@ -236,6 +250,7 @@ export function useSurfaceName() {
     surface: ctx?.surface,
     locale: ctx?.locale,
     error: ctx?.error,
+    errorCode: ctx?.errorCode,
     returnUrl: ctx?.returnUrl,
   };
 }

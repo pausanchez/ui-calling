@@ -7,7 +7,10 @@ const SURFACES: Record<string, () => React.JSX.Element> = {
   /* ui-calling:surfaces */
 };
 
-/** Renders whichever surface the link's token points to. Mount it on your `/s/:token` route. */
+/**
+ * Renders whichever surface the link's token points to. Mount it on your `/s/:token` route.
+ * `returnUrl` is where "Back to chat" goes, e.g. `https://wa.me/<your number>` or your web chat.
+ */
 export function SurfaceScreen({ token, returnUrl }: { token: string; returnUrl?: string }) {
   return (
     <SurfaceProvider token={token} endpoint="/api/ui" returnUrl={returnUrl}>
@@ -21,6 +24,9 @@ const TEXT = {
     expired: "This link has expired",
     invalid: "This link isn't valid",
     help: "Ask your assistant for a new one.",
+    loadError: "We couldn't load this page",
+    loadErrorHelp: "Check your connection and try again.",
+    tryAgain: "Try again",
     completed: "All done here",
     completedHelp: "You can go back to the chat. If you need this screen again, ask your assistant.",
     backToChat: "Back to chat",
@@ -29,6 +35,9 @@ const TEXT = {
     expired: "Este enlace ha caducado",
     invalid: "Este enlace no es válido",
     help: "Pídele uno nuevo a tu asistente.",
+    loadError: "No hemos podido cargar esta página",
+    loadErrorHelp: "Comprueba tu conexión e inténtalo de nuevo.",
+    tryAgain: "Reintentar",
     completed: "Ya está hecho",
     completedHelp: "Puedes volver al chat. Si necesitas esta pantalla otra vez, pídesela a tu asistente.",
     backToChat: "Volver al chat",
@@ -36,18 +45,33 @@ const TEXT = {
 };
 
 function Router() {
-  const { status, surface, locale, returnUrl } = useSurfaceName();
+  const { status, surface, locale, errorCode, returnUrl } = useSurfaceName();
+  // Once the surface is known, it renders its own states, including "your data source is down".
   const render = surface ? SURFACES[surface] : undefined;
   if (render) return render();
   if (status === "loading") return <main style={{ minHeight: "100dvh" }} aria-busy="true" />;
   const t = TEXT[(locale ?? "en").startsWith("es") ? "es" : "en"];
   // "completed": the user already finished here and the link is closed.
   const done = status === "completed";
+  // Only an unknown token is a bad link. Anything else (offline, server down) may work on a retry.
+  const unreachable = status === "error" && errorCode !== "not_found";
+  const [title, help] = done
+    ? [t.completed, t.completedHelp]
+    : status === "expired"
+      ? [t.expired, t.help]
+      : unreachable
+        ? [t.loadError, t.loadErrorHelp]
+        : [t.invalid, t.help];
   return (
     <main style={{ minHeight: "100dvh", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
-      <div>
-        <p style={{ fontWeight: 600, margin: 0 }}>{done ? t.completed : status === "expired" ? t.expired : t.invalid}</p>
-        <p style={{ margin: "4px 0 0", opacity: 0.7 }}>{done ? t.completedHelp : t.help}</p>
+      <div role={unreachable ? "alert" : undefined}>
+        <p style={{ fontWeight: 600, margin: 0 }}>{title}</p>
+        <p style={{ margin: "4px 0 0", opacity: 0.7 }}>{help}</p>
+        {unreachable && (
+          <button onClick={() => location.reload()} style={{ marginTop: 12 }}>
+            {t.tryAgain}
+          </button>
+        )}
         {done && returnUrl && (
           <a href={returnUrl} style={{ display: "inline-block", marginTop: 12 }}>
             {t.backToChat}

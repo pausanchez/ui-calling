@@ -67,6 +67,9 @@ export class UiCallingError extends Error {
   ) {
     super(message);
   }
+  /** Set once the link is known, so the screen can pick the right surface and language for the error. */
+  surface?: string;
+  locale?: string;
 }
 
 /**

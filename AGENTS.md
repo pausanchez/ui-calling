@@ -44,7 +44,7 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 - **Blocks vs. demo surfaces:**
   - A surface goes in `packages/cli/registry` only when it's generic enough that products would use it unchanged apart from their data and tokens.
   - Everything else is demo-only: create it with `ui-calling new` inside `apps/demo`.
-  - The registry is the source of truth for its blocks. After editing one, copy it into the demo with `cd apps/demo && npx ui-calling add <block> --force`; never edit the demo copy alone.
+  - The registry is the source of truth for its blocks. After editing one, copy it into the demo with `cd apps/demo && npx ui-calling add <block> --force --server-dir server`; never edit the demo copy alone. That keeps the demo's own `server/<block>.server.ts` (mock data, outage switches): `add` never overwrites a server file.
 - **Templates:** `packages/cli/templates/surface` must stay valid TypeScript. Placeholders (`__name__`, `__surface__`, `__const__`, `__Component__`, `__MESSAGES__`) are real identifiers, so the typecheck covers generated code.
 - **Strings:**
   - Text the user sees goes in en/es message objects.

@@ -7,6 +7,8 @@
         "blocks/order-status/order-status.surface.ts",
         "blocks/order-status/order-status.tsx"
       ],
+      "server": "blocks/order-status/order-status.server.ts",
+      "register": { "impl": "orderStatusImpl", "component": "OrderStatus", "surface": "order_status" },
       "dependencies": ["@ui-calling/core", "@ui-calling/react", "zod"]
     }
   }

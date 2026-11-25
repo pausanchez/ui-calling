@@ -12,7 +12,19 @@ const registry = JSON.parse(readFileSync(join(registryDir, "registry.json"), "ut
 
 /** Written by `init`, read by `new` and `add`: where things live in this project (like shadcn's components.json). */
 const CONFIG_FILE = "ui-calling.json";
-const config = existsSync(CONFIG_FILE) ? JSON.parse(readFileSync(CONFIG_FILE, "utf8")) : null;
+
+/** The package `init` ran in: the nearest folder with a package.json, from here up. Paths in the config are relative to it. */
+function packageRoot(dir = process.cwd()) {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, "package.json"))) return d;
+    if (dirname(d) === d) return process.cwd();
+  }
+}
+const root = packageRoot();
+const configPath = join(root, CONFIG_FILE);
+const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")) : null;
+const fromRoot = (p) => (p ? resolve(root, p) : undefined);
+const config = raw && { ...raw, runtime: fromRoot(raw.runtime), screen: fromRoot(raw.screen), surfacesDir: fromRoot(raw.surfacesDir), serverDir: fromRoot(raw.serverDir) };
 
 const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url"];
 const [cmd, ...rest] = process.argv.slice(2);
@@ -21,8 +33,25 @@ const flag = (name, fallback) => {
   return i >= 0 ? rest[i + 1] : fallback;
 };
 const force = rest.includes("--force");
-const outDir = resolve(flag("--dir", config?.surfacesDir ?? "src/components/ui-calling"));
-const serverDir = resolve(flag("--server-dir", config?.serverDir ?? flag("--dir", config?.surfacesDir ?? "src/components/ui-calling")));
+// Flags are relative to where you run the command; the config's paths, to its package.
+const outDir = flag("--dir") ? resolve(flag("--dir")) : (config?.surfacesDir ?? resolve(root, "src/components/ui-calling"));
+const serverDir = flag("--server-dir") ? resolve(flag("--server-dir")) : flag("--dir") ? outDir : (config?.serverDir ?? outDir);
+
+/** A monorepo root that isn't itself a Next.js or Vite app. */
+function isWorkspaceRoot(dir) {
+  if (!existsSync(join(dir, "package.json"))) return false;
+  const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  return Boolean(pkg.workspaces || existsSync(join(dir, "pnpm-workspace.yaml"))) && !deps.next && !deps.vite;
+}
+
+/** A workspace root has no app of its own: generated files there would be wired to nothing. */
+function refuseWorkspaceRoot(what) {
+  if (config || flag("--dir") || force) return;
+  if (!isWorkspaceRoot(root)) return;
+  console.error(`${relative(process.cwd(), root) || "This folder"} is a monorepo root. Run \`ui-calling ${what}\` in the app's folder (where you ran \`ui-calling init\`), or pass --dir.`);
+  process.exit(1);
+}
 const names = rest.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.includes(rest[i - 1]));
 
 function write(target, content) {
@@ -39,6 +68,9 @@ function write(target, content) {
 function copy(rel) {
   write(join(outDir, basename(rel)), readFileSync(join(registryDir, rel)));
 }
+
+/** Path for messages: relative to where the command runs. */
+const shown = (p) => relative(process.cwd(), p) || ".";
 
 /** Import path from the file at `fromFile` to `toFile`, without extension. */
 function importPath(fromFile, toFile) {
@@ -60,8 +92,15 @@ function register(file, importLine, entry) {
   if (!s.includes(importLine)) s = s.replace("// ui-calling:imports", `${importLine}\n// ui-calling:imports`);
   if (!s.includes(entry)) s = s.replace("/* ui-calling:surfaces */", `${entry} /* ui-calling:surfaces */`);
   writeFileSync(file, s);
-  console.log(`  update ${file}`);
+  console.log(`  update ${shown(file)}`);
   return true;
+}
+
+/** Register a surface's implementation in the runtime and its component in the screen, if `init` made them. */
+function registerSurface({ impl, component, surface }, serverFile, screenFile) {
+  const inRuntime = register(config?.runtime, `import { ${impl} } from "${importPath(config?.runtime ?? ".", serverFile)}";`, `${impl},`);
+  const inScreen = register(config?.screen, `import { ${component} } from "${importPath(config?.screen ?? ".", screenFile)}";`, `${surface}: () => <${component} />,`);
+  return inRuntime && inScreen;
 }
 
 function newSurface(name) {
@@ -91,16 +130,14 @@ function newSurface(name) {
   }
 
   // With a ui-calling.json from `init`, wire it up too.
-  const inRuntime = register(config?.runtime, `import { ${vars.__const__}Impl } from "${importPath(config?.runtime ?? ".", serverFile)}";`, `${vars.__const__}Impl,`);
-  const inScreen = register(config?.screen, `import { ${vars.__Component__} } from "${importPath(config?.screen ?? ".", screenFile)}";`, `${vars.__surface__}: () => <${vars.__Component__} />,`);
-  const registered = inRuntime && inScreen;
+  const registered = registerSurface({ impl: `${vars.__const__}Impl`, component: vars.__Component__, surface: vars.__surface__ }, serverFile, screenFile);
 
   console.log(`
 Next:
   1. Fill the TODOs in ${name}.surface.ts: description, input, data, events.
   2. Load real data in ${name}.server.ts.${
     registered
-      ? `\n  3. Already registered in ${config.runtime} and ${config.screen}.`
+      ? `\n  3. Already registered in ${shown(config.runtime)} and ${shown(config.screen)}.`
       : `\n  3. Register it: createUiCalling({ surfaces: [${vars.__const__}Impl, ...] }),\n     and render <${vars.__Component__} /> inside <SurfaceProvider> on your surface route.`
   }
   4. Run your typechecker: it points at anything left to change.
@@ -115,9 +152,18 @@ function init() {
   }
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  if (isWorkspaceRoot(".") && !flag("--framework") && !force) {
+    console.error("This is a monorepo root. Run `npx ui-calling init` in the app that serves your screens (e.g. apps/web), or pass --force.");
+    process.exit(1);
+  }
   const framework = flag("--framework", deps.next ? "next" : deps.vite ? "vite" : "other");
   const src = existsSync("src");
-  const lib = flag("--dir", src ? "src/ui-calling" : "ui-calling");
+  const lib = flag("--dir", raw?.surfacesDir ?? (src ? "src/ui-calling" : "ui-calling"));
+  if (raw && relative(raw.surfacesDir, lib) !== "" && !force) {
+    // `new` registers in the files the config points at: two setups would leave one of them unused.
+    console.error(`Already set up in ${raw.surfacesDir} (see ${CONFIG_FILE}). To move it, move those files and edit ${CONFIG_FILE}, or pass --force to set up again in ${lib}.`);
+    process.exit(1);
+  }
   const deliver = flag("--deliver", "button");
   const runtime = join(lib, "ui.ts");
   const screen = join(lib, "surface-screen.tsx");
@@ -181,10 +227,13 @@ switch (cmd) {
     break;
   case "add": {
     if (!names.length) {
-      console.error("Usage: ui-calling add <block...> [--dir path] [--force]");
+      console.error("Usage: ui-calling add <block...> [--dir path] [--server-dir path] [--force]");
       process.exit(1);
     }
+    refuseWorkspaceRoot("add");
     const deps = new Set();
+    const unregistered = [];
+    let wroteServer = false;
     for (const name of names) {
       const block = registry.blocks[name];
       if (!block) {
@@ -194,11 +243,27 @@ switch (cmd) {
       console.log(name);
       block.files.forEach(copy);
       block.dependencies.forEach((d) => deps.add(d));
+      if (!block.server) continue;
+      // The server file is where your data comes from: written once, never overwritten, even with --force.
+      const serverFile = join(serverDir, basename(block.server));
+      const contract = block.files.find((f) => f.endsWith(".surface.ts"));
+      if (existsSync(serverFile)) console.log(`  keep   ${shown(serverFile)} (your data code; delete it to get the example again)`);
+      else {
+        const s = readFileSync(join(registryDir, block.server), "utf8");
+        wroteServer = write(serverFile, s.replaceAll(`"./${basename(contract, ".ts")}"`, `"${importPath(serverFile, join(outDir, basename(contract)))}"`));
+      }
+      const screenFile = join(outDir, basename(block.files.find((f) => f.endsWith(".tsx"))));
+      if (!registerSurface(block.register, serverFile, screenFile)) unregistered.push(block);
     }
     console.log(`\nMake sure these are installed: ${[...deps].join(" ")}`);
+    for (const { register: r } of unregistered) {
+      console.log(`Register it: createUiCalling({ surfaces: [${r.impl}, ...] }), and render <${r.component} /> for "${r.surface}" on your surface route.`);
+    }
+    if (wroteServer) console.log(`Then load real data in the .server.ts file: it ships with an example so the screen renders.`);
     break;
   }
   case "new":
+    refuseWorkspaceRoot("new");
     if (names.length !== 1) {
       console.error("Usage: ui-calling new <name> [--dir path] [--server-dir path] [--force]");
       process.exit(1);
@@ -216,7 +281,8 @@ switch (cmd) {
                     --framework next|vite|other, --base-url
   new <name>        scaffold a surface (contract, screen, server) and register it
                     --dir, --server-dir (default: from ui-calling.json)
-  add <block...>    copy ready-made blocks into --dir
+  add <block...>    copy ready-made blocks and register them; their .server.ts is written once,
+                    never overwritten (--dir, --server-dir, --force)
   list              show available blocks
   tokens            copy the design tokens only
   guide             print the guide for building surfaces (for people and coding agents)`);

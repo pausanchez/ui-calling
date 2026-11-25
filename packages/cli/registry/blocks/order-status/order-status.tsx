@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { pickLocalized } from "@ui-calling/core";
-import { useSurface } from "@ui-calling/react";
+import { SurfaceActionError, useSurface } from "@ui-calling/react";
 import { orderStatus } from "./order-status.surface";
 
 /** Every string the screen shows. Add a language by adding a key; override single strings with the `messages` prop.
@@ -46,6 +46,7 @@ const ORDER_STATUS_MESSAGES = {
     problemReported: "Problem reported",
     assistantKnows: "Your assistant already knows. You can go back to the chat.",
     backToChat: "Back to chat",
+    finish: "Finish",
     issueTitle: (ticket: string) => `Problem reported · ticket ${ticket}`,
     issueBody: "We're on it and will update you in the chat.",
     expired: "This link has expired",
@@ -56,6 +57,7 @@ const ORDER_STATUS_MESSAGES = {
     actionFailed: "That didn't go through",
     actionFailedBody: "Your assistant already knows. You can try again or go back to the chat.",
     tryAgain: "Try again",
+    offline: "We couldn't reach the server. Check your connection and try again.",
   },
   es: {
     order: "Pedido",
@@ -97,6 +99,7 @@ const ORDER_STATUS_MESSAGES = {
     problemReported: "Problema enviado",
     assistantKnows: "Tu asistente ya lo sabe. Puedes volver al chat.",
     backToChat: "Volver al chat",
+    finish: "Terminar",
     issueTitle: (ticket: string) => `Incidencia abierta · ${ticket}`,
     issueBody: "Lo estamos revisando y te avisaremos por el chat.",
     expired: "Este enlace ha caducado",
@@ -107,6 +110,7 @@ const ORDER_STATUS_MESSAGES = {
     actionFailed: "No se ha podido completar",
     actionFailedBody: "Tu asistente ya lo sabe. Puedes intentarlo de nuevo o volver al chat.",
     tryAgain: "Reintentar",
+    offline: "No hemos podido conectar. Comprueba tu conexión e inténtalo de nuevo.",
   },
 };
 
@@ -116,7 +120,7 @@ const REASONS = ["damaged", "missing_items", "wrong_address", "late", "other"] a
 type Reason = (typeof REASONS)[number];
 
 export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessages> }) {
-  const { status, data, errorCode, locale, emit, complete, returnUrl } = useSurface(orderStatus);
+  const { status, data, errorCode, locale, emit, reload, complete, returnUrl } = useSurface(orderStatus);
   const t: OrderStatusMessages = { ...pickLocalized(ORDER_STATUS_MESSAGES, locale)!, ...messages };
   const [panel, setPanel] = useState<null | "reschedule" | "problem">(null);
   const [itemsOpen, setItemsOpen] = useState(false);
@@ -124,7 +128,9 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState<Reason>("damaged");
   const [details, setDetails] = useState("");
-  const [failed, setFailed] = useState<null | { retry: () => void }>(null);
+  // After a failed action. `retry` only when trying again can work (a carrier timeout can, a past slot can't).
+  // `offline`: the request never arrived, so the agent doesn't know either.
+  const [failed, setFailed] = useState<null | { retry?: () => void; offline?: boolean }>(null);
 
   if (status === "loading") return <Shell><Skeleton /></Shell>;
   if (status !== "ready" || !data) {
@@ -156,9 +162,13 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
       await fn();
       setPanel(null);
       setConfirmation(message);
-    } catch {
+    } catch (err) {
       // The server already recorded the failure for the agent; here we only tell the user.
-      setFailed({ retry: () => void run(fn, message) });
+      const retryable = !(err instanceof SurfaceActionError) || err.retryable;
+      const offline = !(err instanceof SurfaceActionError) || err.code === "network";
+      setFailed(retryable ? { retry: () => void run(fn, message), offline } : {});
+      // What's on screen may be out of date (e.g. the slot is gone): refresh it.
+      if (!retryable) void reload().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -175,13 +185,15 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
       </header>
 
       {failed && (
-        <Card className="border-destructive/40 bg-destructive/10">
+        <Card role="alert" className="border-destructive/40 bg-destructive/10">
           <p className="font-medium">{t.actionFailed}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{t.actionFailedBody}</p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button disabled={busy} onClick={failed.retry} className={btn("primary")}>{t.tryAgain}</button>
-            {returnUrl && <a href={returnUrl} className={btn("outline")}>{t.backToChat}</a>}
-          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{failed.offline ? t.offline : failed.retry ? t.actionFailedBody : t.unavailableBody}</p>
+          {(failed.retry || returnUrl) && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {failed.retry && <button disabled={busy} onClick={failed.retry} className={btn("primary")}>{t.tryAgain}</button>}
+              {returnUrl && <a href={returnUrl} className={btn("outline")}>{t.backToChat}</a>}
+            </div>
+          )}
         </Card>
       )}
 
@@ -189,10 +201,14 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
         <Card className="border-success/40 bg-success/10">
           <p className="font-medium">{confirmation}</p>
           <p className="mt-1 text-sm text-muted-foreground">{t.assistantKnows}</p>
-          {returnUrl && (
-            <a href={returnUrl} onClick={() => void complete()} className={btn("primary", "mt-3 w-full")}>
+          {returnUrl ? (
+            <a href={returnUrl} onClick={() => void complete().catch(() => {})} className={btn("primary", "mt-3 w-full")}>
               {t.backToChat}
             </a>
+          ) : (
+            <button onClick={() => void complete().catch(() => {})} className={btn("primary", "mt-3 w-full")}>
+              {t.finish}
+            </button>
           )}
         </Card>
       )}
@@ -231,6 +247,7 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
       <Card>
         <button
           className="flex w-full items-center justify-between text-left"
+          aria-expanded={itemsOpen}
           onClick={() => {
             if (!itemsOpen) void emit("viewed_items", {});
             setItemsOpen(!itemsOpen);
@@ -276,12 +293,13 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
           <p className="mb-3 font-medium">{t.whatHappened}</p>
           <div className="flex flex-wrap gap-2">
             {REASONS.map((value) => (
-              <button key={value} onClick={() => setReason(value)} className={btn(reason === value ? "primary" : "outline", "h-9 px-3")}>
+              <button key={value} aria-pressed={reason === value} onClick={() => setReason(value)} className={btn(reason === value ? "primary" : "outline", "h-9 px-3")}>
                 {t.reasons[value]}
               </button>
             ))}
           </div>
           <textarea
+            aria-label={t.detailsPlaceholder}
             value={details}
             onChange={(e) => setDetails(e.target.value)}
             maxLength={500}
@@ -324,8 +342,8 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-lg border border-border bg-card p-4 text-card-foreground ${className}`}>{children}</section>;
+function Card({ children, className = "", role }: { children: ReactNode; className?: string; role?: string }) {
+  return <section role={role} className={`rounded-lg border border-border bg-card p-4 text-card-foreground ${className}`}>{children}</section>;
 }
 
 function Skeleton() {
