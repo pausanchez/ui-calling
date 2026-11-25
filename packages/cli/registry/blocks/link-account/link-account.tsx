@@ -13,8 +13,8 @@ const LINK_ACCOUNT_MESSAGES = {
     identifierPlaceholder: "you@example.com",
     sendCode: "Send code",
     codeTitle: "Enter your code",
-    codeSentTo: (to: string) => `We sent a code to ${to}. It works for 10 minutes.`,
-    codeSentAny: "If that email matches an account, we sent a code to it. It works for 10 minutes.",
+    // The same words whether or not the account exists, so the screen can't be used to find accounts.
+    codeSent: "If that matches an account, we've sent a code to its email. It works for 10 minutes.",
     codeLabel: "Code",
     verify: "Verify",
     startOver: "Use a different email",
@@ -42,12 +42,12 @@ const LINK_ACCOUNT_MESSAGES = {
     identifierPlaceholder: "tu@ejemplo.com",
     sendCode: "Enviar código",
     codeTitle: "Escribe tu código",
-    codeSentTo: (to: string) => `Te hemos enviado un código a ${to}. Sirve durante 10 minutos.`,
-    codeSentAny: "Si ese email corresponde a una cuenta, le hemos enviado un código. Sirve durante 10 minutos.",
+    codeSent: "Si corresponde a una cuenta, hemos enviado un código a su email. Sirve durante 10 minutos.",
     codeLabel: "Código",
     verify: "Verificar",
     startOver: "Usar otro email",
-    linked: (name: string | null) => (name ? `Ya estás verificado, ${name.split(" ")[0]}` : "Ya estás verificado"),
+    // Neutral wording: "verificado" would be masculine for everyone.
+    linked: (name: string | null) => (name ? `Listo, ${name.split(" ")[0]}: identidad verificada` : "Identidad verificada"),
     linkedBody: "Tu asistente ya puede ayudarte con tu cuenta. Vuelve al chat para seguir.",
     backToChat: "Volver al chat",
     finish: "Terminar",
@@ -166,7 +166,7 @@ export function LinkAccount({
         >
           <header>
             <h1 className="text-2xl font-semibold tracking-tight">{t.codeTitle}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{data.sentTo ? t.codeSentTo(data.sentTo) : t.codeSentAny}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t.codeSent}</p>
           </header>
           <label className="flex flex-col gap-1.5 text-sm font-medium">
             {t.codeLabel}
@@ -180,6 +180,7 @@ export function LinkAccount({
             disabled={busy}
             onClick={() => {
               setCode("");
+              setIdentifier("");
               void send(() => emit("start_over", {}));
             }}
             className={btn("outline")}

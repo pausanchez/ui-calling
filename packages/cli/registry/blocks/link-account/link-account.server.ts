@@ -23,15 +23,15 @@ async function nameOf(customerId: string) {
   return customerId === "C-1001" ? "Sam Taylor" : null;
 }
 
-const mask = (email: string) => email.replace(/^(.).*(@.*)$/, "$1***$2");
 type Data = SurfaceData<typeof linkAccount>;
 
 /** Where this subject stands: linked, waiting for a code (also after a reload), or at the start. */
-async function state(subject: string, continueWith: string, sentTo: string | null = null): Promise<Data> {
+// No "we sent it to s***@…": the screen must look the same for an account that doesn't exist.
+async function state(subject: string, continueWith: string): Promise<Data> {
   const customerId = identity.customerFor(subject);
-  if (customerId) return { stage: "linked", sentTo: null, name: await nameOf(customerId), continueWith };
-  if (identity.pending(subject)) return { stage: "code_sent", sentTo, name: null, continueWith };
-  return { stage: "start", sentTo: null, name: null, continueWith };
+  if (customerId) return { stage: "linked", name: await nameOf(customerId), continueWith };
+  if (identity.pending(subject)) return { stage: "code_sent", name: null, continueWith };
+  return { stage: "start", name: null, continueWith };
 }
 
 /** Server-side half of "link_account": links the session's subject (the chat user), never an ID from the screen. */
@@ -54,7 +54,7 @@ export const linkAccountImpl = implement(linkAccount, {
       const code = identity.startVerification(ctx.subject, customer.id);
       if (!code) throw new SurfaceError("try_later", "Too many wrong codes for this account; it's locked for a while");
       await sendCode(customer, code);
-      return state(ctx.subject, ctx.input.continue_with, mask(customer.email));
+      return state(ctx.subject, ctx.input.continue_with);
     },
     code_entered: async ({ code }, ctx) => {
       const result = identity.verify(ctx.subject, code);

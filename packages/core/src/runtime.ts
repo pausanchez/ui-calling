@@ -150,6 +150,7 @@ const CLIENT_LIFECYCLE = new Set<string>(["opened", "left", "completed"]);
 // The handler's side effect already happened by the time these run: a bug in them must not lose the event.
 function safeSummary(impl: SurfaceImpl<any>, data: unknown, moment: SummaryMoment = {}): string | undefined {
   try {
+    checkSecretPaths(impl.surface.name, impl.surface.secret, data);
     const summary = impl.summarize?.(data as never, moment as never);
     return summary === undefined ? undefined : scrubSecrets(summary, impl.surface.secret, data);
   } catch (err) {
@@ -169,6 +170,28 @@ function secretValues(paths: string[] | undefined, data: unknown): string[] {
   };
   for (const path of paths) walk(path.split(".").reduce<unknown>((v, k) => (v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined), data));
   return [...new Set(found)].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * A `secret` path that names a field the data doesn't have protects nothing: say so, once per path. A null or
+ * missing parent is fine (the code isn't revealed yet); an object without the named key is a typo.
+ */
+const warnedPaths = new Set<string>();
+function checkSecretPaths(surface: string, paths: string[] | undefined, data: unknown) {
+  for (const path of paths ?? []) {
+    let v: unknown = data;
+    for (const key of path.split(".")) {
+      if (!v || typeof v !== "object") break;
+      if (!(key in v)) {
+        if (!warnedPaths.has(`${surface}:${path}`)) {
+          warnedPaths.add(`${surface}:${path}`);
+          console.warn(`[ui_calling] ${surface}: secret path "${path}" matches no field in its data, so it protects nothing. Check the spelling.`);
+        }
+        break;
+      }
+      v = (v as Record<string, unknown>)[key];
+    }
+  }
 }
 
 /** Replace each secret value where it stands as a whole word, so "200" doesn't blank "1200" or "200m". */
