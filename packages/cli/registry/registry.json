@@ -43,6 +43,13 @@
     }
   },
   "parts": {
+    "screen-kit": {
+      "description": "The frame every screen shares: Shell, Card, btn and a loading Skeleton. new uses it.",
+      "files": [
+        "parts/screen-kit.tsx"
+      ],
+      "dependencies": []
+    },
     "step-bar": {
       "description": "Progress through a screen with several steps; reached steps can be tapped.",
       "files": [

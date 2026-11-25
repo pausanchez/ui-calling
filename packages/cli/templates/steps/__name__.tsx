@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { pickLocalized, type SurfaceData } from "@ui-calling/core";
 import { SurfaceActionError, useSurface, useSurfaceSteps } from "@ui-calling/react";
+import { Card, Shell, Skeleton, btn } from "../../registry/parts/screen-kit";
 import { ActionBar } from "../../registry/parts/action-bar";
 import { ChoiceCard } from "../../registry/parts/choice-card";
 import { StepBar } from "../../registry/parts/step-bar";
@@ -70,7 +71,7 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
   const { status, data, errorCode, locale, returnUrl } = useSurface(__const__);
   const t: __Component__Messages = { ...pickLocalized(__MESSAGES__, locale)!, ...messages };
 
-  if (status === "loading") return <Shell><div className="h-40 animate-pulse rounded-lg bg-muted" /></Shell>;
+  if (status === "loading") return <Shell><Skeleton /></Shell>;
   if (status !== "ready" || !data) {
     // upstream_error: your data source failed and the agent was told, so send the user back to the chat.
     const upstream = errorCode === "upstream_error";
@@ -84,7 +85,7 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
       </Shell>
     );
   }
-  return <Shell>{data.submitted ? <Done reference={data.submitted.reference} t={t} /> : <Steps data={data} t={t} />}</Shell>;
+  return <Shell steps>{data.submitted ? <Done reference={data.submitted.reference} t={t} /> : <Steps data={data} t={t} />}</Shell>;
 }
 
 /** The steps. Answers live in state until each step is saved with its event, so going back never loses them. */
@@ -216,26 +217,4 @@ function Summary({ title, edit, onEdit, children }: { title: string; edit: strin
       <div className="mt-1">{children}</div>
     </Card>
   );
-}
-
-function Shell({ children }: { children: ReactNode }) {
-  return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col gap-5 px-4 pt-6">{children}</div>
-    </main>
-  );
-}
-
-function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-lg border border-border bg-card p-4 text-card-foreground ${className}`}>{children}</section>;
-}
-
-function btn(variant: "primary" | "outline", extra = "") {
-  const base =
-    "inline-flex h-11 items-center justify-center rounded-md px-4 text-sm font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-  const v = {
-    primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-    outline: "border border-border bg-card hover:bg-muted",
-  }[variant];
-  return `${base} ${v} ${extra}`;
 }

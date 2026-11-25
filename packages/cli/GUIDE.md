@@ -41,6 +41,7 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 
 | Part | What it is |
 |---|---|
+| `screen-kit` | `Shell`, `Card`, `btn()` and `Skeleton`: the page, card and button styles every generated screen uses (`new` adds it for you) |
 | `step-bar` | Progress through the steps; reached steps can be tapped |
 | `action-bar` | The sticky bottom bar: Back, the step's one action, and the last problem above them |
 | `choice-card` | An option as a full-width radio or checkbox card, with details when checked |
@@ -358,7 +359,7 @@ npx ui-calling whatsapp dev               # tunnel, your dev server with PUBLIC_
 npx ui-calling whatsapp check             # is the token valid, and where does Meta deliver?
 ```
 
-`whatsapp dev` runs `npm run dev` unless you pass your own after `--` (`npx ui-calling whatsapp dev -- pnpm dev`), and expects the webhook at `/api/whatsapp/webhook` (`--webhook-path`). One Meta app delivers to one address at a time: pointing it here takes it from any other app.
+`whatsapp dev` runs `npm run dev` unless you pass your own after `--` (`npx ui-calling whatsapp dev -- pnpm dev`), and expects the webhook at `/api/whatsapp/webhook` (`--webhook-path`). One Meta app delivers to one address at a time: pointing it here takes it from any other app. Working on two projects at once? Give each its own Meta app (or test number); `whatsapp check` says where messages go now.
 
 **Next.js:** `next dev` serves its own scripts only to `localhost`, so a screen opened on a phone through the tunnel stays blank unless the tunnel's host is in `allowedDevOrigins`. `init` adds `allowedDevOrigins: process.env.PUBLIC_URL ? [new URL(process.env.PUBLIC_URL).hostname] : []` to `next.config`; `whatsapp dev` warns if it's missing. (Vite doesn't need it.)
 
@@ -412,7 +413,7 @@ console.log(formatEventsForAgent(await ui.events("t")));                  // exa
 
 To click through a screen by hand instead, use `npx ui-calling link <surface> key=value...` against your dev server; it uses the dev routes above.
 
-Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and `resolve` refuses data the `subject` doesn't own (call with someone else's ID and expect a `SurfaceError`). The link itself is a bearer token: anyone holding it can open it, so what protects the data is that scoping in `resolve`. The demo's `apps/demo/server/smoke.ts` is a full example.
+Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and `resolve` refuses data the `subject` doesn't own (call with someone else's ID and expect a `SurfaceError`). The error's `code` is a property, not part of the message: `await assert.rejects(ui.call(...), (e) => e.code === "shift_not_found")`. The link itself is a bearer token: anyone holding it can open it, so what protects the data is that scoping in `resolve`. The demo's `apps/demo/server/smoke.ts` is a full example.
 
 ## Done checklist
 
@@ -521,7 +522,7 @@ type UiEvent = {
 |---|---|
 | `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"`. On a computer, links to `returnUrl` close the tab instead |
 | `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)` (resolves with the fresh data the handler returned, so you can show this action's outcome, e.g. a new ticket number), `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
-| `useSurfaceName()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
+| `useSurfaceSession()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
 | `useSurfaceSteps(steps, { initial, key? })` | `step`, `index`, `count`, `isFirst`, `isLast`, `go(step)`, `next()`, `back()`: the steps of a screen in the browser's history, so Back and reloads work |
 | `SurfaceActionError` | Thrown by a failed `emit`, `reload` or `upload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |
 

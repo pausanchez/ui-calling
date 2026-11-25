@@ -10,7 +10,9 @@ import { store } from "./store";
 export const ui = createUiCalling({
   // Public origin of this app: links look like `${baseUrl}/s/<token>`.
   baseUrl: process.env.PUBLIC_URL ?? "__BASE_URL__",
-  surfaces: [/* ui-calling:surfaces */],
+  surfaces: [
+    /* ui-calling:surfaces */
+  ],
   // Sessions, events and files: see store.ts, which your own server code can use too.
   store,
   // "button" if your channel sends links as buttons (e.g. WhatsApp); "message" if the model writes them in its reply.

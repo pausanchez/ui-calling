@@ -61,6 +61,8 @@ try {
   run(next, "new", "shift-picker"); // again: files are skipped, registration stays single
   const runtime = read("init-next-src", "src/ui-calling/ui.ts");
   assert.equal(runtime.match(/shiftPickerImpl,/g)?.length, 1, "registered once");
+  // One line per surface, so each `new` is a one-line diff.
+  assert.match(runtime, /\n    shiftPickerImpl,\n    linkAccountImpl,\n    \/\* ui-calling:surfaces \*\//);
   assert.match(runtime, /linkAccountImpl,/);
   const screen = read("init-next-src", "src/ui-calling/surface-screen.tsx");
   assert.match(screen, /shift_picker: \(\) => <ShiftPicker \/>/);

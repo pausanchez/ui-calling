@@ -115,7 +115,14 @@ function register(file, importLine, entry) {
   let s = readFileSync(file, "utf8");
   if (!s.includes("// ui-calling:imports") || !s.includes("/* ui-calling:surfaces */")) return false;
   if (!s.includes(importLine)) s = s.replace("// ui-calling:imports", `${importLine}\n// ui-calling:imports`);
-  if (!s.includes(entry)) s = s.replace("/* ui-calling:surfaces */", `${entry} /* ui-calling:surfaces */`);
+  if (!s.includes(entry)) {
+    // On a line of its own, each entry goes on a new line above the marker (a clean diff per surface);
+    // an inline marker (older setups: `[/* ui-calling:surfaces */]`) keeps entries on its line.
+    const own = s.match(/\n([ \t]*)\/\* ui-calling:surfaces \*\//);
+    s = own
+      ? s.replace(own[0], `\n${own[1]}${entry}${own[0]}`)
+      : s.replace("/* ui-calling:surfaces */", `${entry} /* ui-calling:surfaces */`);
+  }
   writeFileSync(file, s);
   console.log(`  update ${shown(file)}`);
   return true;

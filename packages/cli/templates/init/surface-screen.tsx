@@ -1,5 +1,5 @@
 "use client";
-import { SurfaceProvider, useSurfaceName } from "@ui-calling/react";
+import { SurfaceProvider, useSurfaceSession } from "@ui-calling/react";
 // ui-calling:imports
 
 /** One entry per surface. `npx ui-calling new <name>` adds them. */
@@ -61,7 +61,7 @@ const TEXT = {
 };
 
 function Router() {
-  const { status, surface, locale, errorCode, returnUrl } = useSurfaceName();
+  const { status, surface, locale, errorCode, returnUrl } = useSurfaceSession();
   // Once the surface is known, it renders its own states, including "your data source is down".
   const render = surface ? SURFACES[surface] : undefined;
   if (render) return render();
