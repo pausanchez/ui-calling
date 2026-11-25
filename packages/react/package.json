@@ -2,6 +2,22 @@
   "name": "@ui-calling/react",
   "version": "0.0.1",
   "description": "React bindings for UI_calling surfaces: typed data, semantic events, automatic lifecycle tracking.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "react",
+    "agents",
+    "ui"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +28,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -39,5 +56,8 @@
   },
   "peerDependencies": {
     "react": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -191,7 +191,13 @@ function init() {
   const screen = join(lib, "surface-screen.tsx");
   console.log(`Setting up UI_calling for ${framework === "other" ? "your project" : framework === "next" ? "Next.js" : "Vite"}\n`);
 
-  write(runtime, fill("ui.ts", { __BASE_URL__: flag("--base-url", framework === "vite" ? "http://localhost:5173" : "http://localhost:3000"), __DELIVER__: deliver }));
+  // Flags become string literals in ui.ts: escape them, so a quote can't break the file.
+  const literal = (v) => JSON.stringify(String(v)).slice(1, -1);
+  if (!["button", "message"].includes(deliver)) {
+    console.error(`--deliver is "button" or "message", not "${deliver}".`);
+    process.exit(1);
+  }
+  write(runtime, fill("ui.ts", { __BASE_URL__: literal(flag("--base-url", framework === "vite" ? "http://localhost:5173" : "http://localhost:3000")), __DELIVER__: deliver }));
   write(screen, fill("surface-screen.tsx", {}));
   write(join(lib, "store.ts"), fill("store.ts", {}));
   write(join(lib, "tokens.css"), readFileSync(join(registryDir, registry.tokens)));

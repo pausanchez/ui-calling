@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { defineSurface, event } from "@ui-calling/core";
 
-const slot = z.object({ date: z.string().describe("ISO date, YYYY-MM-DD"), window: z.string() });
+// Short, shaped strings: these come from the browser and reach the agent's context.
+const slot = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("ISO date, YYYY-MM-DD"), window: z.string().max(40) });
 
 export const orderStatus = defineSurface({
   name: "order_status",
@@ -33,7 +34,8 @@ export const orderStatus = defineSurface({
         reason: z.enum(["damaged", "missing_items", "wrong_address", "late", "other"]),
         details: z.string().max(500),
       }),
-      { describe: (p) => `User reported a problem (${p.reason}): "${p.details}"`, wake: true },
+      // JSON.stringify quotes the user's text, so it reads as their words, not as part of the sentence.
+      { describe: (p) => `User reported a problem (${p.reason}): ${JSON.stringify(p.details)}`, wake: true },
     ),
     viewed_items: event(z.object({}), { describe: () => "User expanded the item list" }),
   },

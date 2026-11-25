@@ -2,6 +2,22 @@
   "name": "@ui-calling/anthropic",
   "version": "0.0.1",
   "description": "Use UI_calling surfaces as tools with the Anthropic SDK (tool runner or manual loop).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/anthropic"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "anthropic",
+    "claude",
+    "tools"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +28,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -39,5 +56,8 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^1.13.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

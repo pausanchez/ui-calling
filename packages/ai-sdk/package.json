@@ -2,6 +2,22 @@
   "name": "@ui-calling/ai-sdk",
   "version": "0.0.1",
   "description": "Use UI_calling surfaces as tools with the Vercel AI SDK.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "directory": "packages/ai-sdk"
+  },
+  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui_calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "ai-sdk",
+    "vercel",
+    "tools"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +28,8 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
@@ -39,5 +56,8 @@
   },
   "devDependencies": {
     "ai": "^7.0.181"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -20,7 +20,13 @@ export type McpAdapterOptions = {
 /**
  * An MCP server whose tools are your surfaces. Connect it to any transport:
  *
- *   const server = createUiCallingMcpServer(ui, { who: (extra) => ({ conversationId: extra.sessionId ?? "mcp", subject: userFrom(extra.authInfo) }) });
+ *   const server = createUiCallingMcpServer(ui, {
+ *     // One conversation per client session, never a shared fallback: events would mix between users.
+ *     who: (extra) => {
+ *       if (!extra.sessionId) throw new Error("This server needs a session ID per client");
+ *       return { conversationId: extra.sessionId, subject: userFrom(extra.authInfo) };
+ *     },
+ *   });
  *   await server.connect(new StdioServerTransport());
  *
  * MCP clients usually show the model's text, so create the runtime with `deliverLinks: "message"`

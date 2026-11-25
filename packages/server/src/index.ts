@@ -25,6 +25,14 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
   // Development only: open a screen for a test user without an agent, and see what the agent would read.
   // `npx ui-calling link` and `npx ui-calling events` call these. Never mounted in production.
   if (opts.dev && process.env.NODE_ENV !== "production") {
+    // They open any user's screens with no login: localhost only, so a dev server reachable through a tunnel or
+    // a misconfigured deploy (`next dev` in production, NODE_ENV=development) doesn't expose them.
+    console.warn("[ui_calling] dev routes are on (/dev/links, /dev/events): localhost only, never in production");
+    app.use("/dev/*", async (c, next) => {
+      const host = new URL(c.req.url).hostname;
+      if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) return c.json({ error: "not_found" }, 404);
+      await next();
+    });
     app.post("/dev/links", async (c) => {
       const body = await c.req.json<{ surface?: string; input?: Record<string, unknown>; subject?: string; conversationId?: string; locale?: string }>();
       const tool = ui.tools().find((t) => t.name === body.surface || t.name.endsWith(`_${body.surface}`))?.name;
@@ -75,7 +83,8 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     const { file, bytes } = await ui.file(c.req.param("token"), c.req.param("id"));
     return c.body(bytes as Uint8Array<ArrayBuffer>, 200, {
       "Content-Type": file.type,
-      "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      // Images and PDFs show in the page; anything else downloads instead of rendering on this origin.
+      "Content-Disposition": `${/^image\/|^application\/pdf$/.test(file.type) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
       // Uploaded bytes are untrusted: never let the browser guess a type or run anything in them.
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'; sandbox",
