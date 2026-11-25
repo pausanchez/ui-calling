@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { SessionStatus, UiEvent, UiSession, UiStore } from "@ui-calling/core";
+import { UnknownEventError, type EventQuery, type SessionStatus, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
 
 /**
  * Sessions and events in a SQLite file, on Node's built-in `node:sqlite`: nothing to install, nothing
@@ -44,10 +44,17 @@ export function sqliteStore(path = ".ui-calling/ui-calling.db") {
     sessionsByStatus: db.prepare("SELECT json FROM ui_sessions WHERE status = ?"),
     allSessions: db.prepare("SELECT json FROM ui_sessions"),
     insertEvent: db.prepare("INSERT INTO ui_events (id, session_id, conversation_id, json) VALUES (?, ?, ?, ?)"),
-    eventsBySession: db.prepare("SELECT json FROM ui_events WHERE session_id = ? ORDER BY seq"),
-    eventsByConversation: db.prepare("SELECT json FROM ui_events WHERE conversation_id = ? ORDER BY seq"),
-    eventsByBoth: db.prepare("SELECT json FROM ui_events WHERE conversation_id = ? AND session_id = ? ORDER BY seq"),
-    allEvents: db.prepare("SELECT json FROM ui_events ORDER BY seq"),
+    seqOf: db.prepare("SELECT seq FROM ui_events WHERE id = ?"),
+  };
+  // One statement per combination of filters, so each query can use the (…, seq) indexes.
+  const eventQueries = new Map<string, ReturnType<DatabaseSync["prepare"]>>();
+  const eventQuery = (filters: string[]) => {
+    const key = filters.join(",");
+    if (!eventQueries.has(key)) {
+      const where = filters.length ? `WHERE ${filters.map((f) => `${f} = ?`).join(" AND ")} AND seq > ?` : "WHERE seq > ?";
+      eventQueries.set(key, db.prepare(`SELECT json FROM ui_events ${where} ORDER BY seq LIMIT ?`));
+    }
+    return eventQueries.get(key)!;
   };
   const one = <T>(row: unknown) => (row ? (JSON.parse((row as { json: string }).json) as T) : undefined);
   const many = <T>(rows: unknown[]) => rows.map((r) => JSON.parse((r as { json: string }).json) as T);
@@ -75,11 +82,25 @@ export function sqliteStore(path = ".ui-calling/ui-calling.db") {
     async appendEvent(event: UiEvent) {
       q.insertEvent.run(event.id, event.sessionId, event.conversationId, JSON.stringify(event));
     },
-    async listEvents({ conversationId, sessionId }: { conversationId?: string; sessionId?: string }) {
-      if (conversationId && sessionId) return many<UiEvent>(q.eventsByBoth.all(conversationId, sessionId));
-      if (sessionId) return many<UiEvent>(q.eventsBySession.all(sessionId));
-      if (conversationId) return many<UiEvent>(q.eventsByConversation.all(conversationId));
-      return many<UiEvent>(q.allEvents.all());
+    async listEvents({ conversationId, sessionId, after, limit }: EventQuery) {
+      let from = 0;
+      if (after !== undefined) {
+        const row = q.seqOf.get(after) as { seq: number } | undefined;
+        if (!row) throw new UnknownEventError(after);
+        from = row.seq;
+      }
+      const filters: string[] = [];
+      const params: (string | number)[] = [];
+      if (conversationId) {
+        filters.push("conversation_id");
+        params.push(conversationId);
+      }
+      if (sessionId) {
+        filters.push("session_id");
+        params.push(sessionId);
+      }
+      // LIMIT -1 is SQLite for "no limit".
+      return many<UiEvent>(eventQuery(filters).all(...params, from, limit ?? -1));
     },
     async listSessions({ status }: { status?: SessionStatus }) {
       return many<UiSession>(status ? q.sessionsByStatus.all(status) : q.allSessions.all());

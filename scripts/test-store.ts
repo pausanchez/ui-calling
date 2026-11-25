@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { MemoryStore, createUiCalling, defineSurface, event, implement, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
+import { MemoryStore, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
 import { sqliteStore } from "@ui-calling/sqlite";
 
 const dir = mkdtempSync(join(tmpdir(), "ui-calling-store-"));
@@ -52,6 +52,20 @@ async function contract(name: string, store: UiStore) {
     assert.deepEqual((await store.listEvents({ sessionId: "s-a" })).map((e) => e.id), ["e1", "e3"]);
     assert.deepEqual((await store.listEvents({ conversationId: "c2" })).map((e) => e.id), ["e2"]);
     assert.deepEqual((await store.listEvents({ conversationId: "c1", sessionId: "s-a" })).map((e) => e.payload), [{ n: "e1" }, { n: "e3" }]);
+  });
+  await check(`${name}: \`after\` returns only newer events, \`limit\` pages, and an unknown cursor throws`, async () => {
+    const a = (await store.getSession("s-a"))!;
+    await store.appendEvent(ev("e4", a, "t-e4"));
+    const ids = async (q: Parameters<UiStore["listEvents"]>[0]) => (await store.listEvents(q)).map((e) => e.id);
+    assert.deepEqual(await ids({ conversationId: "c1", after: "e1" }), ["e3", "e4"]);
+    // The cursor is a position, not a filter: an event from another conversation works too.
+    assert.deepEqual(await ids({ conversationId: "c1", after: "e2" }), ["e3", "e4"]);
+    assert.deepEqual(await ids({ sessionId: "s-a", after: "e4" }), [], "nothing new yet");
+    assert.deepEqual(await ids({ conversationId: "c1", limit: 2 }), ["e1", "e3"]);
+    assert.deepEqual(await ids({ conversationId: "c1", after: "e1", limit: 1 }), ["e3"]);
+    assert.deepEqual(await ids({ after: "e1" }), ["e2", "e3", "e4"]);
+    // Silently returning everything would duplicate the agent's context, so a bad cursor must fail loudly.
+    await assert.rejects(store.listEvents({ conversationId: "c1", after: "missing" }), UnknownEventError);
   });
 }
 
@@ -101,7 +115,10 @@ await check("restart: a link sent before a restart still opens, and the agent's 
   assert.equal(open.locale, "es");
   const { event } = await second.emit(token, "close", {});
   assert.match(event.state ?? "", /Ticket T-7 closed/);
-  assert.deepEqual((await second.events("conv")).map((e) => e.type), ["opened", "close"]);
+  const all = await second.events("conv");
+  assert.deepEqual(all.map((e) => e.type), ["opened", "close"]);
+  // The cursor survives the restart: catch up from the last event handled before it.
+  assert.deepEqual((await second.events("conv", { after: all[0].id })).map((e) => e.type), ["close"]);
   after.close();
 });
 

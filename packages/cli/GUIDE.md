@@ -182,7 +182,14 @@ async function runTurn(conversationId: string, userText?: string) {
 - **Which events wake the agent:** domain events with `wake: true`, `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`).
 - **A woken turn may say nothing.** The agent gets events without a new message. Let it answer `NO_REPLY` when a follow-up wouldn't help.
 - **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
-- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Keep `pending` in your database (or read it back with `ui.events(conversationId)`), use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
+- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Instead of the in-memory `pending`, save the ID of the last event each turn handled, and read what's new with the cursor (below). Use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
+- **Catching up with a cursor.** `ui.events(conversationId, { after: lastEventId })` returns only the events after the one you handled last, oldest first. This works after a restart, on another instance, and when an `onEvent` call was lost. It throws `UnknownEventError` if the ID isn't stored, rather than silently returning everything again. Add `limit` to page through long conversations.
+
+  ```ts
+  const events = await ui.events(conversationId, convo.lastEventId ? { after: convo.lastEventId } : {});
+  // ...run the turn with formatEventsForAgent(events), then:
+  convo.lastEventId = events.at(-1)?.id ?? convo.lastEventId;
+  ```
 
 The demo's `apps/demo/server/agent.ts` does all of this with Claude (`enqueue`, `handleUiEvent`, `NO_REPLY`).
 
@@ -366,7 +373,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `surfaces` | required | The `implement(…)` results to expose as tools |
 | `baseUrl` | required | Public origin of your screens; links are `baseUrl + pathPrefix + token` |
 | `pathPrefix` | `"/s/"` | Path in front of the token |
-| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore` |
+| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after` |
 | `ttlSeconds` | `3600` | Link lifetime; a surface's own `ttlSeconds` wins |
 | `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen gets no domain event in this time |
 | `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
@@ -385,7 +392,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `ui.isUiTool(name)` | Whether a tool name belongs to UI_calling |
 | `ui.runTool(name, input, who)` | `{ ok: true, content, link, summary }` or `{ ok: false, content, error }`; never throws for bad input |
 | `ui.call(name, input, who)` | `{ url, sessionId, surface, locale, ctaLabel, expiresAt, summary }`; throws on bad input |
-| `ui.events(conversationId)` | Every recorded event of the conversation, oldest first |
+| `ui.events(conversationId, { after?, limit? })` | The conversation's events, oldest first; with `after` (an event ID), only newer ones. Throws `UnknownEventError` for an unknown `after` |
 | `ui.ready` | Resolves once abandon timers from before a restart are re-armed |
 
 `who` is `{ conversationId, subject }`: the conversation events report to, and the user the data is scoped to.
