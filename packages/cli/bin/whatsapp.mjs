@@ -5,7 +5,7 @@
 // Reads WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_APP_SECRET and WHATSAPP_VERIFY_TOKEN from the
 // environment or .env.local / .env, and never prints them.
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const GRAPH = "https://graph.facebook.com/v25.0";
@@ -90,6 +90,15 @@ export async function whatsapp(sub, { flag, devCommand, defaultPort }) {
     process.exit(1);
   }
 
+  // Next.js: `next dev` serves its scripts only to localhost unless the tunnel's host is in allowedDevOrigins.
+  const nextConfig = ["next.config.ts", "next.config.mjs", "next.config.js"].find((f) => existsSync(f));
+  if (nextConfig && !readFileSync(nextConfig, "utf8").includes("allowedDevOrigins")) {
+    console.warn(
+      `! ${nextConfig} has no allowedDevOrigins: on a phone the screens will stay blank in next dev. Add\n` +
+        `    allowedDevOrigins: process.env.PUBLIC_URL ? [new URL(process.env.PUBLIC_URL).hostname] : [],\n` +
+        `  to its config (npx ui-calling init does this for new setups).`,
+    );
+  }
   const port = Number(flag("--port", defaultPort));
   const children = [];
   const stop = (code = 0) => {
