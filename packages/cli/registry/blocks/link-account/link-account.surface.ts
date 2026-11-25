@@ -19,8 +19,6 @@ export const linkAccount = defineSurface({
   abandonAfterMs: 10 * 60_000,
   data: z.object({
     stage: z.enum(["start", "code_sent", "linked"]),
-    /** Where the code went, masked (e.g. "a***@example.com"). Null until a code is sent. */
-    sentTo: z.string().nullable(),
     name: z.string().nullable(),
     continueWith: z.string(),
   }),

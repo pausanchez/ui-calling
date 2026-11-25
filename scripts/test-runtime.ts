@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { MemoryStore, createUiCalling, defineSurface, event, formatEventsForAgent, implement, SurfaceError, type UiStore } from "@ui-calling/core";
 import { uiCallingHandler } from "@ui-calling/server";
+import { linkAccountImpl } from "../packages/cli/registry/blocks/link-account/link-account.server";
 
 const ticket = defineSurface({
   name: "ticket",
@@ -513,6 +514,44 @@ await check("secret data: a path keeps the rest of the field visible, and only w
   });
   const { summary } = await ui.call("show_site", {}, { conversationId: "c60", subject: "u" });
   assert.equal(summary, "Access open until 22:00, PIN [secret], floor [secret], site 1200, 42nd street.");
+});
+
+await check("link-account block: a known and an unknown account get exactly the same screen", async () => {
+  const ui = createUiCalling({ baseUrl: "https://ui.example.com", surfaces: [linkAccountImpl] });
+  const ask = async (subject: string, identifier: string) => {
+    const t = token((await ui.call("show_link_account", { continue_with: "see my rota" }, { conversationId: subject, subject })).url);
+    const log = console.log;
+    console.log = () => {}; // the example sendCode prints the code
+    const { data } = await ui.emit(t, "code_requested", { identifier });
+    console.log = log;
+    return { now: data, afterReload: (await ui.open(t)).data };
+  };
+  const known = await ask(`block-known-${Date.now()}`, "sam@example.com");
+  const unknown = await ask(`block-unknown-${Date.now()}`, "nobody@example.com");
+  assert.deepEqual(known, unknown);
+  assert.equal((known.now as { stage?: string } | undefined)?.stage, "code_sent");
+});
+
+await check("secret data: a misspelled path doesn't compile, and one that matches nothing is reported", async () => {
+  const data = z.object({ access: z.object({ status: z.string(), secret: z.object({ code: z.string() }).nullable() }) });
+  defineSurface({ name: "typo", description: "x", input: z.object({}), data, events: {},
+    // @ts-expect-error: "secrte" isn't a field of access
+    secret: ["access.secrte"],
+  });
+  // Typed as a plain string (e.g. built at runtime), the same typo still gets a warning.
+  const loose = defineSurface({ name: "loose", description: "x", input: z.object({}), data, events: {}, secret: ["access.secrte" as "access.secret"] });
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    surfaces: [implement(loose, { resolve: async () => ({ access: { status: "open", secret: { code: "1958#" } } }), summarize: (d) => d.access.status })],
+  });
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (m: string) => warned.push(m);
+  await ui.call("show_loose", {}, { conversationId: "c70", subject: "u" });
+  await ui.call("show_loose", {}, { conversationId: "c71", subject: "u" });
+  console.warn = warn;
+  assert.equal(warned.length, 1, "once per path");
+  assert.match(warned[0], /secret path "access.secrte" matches no field/);
 });
 
 await check("files: a surface with files needs a store that can keep them", async () => {

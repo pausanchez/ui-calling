@@ -81,7 +81,16 @@ export type SurfaceContract<
 };
 
 /** A top-level field of the data, when the data is an object; any name otherwise (so any surface fits `AnySurface`). */
-type SecretKey<D extends z.ZodType> = D extends z.ZodObject ? (keyof z.infer<D> & string) | `${keyof z.infer<D> & string}.${string}` : string;
+type SecretKey<D extends z.ZodType> = D extends z.ZodObject ? DataPath<z.infer<D>> : string;
+
+/** Every path into an object's fields, "a" and "a.b", checked in full so a typo doesn't compile. Four levels deep. */
+type DataPath<T, Depth extends unknown[] = []> = Depth["length"] extends 4
+  ? never
+  : T extends readonly unknown[]
+    ? never
+    : T extends object
+      ? { [K in keyof T & string]: K | (NonNullable<T[K]> extends object ? `${K}.${DataPath<NonNullable<T[K]>, [...Depth, 1]>}` : never) }[keyof T & string]
+      : never;
 
 export function defineSurface<
   const N extends string,

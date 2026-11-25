@@ -54,7 +54,7 @@ export const linkAccount = defineSurface({
   name: "link_account",
   input: z.object({ continue_with: z.string().max(200).describe("What the user asked for, so you can pick it up after linking") }),
   ttlSeconds: 15 * 60, // whoever holds this link can link the chat to an account
-  data: z.object({ stage: z.enum(["start", "code_sent", "linked"]), sentTo: z.string().nullable(), name: z.string().nullable(), continueWith: z.string() }),
+  data: z.object({ stage: z.enum(["start", "code_sent", "linked"]), name: z.string().nullable(), continueWith: z.string() }),
   events: {
     code_requested: event(z.object({ identifier: z.string().trim().min(1).max(200) }), { describe: () => "User asked for a verification code" }),
     code_entered: event(z.object({ code: z.string().trim().max(12) }), { redact: ["code"], describe: () => "User entered their verification code", wake: true }),
@@ -67,7 +67,7 @@ export const linkAccount = defineSurface({
 
 ## Watch out
 
-- **Same answer for unknown accounts.** `code_requested` shows "if that email matches an account, we sent a code" either way, also after a reload, so the screen can't be used to find out who's a customer.
+- **Same answer for unknown accounts.** `code_requested` returns exactly the same data whether or not the account exists, also after a reload: no masked "we sent it to s***@…", which would tell anyone holding a link which emails or employee numbers are real. If you change the screen, keep it that way.
 - **Link the session's subject, never an ID from the screen.** The handler links `ctx.subject`; the payload only carries what the user typed.
 - **Attempts count per customer, not per link.** The agent can open new links on request; the helper's lock follows the customer across chats and links.
 - **Restrict tools until linked.** Giving the agent every tool and hoping it asks first leaks data the first time it doesn't.
