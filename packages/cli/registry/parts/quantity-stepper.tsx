@@ -2,18 +2,24 @@
  * Minus, the number, plus: for "how many", with 44px targets.
  *
  *   <QuantityStepper value={qty} min={1} max={item.qty} onChange={setQty} label={item.name} locale={locale} />
+ *
+ * Counting something that may exceed the expected number (a delivery against its note)? Leave out `max`, or
+ * pass `showMax={false}` to keep a cap without showing "of 26".
  */
 export function QuantityStepper({
   value,
   min = 1,
-  max,
+  max = Infinity,
+  showMax = true,
   onChange,
   label,
   locale,
 }: {
   value: number;
   min?: number;
-  max: number;
+  /** The most allowed; shown as "of {max}" unless `showMax` is false. */
+  max?: number;
+  showMax?: boolean;
   onChange: (value: number) => void;
   /** What is being counted, for screen readers. */
   label: string;
@@ -33,7 +39,7 @@ export function QuantityStepper({
       <button type="button" className={btn} disabled={value >= max} onClick={() => onChange(value + 1)} aria-label={es ? `Añadir uno: ${label}` : `One more: ${label}`}>
         +
       </button>
-      <span className="text-sm text-muted-foreground">{es ? `de ${max}` : `of ${max}`}</span>
+      {showMax && Number.isFinite(max) && <span className="text-sm text-muted-foreground">{es ? `de ${max}` : `of ${max}`}</span>}
     </div>
   );
 }

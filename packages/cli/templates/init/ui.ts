@@ -15,8 +15,11 @@ export const ui = createUiCalling({
   ],
   // Sessions, events and files: see store.ts, which your own server code can use too.
   store,
-  // "button" if your channel sends links as buttons (e.g. WhatsApp); "message" if the model writes them in its reply.
+  // "button": your code shows each link (a WhatsApp button, a button in your own web chat), so it never depends on the
+  // model. "message": the model writes the URL in its reply, for channels you can't attach a button to (MCP, SMS).
   deliverLinks: "__DELIVER__",
+  // The business's time zone: times the agent reads are written in it (see moment.time() in summarize).
+  timeZone: "UTC",
   // Wake the agent if a user opens a screen and does nothing for 10 minutes.
   abandonAfterMs: 10 * 60_000,
   onEvent: async (event) => {
@@ -28,6 +31,8 @@ export const ui = createUiCalling({
 // file doesn't import the agent (an import cycle):
 //
 //   ui.onEvent((event) => {
-//     // Store it with conversation `event.conversationId`; if `event.wake`, run a turn with
-//     // formatEventsForAgent([...]) from "@ui-calling/core" as a user message.
+//     // If `event.wake`, run a turn for `event.conversationId` and `event.subject` (the user, for the tools), with
+//     // the events since your last turn (ui.events(id, { after })) as formatEventsForAgent(...) in a user message.
 //   });
+//
+// A whole agent module: npx ui-calling guide running.

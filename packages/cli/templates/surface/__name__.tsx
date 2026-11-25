@@ -75,7 +75,10 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
     setBusy(true);
     setFailed(null);
     try {
-      await emit("confirmed", { note });
+      // emit resolves with the handler's fresh data, typed by the contract. The screen re-renders with it anyway;
+      // read it when you want this action's outcome right here (a ticket number, a new date).
+      const fresh = await emit("confirmed", { note });
+      if (fresh?.confirmed) setNote("");
     } catch (err) {
       // The server already recorded the failure for the agent; here we only tell the user.
       const retryable = !(err instanceof SurfaceActionError) || err.retryable;

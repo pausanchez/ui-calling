@@ -43,9 +43,9 @@ export const claim = defineSurface({
 Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and submits once even on a double tap.
 
 ```ts
-// Your drafts table, in the store `init` wrote (ui-calling/store.ts): store.db is a node:sqlite DatabaseSync.
+// Your drafts table, in the store `init` wrote (store.ts): store.db is a node:sqlite DatabaseSync. The steps
+// template (`new <name> --template steps`) writes readDraft/writeDraft on it, creating the table on first use.
 import { store } from "./store";
-store.db.exec("CREATE TABLE IF NOT EXISTS claim_drafts (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
 
 function save(id: string, subject: string, patch: Partial<Draft>, reached: Step) {
   const d = load(id, subject);

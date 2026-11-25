@@ -1,12 +1,29 @@
 import { SurfaceError, implement, type SurfaceData } from "@ui-calling/core";
+import { store } from "../init/store";
 import { __const__, __const__Steps } from "./__name__.surface";
 
 type Data = SurfaceData<typeof __const__>;
 type Step = Data["draft"]["step"];
+type Saved = Pick<Data, "draft" | "submitted">;
 
-// TODO: keep drafts in your database. In memory, a restart loses them. For a prototype, the store `init`
-// wrote can hold a table: import { store } from "<your ui-calling folder>/store", then use store.db.
-const drafts = new Map<string, Pick<Data, "draft" | "submitted">>();
+// Drafts live in a table of the SQLite database `init` set up, so a restart keeps them. Move them to your own
+// database when you have one. The table is made on first use: opening the database on import would create it
+// during a production build.
+let tableReady = false;
+function draftsTable() {
+  if (!tableReady) store.db.exec("CREATE TABLE IF NOT EXISTS __surface___drafts (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
+  tableReady = true;
+  return store.db;
+}
+function readDraft(key: string): Saved | undefined {
+  const row = draftsTable().prepare("SELECT json FROM __surface___drafts WHERE key = ?").get(key) as { json: string } | undefined;
+  return row && JSON.parse(row.json);
+}
+function writeDraft(key: string, saved: Saved) {
+  draftsTable()
+    .prepare("INSERT INTO __surface___drafts (key, json) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET json = excluded.json")
+    .run(key, JSON.stringify(saved));
+}
 
 /** Load the record, start the draft, and apply what the agent already knows until the user saves their own choice. */
 function load(id: string, subject: string, prefill?: string): Data {
@@ -16,11 +33,11 @@ function load(id: string, subject: string, prefill?: string): Data {
     { id: "b", label: "Option B" },
   ];
   const key = `${subject}:${id}`;
-  const saved = drafts.get(key) ?? { draft: { step: "details" as Step, details: "", choice: null }, submitted: null };
+  const saved = readDraft(key) ?? { draft: { step: "details" as Step, details: "", choice: null }, submitted: null };
   if (prefill && options.some((o) => o.id === prefill) && __const__Steps.indexOf(saved.draft.step) < __const__Steps.indexOf("review")) {
     saved.draft = { ...saved.draft, choice: saved.draft.choice ?? prefill };
   }
-  drafts.set(key, saved);
+  writeDraft(key, saved);
   return { id, options, ...saved };
 }
 
@@ -28,7 +45,7 @@ function load(id: string, subject: string, prefill?: string): Data {
 function save(id: string, subject: string, patch: Partial<Data["draft"]>, reached: Step) {
   const d = load(id, subject);
   const step = __const__Steps.indexOf(reached) > __const__Steps.indexOf(d.draft.step) ? reached : d.draft.step;
-  drafts.set(`${subject}:${id}`, { draft: { ...d.draft, ...patch, step }, submitted: d.submitted });
+  writeDraft(`${subject}:${id}`, { draft: { ...d.draft, ...patch, step }, submitted: d.submitted });
   return load(id, subject);
 }
 
@@ -61,7 +78,7 @@ export const __const__Impl = implement(__const__, {
       if (d.submitted) return d; // a double tap submits once
       if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing", { refused: true });
       // TODO: do the real thing here. Throw SurfaceError(code, message, { retryable: true }) if a system behind it fails.
-      drafts.set(`${ctx.subject}:${id}`, { draft: d.draft, submitted: { reference: `R-${Math.floor(1000 + Math.random() * 9000)}` } });
+      writeDraft(`${ctx.subject}:${id}`, { draft: d.draft, submitted: { reference: `R-${Math.floor(1000 + Math.random() * 9000)}` } });
       return load(id, ctx.subject);
     },
   },

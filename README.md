@@ -120,7 +120,7 @@ npx ui-calling init
 npx ui-calling new shift-picker
 ```
 
-`init` detects Next.js or Vite and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page; elsewhere it tells you how to mount them. Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
+`init` detects Next.js or Vite and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page. On Vite it writes a small Hono API server in `server/`, proxies `/api` to it and renders screens on `/s/:token`; elsewhere it tells you how to mount them. Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
 
 ## The primitives
 
@@ -276,7 +276,7 @@ The demo keeps its own state in the same file, so you can restart it mid-convers
 npm run build
 ```
 
-This builds every package with tsup into `dist/` (ESM, `.d.ts` and source maps). Published packages ship only `dist/`. Inside this repo, a custom export condition, `ui-calling-source`, makes TypeScript, tsx and Vite read `src/` directly, so development and tests never need a build.
+This builds every package with tsup into `dist/` (ESM, `.d.ts` and source maps). Published packages ship only `dist/` and a short README. Inside this repo, a custom export condition, `ui-calling-source`, makes TypeScript, tsx and Vite read `src/` directly, so development and tests never need a build.
 
 To try a release before publishing, create the app first, then pack the packages and install the tarballs into it (installing them before `create-next-app` makes it refuse a non-empty folder):
 

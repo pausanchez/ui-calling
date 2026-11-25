@@ -22,7 +22,7 @@ events: {
 
 ## Server
 
-Check the pick against your data, and fail with a specific code when it's gone. The code reaches both the screen (as `reason`) and the agent.
+Check the pick against your data, and fail with a specific code when it's gone. The code reaches both the screen (as `reason`) and the agent. A refusal doesn't wake the agent: the screen asks the user to pick again, and the agent reads what happened on its next turn.
 
 ```ts
 shift_selected: async (p, ctx) => {

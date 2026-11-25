@@ -8,7 +8,7 @@ import { defineSurface, event } from "@ui-calling/core";
 export const linkAccount = defineSurface({
   name: "link_account",
   description:
-    "Lets the user verify who they are with a one-time code sent to their email, so this chat gets linked to their account. Open it when the user asks about anything personal and their account isn't linked yet. After it's linked, continue with what they asked for.",
+    "Lets the user verify who they are with a one-time code sent outside this chat (by email or SMS), so this chat gets linked to their account. Open it when the user asks about anything personal and their account isn't linked yet. After it's linked, continue with what they asked for.",
   input: z.object({
     continue_with: z.string().max(200).describe("What the user asked for, in a few words, so you can pick it up after linking"),
   }),
@@ -25,7 +25,7 @@ export const linkAccount = defineSurface({
   events: {
     code_requested: event(z.object({ identifier: z.string().trim().min(1).max(200) }), {
       describe: () => "User asked for a verification code",
-      // The email they typed is personal data the agent doesn't need.
+      // What they typed (an email, a phone or employee number) is personal data the agent doesn't need.
       includePayload: false,
     }),
     code_entered: event(z.object({ code: z.string().trim().max(12) }), {

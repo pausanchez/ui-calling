@@ -1,4 +1,5 @@
 "use client";
+import { useEffect } from "react";
 import { SurfaceProvider, useSurfaceSession } from "@ui-calling/react";
 // ui-calling:imports
 
@@ -26,6 +27,12 @@ export function SurfaceLoading() {
  * `returnUrl` is where "Back to chat" goes, e.g. `https://wa.me/<your number>` or your web chat.
  */
 export function SurfaceScreen({ token, returnUrl }: { token: string; returnUrl?: string }) {
+  // The token is in this page's address: keep it out of the Referer sent to anything the screen links to or loads.
+  useEffect(() => {
+    if (document.querySelector('meta[name="referrer"]')) return;
+    const meta = Object.assign(document.createElement("meta"), { name: "referrer", content: "no-referrer" });
+    document.head.append(meta);
+  }, []);
   return (
     <SurfaceProvider token={token} endpoint="/api/ui" returnUrl={returnUrl}>
       <Router />

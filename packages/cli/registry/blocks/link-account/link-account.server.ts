@@ -9,8 +9,9 @@ type Customer = { id: string; name: string; email: string };
  * Return undefined when there's no match: the screen shows the same thing either way.
  */
 async function findCustomer(identifier: string): Promise<Customer | undefined> {
+  // The example answers to its email or its ID, so it works with any `identifier` the screen asks for.
   const example: Customer = { id: "C-1001", name: "Sam Taylor", email: "sam@example.com" };
-  return identifier.toLowerCase() === example.email ? example : undefined;
+  return [example.email, example.id.toLowerCase()].includes(identifier.trim().toLowerCase()) ? example : undefined;
 }
 
 /** TODO: send the code through a channel the customer already controls (email, SMS), never back to the chat. */

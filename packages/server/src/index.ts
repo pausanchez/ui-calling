@@ -58,7 +58,11 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
       const subject = body.subject ?? "dev-user";
       const conversationId = body.conversationId ?? `dev:${subject}`;
       const run = await ui.runTool(tool, { ...body.input, ...(body.locale ? { locale: body.locale } : {}) }, { conversationId, subject });
-      if (!run.ok) return c.json({ error: "tool_failed", message: run.content }, 400);
+      // A refusal from resolve (e.g. the test user isn't linked) is 422 with its code; bad input stays 400.
+      if (!run.ok) {
+        const bad = run.error.code === "invalid_payload" || run.error.code === "unknown_surface";
+        return c.json({ error: run.error.code, message: run.error.message }, bad ? 400 : 422);
+      }
       return c.json({ url: run.link?.url, conversationId, toolResult: run.content });
     });
     app.get("/dev/events/:conversationId", async (c) => {
@@ -143,7 +147,7 @@ export type RouteOptions = {
  *
  *   // app/api/ui/[...path]/route.ts
  *   const handler = uiCallingHandler(ui);
- *   export { handler as GET, handler as POST };
+ *   export { handler as GET, handler as POST, handler as DELETE }; // DELETE: removing an uploaded file
  */
 export function uiCallingHandler(ui: UiCalling, opts: RouteOptions & { basePath?: string } = {}) {
   const app = new Hono().basePath(opts.basePath ?? "/api/ui");

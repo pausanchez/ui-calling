@@ -4,11 +4,11 @@ A **surface** is a screen an AI agent can open for a user, the way it calls a fu
 
 Unlike a webview that returns one result when it closes, the agent decides when to open a surface, and it hears about the screen's whole life: what the user saw, tried, finished or gave up on, and what failed and why. That's what lets it follow up in the chat instead of answering blind.
 
-This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`.
+This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`, or one section at a time: `npx ui-calling guide toc` lists them, and `npx ui-calling guide <section>` prints one (a word is enough: `guide vite`, `guide agent`, `guide testing`).
 
 **Starting from a task?** The recipes give the whole answer for one job: a form with several steps, a photo upload, picking a slot that can fill up, linking a WhatsApp user, and more. List them with `npx ui-calling guide recipes` and print one with `npx ui-calling guide <recipe>`. This guide holds the rules and the reference they build on.
 
-> **Not on npm yet.** Until the first release, install the tarballs built from the UI_calling repo (`npm pack`, see its README), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
+> **Not on npm yet.** Until the first release, install the packages from tarballs (`npm install ./vendor/*.tgz`, built with `npm pack` in the UI_calling repo), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
 
 ## Mental model: three files per surface
 
@@ -33,7 +33,7 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 3. **Screen.** Render `data`, call `emit(event, payload)`, call `complete()` when the user is done, and keep every string in the messages object.
 4. **Register** the implementation in `createUiCalling({ surfaces: [...] })` and render the component on your surface route.
 5. **Typecheck.**
-6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back. Add `--conversation <id>` to put the screen in your agent's conversation, so its events reach your agent end to end; `--url http://localhost:3100` if your app isn't on the default port. `events --time-zone Europe/Madrid` uses the clock you give `formatEventsForAgent`. The test user's `subject` is `dev-user` (change it with `--subject`): in development, have `resolve` map it to a test customer, the way a WhatsApp subject maps to a real one.
+6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back. Add `--conversation <id>` to put the screen in your agent's conversation, so its events reach your agent end to end; `--url http://localhost:3100` if your app isn't on the default port. `events --time-zone Europe/Madrid` uses the clock you give `formatEventsForAgent`. `link` takes the file name (`shift-picker`), the surface name (`shift_picker`) or the tool name (`show_shift_picker`), and finds your app at `devUrl` in `ui-calling.json` (`init` writes it; `--url` overrides it). The test user's `subject` is `dev-user` (change it with `--subject`): in development, give it a test account, the way a WhatsApp subject maps to a real one. With the `link-account` block, link it once at startup: `if (process.env.NODE_ENV !== "production") identity.link("dev-user", "C-1001")`.
 
 **A screen with several steps** (a return, a claim, an application): `npx ui-calling new <name> --template steps`. It writes a working three-step screen with a saved draft, resume, and the phone's back button, built on `useSurfaceSteps` and the parts below. Change the steps to yours.
 
@@ -57,22 +57,37 @@ npx ui-calling init
 ```
 
 Run it in your project's root. It detects Next.js or Vite and writes:
-- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
-- `ui-calling/store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
+- `ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
+- `store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
 
-These paths are under the folder `init` picked: `src/ui-calling/` when your app has a `src` folder, `ui-calling/` otherwise, or `--dir`.
-- `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
+The screens go in the folder `init` picked: `src/ui-calling/` when your app has a `src` folder, `ui-calling/` otherwise, or `--dir`. Server code (`ui.ts`, `store.ts`, every `.server.ts`) goes next to them on Next.js, and in `server/` otherwise, because there `src/` is bundled for the browser (`--server-dir` to change it).
+- `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to. It also sets `Referrer-Policy: no-referrer` on the page, so the token in its address doesn't leak to sites the screen links to.
 - `ui-calling/tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use UI_calling's). `npx ui-calling tokens` copies only this file.
-- **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
-- **`.gitignore`:** adds `.ui-calling/`, where the production database goes. In development the database is in `node_modules/.cache/ui-calling/`, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading.
+- **Next.js:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
+- **Vite:** see "Vite" below: an API server, the `/api` proxy and the `/s/:token` route.
+- **`.gitignore`:** adds `.ui-calling/`, where the database goes. On Next.js the development database is in `node_modules/.cache/ui-calling/` instead, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading. A clean install (`rm -rf node_modules`, `npm ci`) wipes it, with linked test accounts and drafts. Elsewhere it's `.ui-calling/dev.db`.
 - `ui-calling.json`: where things live. With it, `ui-calling new` and `ui-calling add` register each surface in `ui.ts` and `surface-screen.tsx` by themselves, from any folder of the app. In a monorepo, run `init` in the app that serves the screens, not at the root.
 - **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
 
-Without Next.js, mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
-- **`uiCallingHandler(ui, { basePath, dev })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`. Pass `dev: process.env.NODE_ENV === "development"` to get the routes behind `ui-calling link` and `events`. Serve GET, POST and DELETE.
-- **`uiCallingRoutes(ui, { dev })`** is a Hono app.
+### Vite
 
-Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
+Vite has no server, so `init` adds a small Hono one and wires it in:
+- `server/index.ts`: Hono on Node (`@hono/node-server`) serving `uiCallingRoutes(ui, { dev })` at `/api/ui`, on port 8787 (`API_PORT`). Add your agent's routes (chat, webhook) next to it.
+- `vite.config`: `server.proxy` sends `/api` to it, so screens, the CLI and a phone through a tunnel reach the API at your Vite address.
+- `src/main.tsx`: renders `{surfaceRoute() ?? <App />}`, so `/s/<token>` shows the screen and every other page your app. With a router, route `/s/:token` to `<SurfaceScreen token={token} />` instead.
+- `package.json`: `npm run dev:api` (`tsx watch`, with `.env` loaded). Run it next to `npm run dev`.
+
+When a file isn't in create-vite's shape, `init` leaves it alone and lists the step under "Next". For production, serve Vite's `dist/` from the same Hono app, with every path that isn't `/api` falling back to `index.html`.
+
+### Other servers
+
+Mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
+- **`uiCallingHandler(ui, { basePath, dev })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`. Pass `dev: process.env.NODE_ENV === "development"` to get the routes behind `ui-calling link` and `events`. Serve GET, POST and DELETE.
+- **`uiCallingRoutes(ui, { dev })`** is a Hono app; mount it with `app.route("/api/ui", …)`. It has no `basePath`.
+
+### Options and blocks
+
+Options: `--deliver message` (the model writes the link in its reply; for MCP and plain-text channels), `--dir`, `--server-dir`, `--framework`, `--base-url` (your dev address; also saved as `devUrl` for `link` and `events`). To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
 
 On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`. Set `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise it shows your layout's title.
 
@@ -124,14 +139,23 @@ convo.messages = [...runner.params.messages, { role: "assistant", content: final
 
 For a manual loop, use `anthropicTools(ui)` for `tools` and `anthropicToolResult(ui, toolUseBlock, who)` for each `tool_use`.
 
-**Vercel AI SDK** (`@ui-calling/ai-sdk`):
+**Vercel AI SDK** (`@ui-calling/ai-sdk`), AI SDK 6 or 7:
 
 ```ts
+const links: SurfaceLink[] = [];
 const result = await generateText({
-  model, messages, stopWhen: stepCountIs(5),
+  model: anthropic("claude-sonnet-5-5"),
+  instructions: systemPrompt,            // `system` in AI SDK 6
+  messages: convo.messages,
+  stopWhen: stepCountIs(5),
   tools: aiSdkTools(ui, { conversationId, subject }, { onLink: (l) => links.push(l) }),
 });
+// Keep the whole turn for the next one: the tool calls and results (what the screen shows) and the reply.
+convo.messages.push(...result.responseMessages);   // `result.response.messages` in AI SDK 6
+// send result.text, with each link as a button
 ```
+
+`who` can also be a function, `() => ({ conversationId, subject })`, read when a tool runs. A full agent with the AI SDK is in "Running the agent on events" below.
 
 **OpenAI** (`@ui-calling/openai`, no SDK dependency):
 - Responses API: `openaiResponsesTools(ui)` and `runResponsesFunctionCall(ui, item, who)`.
@@ -143,9 +167,15 @@ const result = await generateText({
 
 **Anything else:** `ui.tools()` gives JSON Schema tools, and `ui.runTool(name, input, who)` returns `{ ok, content, link }`. `content` is what goes back to the model, and errors come back as results, not exceptions.
 
+**What the model reads back** from a tool call is JSON:
+- `status`: `"link_ready"`, or `"error"` with `code` and `message`;
+- `what_they_will_see`: your `summarize` for the data the screen will open with;
+- `expires_at`, in `createUiCalling`'s `timeZone` with the zone's name ("26 Nov 21:00 CET"), and `expires_in_minutes`;
+- `note`: how the link reaches the user. With `deliverLinks: "message"`, also `url`.
+
 **How links reach the user.** `createUiCalling({ deliverLinks })` decides what the model is told:
-- **`"button"` (default):** your channel sends the link as a button (a WhatsApp CTA), and the model never sees the URL.
-- **`"message"`:** the model gets the URL and puts it in its reply. Use it for web chat and MCP clients.
+- **`"button"` (default):** your code delivers the link (`onLink`, or `link` from `runTool`), and the model never sees the URL. Use it for every channel you render yourself: a WhatsApp CTA, or a button under the reply in your own web chat. It never depends on the model.
+- **`"message"`:** the model gets the URL and is told to put it in its reply. Use it only where you can't attach a button, like MCP clients and SMS. Models sometimes leave the URL out, so in a web chat prefer `"button"`.
 
 **The return path is the same everywhere.** When events arrive (`onEvent`), give them to the model as data, not instructions:
 
@@ -168,58 +198,84 @@ Tell the agent in its system prompt:
 
 ## Running the agent on events
 
-Two kinds of events reach `onEvent`. Quiet ones (`opened`, `left`, small domain events) should ride along with the next turn. `wake` events should start a turn now. Both share one queue per conversation with the user's own messages, or a screen event and a new message can run the agent twice at once.
+Two kinds of events reach `onEvent`. Quiet ones (`opened`, `left`, small domain events) ride along with the next turn. `wake` events start a turn now, without a message from the user. Both share one queue per conversation with the user's own messages, or a screen event and a new message can run the agent twice at once.
+
+A whole agent module with the Vercel AI SDK. The other adapters change only the `generateText` call:
 
 ```ts
+// agent.ts: imports `ui`, so ui.ts never imports the agent.
+import { anthropic } from "@ai-sdk/anthropic";
+import { formatEventsForAgent, type SurfaceLink } from "@ui-calling/core";
+import { aiSdkTools } from "@ui-calling/ai-sdk";
+import { generateText, stepCountIs, type ModelMessage } from "ai";
+import { ui } from "./ui";
+
+type Conversation = { id: string; subject: string; messages: ModelMessage[]; lastEventId?: string };
+// Your database: load and save a conversation by ID (a table in store.db is fine to start).
+declare const db: { get(id: string): Conversation | undefined; save(c: Conversation): void };
+declare function send(conversationId: string, text: string, links: SurfaceLink[]): Promise<void>;
+declare const SYSTEM_PROMPT: string; // see "Prompting the agent"
+const TIME_ZONE = "Europe/Madrid";
+
+// One queue per conversation: a user message and a screen event never run the agent at the same time.
 const queues = new Map<string, Promise<void>>();
 function enqueue(conversationId: string, turn: () => Promise<void>) {
   const next = (queues.get(conversationId) ?? Promise.resolve()).then(turn).catch(console.error);
   queues.set(conversationId, next);
   return next;
 }
-const pending = new Map<string, UiEvent[]>();   // quiet events wait here for the next turn
 
-// In your agent's module, which imports `ui` (so ui.ts never imports the agent):
+// A screen woke the agent. The event names the user (`subject`), so the turn can run the tools for them.
 ui.onEvent((e) => {
-  pending.set(e.conversationId, [...(pending.get(e.conversationId) ?? []), e]);
-  if (e.wake) void enqueue(e.conversationId, () => runTurn(e.conversationId));
+  if (e.wake) void enqueue(e.conversationId, () => runTurn(e.conversationId, e.subject));
 });
 
-// Your webhook calls this for every message the user writes.
-export const onUserMessage = (conversationId: string, text: string) =>
-  enqueue(conversationId, () => runTurn(conversationId, text));
+// Your chat route or webhook calls this for every message the user writes.
+export const onUserMessage = (conversationId: string, subject: string, text: string) =>
+  enqueue(conversationId, () => runTurn(conversationId, subject, text));
 
-async function runTurn(conversationId: string, userText?: string) {
-  const convo = await db.conversations.get(conversationId);
-  const events = pending.get(conversationId)?.splice(0) ?? [];
-  const content = [
-    events.length ? formatEventsForAgent(events) : "",
-    userText ?? "The user hasn't written. If a short follow-up doesn't help them, reply exactly NO_REPLY.",
-  ].filter(Boolean).join("\n\n");
-  convo.messages.push({ role: "user", content });
-  // Run your model with the surfaces as tools (see the adapters above), save the transcript,
-  // and send the reply with its link, unless it's NO_REPLY.
+async function runTurn(conversationId: string, subject: string, userText?: string) {
+  const convo = db.get(conversationId) ?? { id: conversationId, subject, messages: [] };
+  // Everything the screens reported since the last turn, quiet events included. The cursor survives restarts.
+  const all = await ui.events(conversationId, convo.lastEventId ? { after: convo.lastEventId } : {});
+  convo.lastEventId = all.at(-1)?.id ?? convo.lastEventId;
+  const events = all.filter((e) => e.type !== "left" && e.type !== "returned"); // tab switches: noise
+  if (!userText && !events.length) return db.save(convo);
+
+  convo.messages.push({
+    role: "user",
+    content: [
+      events.length ? formatEventsForAgent(events, { timeZone: TIME_ZONE }) : "",
+      userText ?? "The user hasn't written. If a short follow-up doesn't help them, reply exactly NO_REPLY.",
+    ].filter(Boolean).join("\n\n"),
+  });
+
+  const links: SurfaceLink[] = [];
+  const result = await generateText({
+    model: anthropic("claude-sonnet-5-5"),
+    instructions: SYSTEM_PROMPT,
+    messages: convo.messages,
+    stopWhen: stepCountIs(5),
+    tools: aiSdkTools(ui, { conversationId, subject }, { onLink: (l) => links.push(l) }),
+  });
+  convo.messages.push(...result.responseMessages);
+  db.save(convo);
+  const text = result.text.trim();
+  if (text && text !== "NO_REPLY") await send(conversationId, text, links);
 }
 ```
 
-- **Which events wake the agent:** domain events with `wake: true` (at most `maxWakesPerMinute` per link), `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`).
+- **Use the cursor, not an in-memory list.** `ui.events(conversationId, { after: lastEventId })` returns only the events after the one you handled last, oldest first. It works after a restart, on another instance, and when an `onEvent` call was lost. It throws `UnknownEventError` if the ID isn't stored, rather than silently returning everything again. Add `limit` to page through long conversations.
+- **Which events wake the agent:** domain events with `wake: true` (at most `maxWakesPerMinute` per link), `abandoned` (only when `abandonAfterMs` is set; it's off by default), and the first error of each kind (`wakeOnError`). A refused action (`SurfaceError` with `refused: true`, like a wrong code) doesn't wake it: the screen explains it while the user is still there, and the agent reads it on its next turn.
 - **Screens that are only read** (a rota, an address) shouldn't nudge: closing them without tapping anything is finishing. Set `abandonAfterMs: false` on their contract; a surface can also set its own wait, e.g. `abandonAfterMs: 30 * 60_000`.
 - **A woken turn may say nothing.** The agent gets events without a new message. Let it answer `NO_REPLY` when a follow-up wouldn't help.
+- **Show that it's thinking.** A woken turn starts while the user is on the screen. Count turns running per conversation in `enqueue` and show "typing…" in your chat while it's above zero.
 - **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
-- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Instead of the in-memory `pending`, save the ID of the last event each turn handled, and read what's new with the cursor (below). Use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
-- **Catching up with a cursor.** `ui.events(conversationId, { after: lastEventId })` returns only the events after the one you handled last, oldest first. This works after a restart, on another instance, and when an `onEvent` call was lost. It throws `UnknownEventError` if the ID isn't stored, rather than silently returning everything again. Add `limit` to page through long conversations.
-
-  ```ts
-  const events = await ui.events(conversationId, convo.lastEventId ? { after: convo.lastEventId } : {});
-  // ...run the turn with formatEventsForAgent(events), then:
-  convo.lastEventId = events.at(-1)?.id ?? convo.lastEventId;
-  ```
-
-The demo's `apps/demo/server/agent.ts` does all of this with Claude (`enqueue`, `handleUiEvent`, `NO_REPLY`).
+- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
 
 ## Prompting the agent
 
-The model decides when to open a screen and reads what comes back, so the system prompt matters as much as the code. This one is adapted from the demo (`systemPrompt()` in `apps/demo/server/agent.ts`); each paragraph does one job:
+The model decides when to open a screen and reads what comes back, so the system prompt matters as much as the code. This one comes from UI_calling's demo shop; each paragraph does one job:
 
 ```text
 You are the assistant of Acme Store, chatting with a customer on WhatsApp.
@@ -263,7 +319,8 @@ Events of type "error" mean something failed on the screen, usually a system beh
 
 ## Rules that keep context right
 
-- **Every action returns fresh data.** The outcome (a ticket number, a new date) reaches the agent through `summarize`, so an action that changes something must return the new data.
+- **Every action returns fresh data.** The outcome (a ticket number, a new date) reaches the agent through `summarize`, so an action that changes something must return the new data. Once `resolve` reads what the handler saved, end the handler with `return ctx.resolve()`: one place builds `data`, and nothing the screen shows (this link's uploads, say) is left out.
+- **Write times in the business's zone.** Models misread bare UTC ISO times ("…T20:00:00Z" next to a local "now"). Set `createUiCalling({ timeZone: "Europe/Madrid" })`, and in `summarize` write every time with `moment.time(date)`: "held until 26 Nov 21:00 CET". The tool result's `expires_at` uses the same zone; pass it to `formatEventsForAgent` too.
 - **`describe` says what the user asked for, not the outcome.** Write "User asked to move the delivery to…" or "Worker picked shift S-12", never "Delivery was moved". The outcome comes from `summarize`. If the handler fails, the agent reads your line as "did NOT go through. Attempted: …", so it must read right in both cases. Set `wake: true` only when the agent should react right away.
 - **Secrets never reach the agent.** Add `redact: ["code"]` to an event that carries a one-time code, password or similar. The handler still gets the value, but the event log, `describe` and the agent see `"[redacted]"`. For secrets in the screen's **data** (an access code, alarm instructions), list the fields in the contract, `secret: ["access"]`, or a path into one, `secret: ["access.secret"]`, so the rest of `access` (its status, when it opens) still reaches the agent. The screen still gets them, and every value inside them is replaced with `[secret]` wherever it appears as a whole word in what `summarize` returns, before it reaches the tool result or an event. Paths are checked against the data's schema, so a typo doesn't compile; a path that still matches no field at runtime logs a warning. Only `summarize` is scrubbed: keep secrets out of `describe` and `SurfaceError` messages too. Keep them out of `summarize` anyway, and keep such screens short-lived (`ttlSeconds`).
 - **Read IDs from `ctx.input`.** It's what the agent passed, typed by the contract, so a typo in the field that scopes the data is a compile error.
@@ -348,11 +405,11 @@ On WhatsApp, Meta identifies each user with a **BSUID** (business-scoped user ID
 5. **Handle ID changes.** A BSUID is regenerated when the user changes phone number, and it arrives as a system message (`identityChange`: `user_changed_number` or `user_changed_user_id`, with `previousBsuid`). Copy the link to the new subject. Keep the old one too, so links already sent keep working until they expire.
 6. **Send to the BSUID.** `whatsappCtaMessage({ recipient: bsuid, … })`. Use `to: phone` instead when you have it; if both are set, Meta uses `to`.
 
-The demo implements all of this (`apps/demo/server/identity.ts`, `agent.ts` → `receiveWebhook`), and its panel lets you hide the number or change it.
+The `link-account` block (`npx ui-calling add link-account`, recipe: `npx ui-calling guide link-account`) does the linking screen and the identity helper.
 
 ### Developing against a real WhatsApp number
 
-Put the four keys in `.env` (README, "Try it on your own WhatsApp"), then:
+Put four keys in `.env`, all from your Meta app: `WHATSAPP_TOKEN` (WhatsApp → API Setup; a System User's token for anything that runs unattended), `WHATSAPP_PHONE_NUMBER_ID` (the same page), `WHATSAPP_APP_SECRET` (App settings → Basic) and `WHATSAPP_VERIFY_TOKEN` (any random string you choose). Then:
 
 ```bash
 npx ui-calling whatsapp dev               # tunnel, your dev server with PUBLIC_URL set to it, Meta's webhook pointed there
@@ -413,7 +470,7 @@ console.log(formatEventsForAgent(await ui.events("t")));                  // exa
 
 To click through a screen by hand instead, use `npx ui-calling link <surface> key=value...` against your dev server; it uses the dev routes above.
 
-Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and `resolve` refuses data the `subject` doesn't own (call with someone else's ID and expect a `SurfaceError`). The error's `code` is a property, not part of the message: `await assert.rejects(ui.call(...), (e) => e.code === "shift_not_found")`. The link itself is a bearer token: anyone holding it can open it, so what protects the data is that scoping in `resolve`. The demo's `apps/demo/server/smoke.ts` is a full example.
+Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and `resolve` refuses data the `subject` doesn't own (call with someone else's ID and expect a `SurfaceError`). The error's `code` is a property, not part of the message: `await assert.rejects(ui.call(...), (e) => e.code === "shift_not_found")`. The link itself is a bearer token: anyone holding it can open it, so what protects the data is that scoping in `resolve`. The test checks a link closes too: `complete()` is `POST /sessions/:token/events` with `{ "type": "completed" }`, after which every request gets 410 `completed`.
 
 ## Done checklist
 
@@ -457,7 +514,8 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
 | `toolPrefix` | `"show_"` | Tool name is `toolPrefix + surface name` |
 | `defaultLocale` | `"en"` | Used when a call doesn't pass `locale` |
-| `wakeOnError` | `true` | Wake the agent on the first error of each kind in a session; errors reported by the screen wake once per session |
+| `wakeOnError` | `true` | Wake the agent on the first error of each kind in a session; errors reported by the screen wake once per session. Refused actions (`refused: true`) never wake it: the screen explains them |
+| `timeZone` | `"UTC"` | The business's zone: the tool result's `expires_at` and `moment.time()` in `summarize` are written in it, with the zone's name |
 | `describeError` | generic `unexpected` | Turns unexpected errors into `{ code, message, retryable }` for the agent; by default the real error is only logged. `SurfaceError`s pass as they are |
 | `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
 | `maxEventsPerSession` | `500` | Events one link may record; after that the screen gets 429 |
@@ -483,9 +541,9 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 |---|---|
 | `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `bindToDevice?` (only the first device that opens the link can use it), `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent), `includePayload?` (default `true`; `false` leaves the JSON out of what the agent reads when `describe` already says it) |
-| `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any), `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
-| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?) }`; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface |
-| `new SurfaceError(code, message, { retryable? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason` |
+| `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any; `moment.time(date)` writes a time in `timeZone`), `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
+| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?), resolve() }`; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface; `resolve()` runs `resolve` again with the link's input, for a handler to return |
+| `new SurfaceError(code, message, { retryable?, refused? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason`. `refused: true` for a business refusal (422, doesn't wake the agent) rather than an outage (502) |
 
 ### `UiEvent`
 
@@ -494,6 +552,7 @@ type UiEvent = {
   id: string;
   sessionId: string;
   conversationId: string;
+  subject: string;                 // who the link was issued for: `who` for a woken turn
   surface: string;                 // "order_status"
   type: string;                    // "opened", "reschedule_delivery", "error"…
   kind: "lifecycle" | "domain" | "error";
@@ -528,16 +587,16 @@ type UiEvent = {
 
 ### HTTP
 
-What `@ui-calling/server` serves under your mount point. Any client can use it; React is optional. Every API response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Your `/s/:token` page is served by your app: set `Referrer-Policy: no-referrer` there too, so the token in its URL doesn't leak to sites the screen links to. The Next.js page from `init` already does, with a `<meta name="referrer">`.
+What `@ui-calling/server` serves under your mount point. Any client can use it; React is optional. Every API response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Your `/s/:token` page is served by your app: set `Referrer-Policy: no-referrer` there too, so the token in its URL doesn't leak to sites the screen links to. `SurfaceScreen` from `init` adds the `<meta name="referrer">` itself, and the Next.js page also has it in its HTML.
 
 | Request | Success |
 |---|---|
 | `GET /sessions/:token` | `200 { surface, locale, data, expiresAt }` |
-| `POST /sessions/:token/events` with `{ type, payload }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it |
+| `POST /sessions/:token/events` with `{ type, payload }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it. `type` is a contract event, or a lifecycle event the screen reports: `opened`, `left`, or `completed` (what `complete()` sends; it closes the link), all without a payload |
 | `POST /sessions/:token/files/:slot`, multipart with a `file` field | `200 { file: { id, slot, name, type, size } }` |
 | `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
 | `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
-| `POST /dev/links` with `{ surface, input?, subject?, conversationId?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it |
+| `POST /dev/links` with `{ surface, input?, subject?, conversationId?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it. `422 { error, message }` when `resolve` refuses (e.g. `account_not_linked`) |
 | `GET /dev/events/:conversationId` | Only with `dev: true`. What the agent would read, as text |
 
 Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:
