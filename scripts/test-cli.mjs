@@ -93,6 +93,8 @@ try {
   assert.match(run(next, "add", "step-bar", "photo-picker", "quantity-stepper"), /keep .*step-bar\.tsx/);
   assert.match(read("init-next-src", "src/ui-calling/parts/photo-picker.tsx"), /export function PhotoPicker/);
   assert.match(fails(next, "new", "x", "--template", "nope"), /Unknown template/);
+  // A name the template already uses for a variable would generate code that doesn't compile.
+  assert.match(fails(next, "new", "note"), /clashes with a name/);
   // Setting up again somewhere else would leave the registrations behind.
   assert.match(fails(next, "init", "--dir", "lib/ui"), /Already set up in src\/ui-calling/);
   console.log("generated  init-next-src (+4 surfaces)");

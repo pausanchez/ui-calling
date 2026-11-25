@@ -135,6 +135,13 @@ function newSurface(name) {
   }
   const words = name.split("-");
   const cap = (w) => w[0].toUpperCase() + w.slice(1);
+  // The contract's constant is the camelCase name; the templates already use these names for their own variables.
+  const TAKEN = ["note", "busy", "failed", "problem", "details", "choice", "nav", "step", "status", "data", "locale", "emit", "reload", "complete", "returnUrl", "errorCode", "options", "drafts", "saved", "reached", "upstream", "known", "retryable", "key", "id", "base", "load", "save", "next", "go", "confirm", "btn", "messages", "t", "d", "e", "v"];
+  const constName = words[0] + words.slice(1).map(cap).join("");
+  if (TAKEN.includes(constName)) {
+    console.error(`"${name}" clashes with a name the generated code already uses. Pick a more specific one, e.g. ${name}-form or site-${name}.`);
+    process.exit(1);
+  }
   const vars = {
     __MESSAGES__: `${words.join("_").toUpperCase()}_MESSAGES`,
     __Component__: words.map(cap).join(""),

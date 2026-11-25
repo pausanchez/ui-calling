@@ -58,6 +58,38 @@ const SurfaceContext = createContext<ContextValue | null>(null);
  * (recorded server-side as `returned`). After `complete()` the link is closed: a tab left open
  * switches to `status: "completed"` as soon as it's used again.
  */
+/** A mouse, not a touch screen: the chat is in another tab of this browser, not an app to switch back to. */
+function onComputer() {
+  return typeof matchMedia === "function" && matchMedia("(hover: hover) and (pointer: fine)").matches;
+}
+
+function CloseTabHint({ locale }: { locale: string }) {
+  const text = locale.toLowerCase().startsWith("es")
+    ? "Ya está. Cierra esta pestaña para volver al chat."
+    : "All done. Close this tab to go back to the chat.";
+  return (
+    <p
+      role="status"
+      style={{
+        position: "fixed",
+        insetInline: 16,
+        bottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
+        margin: "0 auto",
+        maxWidth: 420,
+        padding: "12px 16px",
+        borderRadius: 8,
+        background: "var(--foreground, #111)",
+        color: "var(--background, #fff)",
+        fontSize: 14,
+        textAlign: "center",
+        zIndex: 50,
+      }}
+    >
+      {text}
+    </p>
+  );
+}
+
 export function SurfaceProvider(props: { token: string; endpoint?: string; returnUrl?: string; children: ReactNode }) {
   const base = `${props.endpoint ?? "/api/ui"}/sessions/${encodeURIComponent(props.token)}`;
   const [state, setState] = useState<{
@@ -189,6 +221,25 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     document.documentElement.lang = locale;
   }, [locale]);
 
+  // "Back to chat" on a computer: the chat (WhatsApp Web, a web chat) is still open in the tab the screen came
+  // from, and following a wa.me link there lands on WhatsApp's "open the app" page. So close this tab instead,
+  // whichever link points at returnUrl. Phones follow the link back into the app as before.
+  const [closeHint, setCloseHint] = useState(false);
+  useEffect(() => {
+    const target = props.returnUrl;
+    if (!target) return;
+    const onClick = (e: MouseEvent) => {
+      const link = (e.target as Element | null)?.closest?.("a");
+      if (!link || link.getAttribute("href") !== target || !onComputer()) return;
+      e.preventDefault(); // the link's own onClick (e.g. complete()) still runs
+      window.close();
+      // Browsers only let a script close a tab with a single history entry (screens with steps add more).
+      setTimeout(() => !window.closed && setCloseHint(true), 300);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [props.returnUrl]);
+
   const value = useMemo<ContextValue>(
     () => ({ ...state, locale, data: state.data, emit, reload, reportError, upload, removeFile, fileUrl, returnUrl: props.returnUrl }),
     [state, locale, emit, reload, reportError, upload, removeFile, fileUrl, props.returnUrl],
@@ -197,6 +248,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     <SurfaceContext.Provider value={value}>
       <SurfaceErrorBoundary report={(err, info) => reportError(err, info, "render")} locale={locale} returnUrl={props.returnUrl}>
         {props.children}
+        {closeHint && <CloseTabHint locale={locale} />}
       </SurfaceErrorBoundary>
     </SurfaceContext.Provider>
   );
