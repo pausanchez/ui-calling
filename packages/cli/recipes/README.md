@@ -2,7 +2,10 @@
 
 Each recipe starts from a task and gives the whole answer: the contract, the server, the screen, what went wrong when we built it, and the demo code that does it in full. The rules and the API reference stay in the guide (`npx ui-calling guide`).
 
-Print one with `npx ui-calling guide <recipe>`.
+Print one with `npx ui-calling guide <recipe>`. They build on:
+- `npx ui-calling new <name> --template steps` for screens with several steps;
+- parts you copy and own: `step-bar`, `action-bar`, `choice-card`, `quantity-stepper`, `photo-picker` (`npx ui-calling add <part>`, `npx ui-calling list`);
+- `npx ui-calling link <surface> key=value...` to open a screen for a test user while you build, and `npx ui-calling events` to see what the agent reads.
 
 | Recipe | Use it when |
 |---|---|
@@ -15,4 +18,4 @@ Print one with `npx ui-calling guide <recipe>`.
 | [`third-party-failures`](third-party-failures.md) | A system behind the screen can fail, and both the user and the agent should know |
 | [`follow-up-abandoned`](follow-up-abandoned.md) | It matters that the user finishes, and the agent should nudge once if they stop |
 
-Links to `apps/demo/...` point into the UI_calling repo, where each recipe runs and is tested.
+Each recipe's code is complete enough to follow on its own. The "In the UI_calling repo" links at the end point to the demo, where each one runs and is tested; they're not in the package.

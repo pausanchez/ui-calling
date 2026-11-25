@@ -277,7 +277,7 @@ const withFiles = createUiCalling({
       on: {
         photos_added: async (p, ctx) => {
           const mine = await ctx.files(p.photos);
-          // IDs from another link are left out: reject the event instead of trusting the payload.
+          // IDs this user can't use are left out: reject the event instead of trusting the payload.
           if (mine.length !== p.photos.length) throw new SurfaceError("unknown_file", "A photo isn't from this screen");
           return { photos: mine.length };
         },
@@ -312,9 +312,9 @@ await check("files: uploads are checked by slot, type, size and count, and repor
   assert.equal((await withFiles.events("c10")).length, 0, "uploading alone records no event");
 });
 
-await check("files: served only through their own link, safely, and removable", async () => {
+await check("files: served only to their user's links, safely, and removable", async () => {
   const a = await claimLink();
-  const b = await claimLink();
+  const b = token((await withFiles.call("show_claim", {}, { conversationId: "c12", subject: "user-5" })).url);
   const { file } = (await (await put(a, png(5))).json()) as { file: { id: string } };
   const url = (t: string) => `https://ui.example.com/api/ui/sessions/${t}/files/${file.id}`;
   const got = await filesHttp(new Request(url(a)));
@@ -323,22 +323,39 @@ await check("files: served only through their own link, safely, and removable", 
   assert.equal(got.headers.get("x-content-type-options"), "nosniff");
   assert.match(got.headers.get("content-security-policy") ?? "", /sandbox/);
   assert.equal((await got.arrayBuffer()).byteLength, 5);
-  assert.equal((await filesHttp(new Request(url(b)))).status, 404, "another link can't read it, even with the ID");
+  assert.equal((await filesHttp(new Request(url(b)))).status, 404, "another user's link can't read it, even with the ID");
   assert.equal((await filesHttp(new Request(url(b), { method: "DELETE" }))).status, 404, "or delete it");
   assert.equal((await filesHttp(new Request(url(a), { method: "DELETE" }))).status, 200);
   assert.equal((await filesHttp(new Request(url(a)))).status, 404);
 });
 
-await check("files: handlers see only this link's files, so a borrowed ID is rejected", async () => {
-  const a = await claimLink();
-  const b = await claimLink();
-  const mine = ((await (await put(a, png())).json()) as { file: { id: string } }).file.id;
-  const theirs = ((await (await put(b, png())).json()) as { file: { id: string } }).file.id;
-  const { event } = await withFiles.emit(a, "photos_added", { photos: [mine] });
+await check("files: a draft can use the same user's uploads from an earlier link, never another user's", async () => {
+  const first = await claimLink();
+  const earlier = ((await (await put(first, png())).json()) as { file: { id: string } }).file.id;
+  const later = await claimLink(); // the agent opened the screen again for the same user
+  const { event } = await withFiles.emit(later, "photos_added", { photos: [earlier] });
   assert.equal(event.state, "1 photos.");
+  assert.equal((await filesHttp(new Request(`https://ui.example.com/api/ui/sessions/${later}/files/${earlier}`))).status, 200, "and the screen can show it");
+  const other = token((await withFiles.call("show_claim", {}, { conversationId: "c11", subject: "user-4" })).url);
+  const theirs = ((await (await put(other, png())).json()) as { file: { id: string } }).file.id;
   console.warn = () => {};
-  await assert.rejects(withFiles.emit(a, "photos_added", { photos: [mine, theirs] }), /couldn't be completed/);
+  await assert.rejects(withFiles.emit(later, "photos_added", { photos: [earlier, theirs] }), /couldn't be completed/);
   console.warn = quiet;
+  assert.equal((await filesHttp(new Request(`https://ui.example.com/api/ui/sessions/${later}/files/${theirs}`))).status, 404);
+});
+
+await check("dev routes: open a screen for a test user and read what the agent would, only when asked for", async () => {
+  const dev = uiCallingHandler(withFiles, { dev: true });
+  const res = await dev(new Request("https://ui.example.com/api/ui/dev/links", { method: "POST", body: JSON.stringify({ surface: "claim", subject: "tester" }) }));
+  const link = (await res.json()) as { url: string; conversationId: string };
+  assert.match(link.url, /\/s\//);
+  assert.equal(link.conversationId, "dev:tester");
+  await withFiles.emit(token(link.url), "photos_added", { photos: [] });
+  const read = await (await dev(new Request("https://ui.example.com/api/ui/dev/events/dev%3Atester"))).text();
+  assert.match(read, /User attached 0 photos/);
+  const unknown = await dev(new Request("https://ui.example.com/api/ui/dev/links", { method: "POST", body: JSON.stringify({ surface: "nope" }) }));
+  assert.equal(unknown.status, 404);
+  assert.equal((await filesHttp(new Request("https://ui.example.com/api/ui/dev/links", { method: "POST", body: "{}" }))).status, 404, "off by default");
 });
 
 await check("files: a surface with files needs a store that can keep them", async () => {

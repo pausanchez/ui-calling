@@ -104,7 +104,7 @@ npm test
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
-| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it; `add <block>` copies ready-made ones (`list` shows them); `tokens` copies only the design tokens; `guide` prints the building guide |
+| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes |
 
 ## Add it to your project
 
@@ -239,10 +239,12 @@ See [GUIDE.md](packages/cli/GUIDE.md#whatsapp-who-is-the-subject).
 Sessions and events are what keep links working and the agent's context intact, so keep them across restarts:
 
 ```ts
-createUiCalling({ store: sqliteStore(), ... })   // .ui-calling/ui-calling.db, from @ui-calling/sqlite
+createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui-calling/ui-calling.db, node_modules/.cache/ui-calling/ in development
 ```
 
 - **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
+- **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own.
+- **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
 - **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](scripts/test-store.ts) run against any store; copy them into your tests.

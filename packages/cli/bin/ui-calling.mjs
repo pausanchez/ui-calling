@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const pkgDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const registryDir = join(pkgDir, "registry");
-const surfaceTemplates = join(pkgDir, "templates", "surface");
+const TEMPLATES = { surface: join(pkgDir, "templates", "surface"), steps: join(pkgDir, "templates", "steps") };
 const initTemplates = join(pkgDir, "templates", "init");
 const registry = JSON.parse(readFileSync(join(registryDir, "registry.json"), "utf8"));
 
@@ -26,7 +26,7 @@ const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")
 const fromRoot = (p) => (p ? resolve(root, p) : undefined);
 const config = raw && { ...raw, runtime: fromRoot(raw.runtime), screen: fromRoot(raw.screen), surfacesDir: fromRoot(raw.surfacesDir), serverDir: fromRoot(raw.serverDir) };
 
-const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url"];
+const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url"];
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name, fallback) => {
   const i = rest.indexOf(name);
@@ -67,6 +67,17 @@ function write(target, content) {
 
 function copy(rel) {
   write(join(outDir, basename(rel)), readFileSync(join(registryDir, rel)));
+}
+
+/** Parts go in `<surfaces dir>/parts/`; screens import them from there. Already there: kept, unless --force. */
+function addPart(name) {
+  const part = registry.parts[name];
+  for (const rel of part.files) {
+    const target = join(outDir, "parts", basename(rel));
+    if (existsSync(target) && !force) console.log(`  keep   ${shown(target)} (already there; --force replaces it)`);
+    else write(target, readFileSync(join(registryDir, rel)));
+  }
+  return part;
 }
 
 /** Path for messages: relative to where the command runs. */
@@ -117,14 +128,25 @@ function newSurface(name) {
     __surface__: words.join("_"),
     __name__: name,
   };
+  const template = flag("--template", "surface");
+  const templateDir = TEMPLATES[template];
+  if (!templateDir) {
+    console.error(`Unknown template "${template}". Templates: ${Object.keys(TEMPLATES).join(", ")}.`);
+    process.exit(1);
+  }
   const serverFile = join(serverDir, `${name}.server.ts`);
   const screenFile = join(outDir, `${name}.tsx`);
 
-  for (const file of readdirSync(surfaceTemplates)) {
+  for (const file of readdirSync(templateDir)) {
     const isServer = file.endsWith(".server.ts");
-    let content = readFileSync(join(surfaceTemplates, file), "utf8");
+    let content = readFileSync(join(templateDir, file), "utf8");
     // Only the server file may live elsewhere; the screen sits next to its contract.
     if (isServer) content = content.replaceAll('"./__name__.surface"', `"${importPath(serverFile, join(outDir, `${name}.surface.ts`))}"`);
+    // The template imports parts from the registry (so the repo typechecks it); in your project they're in ./parts.
+    for (const [, part] of content.matchAll(/"\.\.\/\.\.\/registry\/parts\/([a-z-]+)"/g)) {
+      addPart(part);
+      content = content.replaceAll(`"../../registry/parts/${part}"`, `"./parts/${part}"`);
+    }
     for (const [key, value] of Object.entries(vars)) content = content.replaceAll(key, value);
     write(join(isServer ? serverDir : outDir, file.replace("__name__", name)), content);
   }
@@ -171,6 +193,7 @@ function init() {
 
   write(runtime, fill("ui.ts", { __BASE_URL__: flag("--base-url", framework === "vite" ? "http://localhost:5173" : "http://localhost:3000"), __DELIVER__: deliver }));
   write(screen, fill("surface-screen.tsx", {}));
+  write(join(lib, "store.ts"), fill("store.ts", {}));
   write(join(lib, "tokens.css"), readFileSync(join(registryDir, registry.tokens)));
 
   const done = [];
@@ -195,12 +218,36 @@ function init() {
     }
   }
 
+  // The production database lives in .ui-calling/ (in development it's under node_modules/.cache).
+  if (existsSync(".gitignore") && !/^\/?\.ui-calling\/?$/m.test(readFileSync(".gitignore", "utf8"))) {
+    appendFileSync(".gitignore", "\n# UI_calling's SQLite database\n.ui-calling/\n");
+    console.log("  update .gitignore");
+  }
+
+  // Without the tokens, the screens' classes (bg-primary, text-muted-foreground...) style nothing.
+  const tokensFile = join(lib, "tokens.css");
+  const css = ["src/app/globals.css", "app/globals.css", "src/index.css", "src/styles.css", "src/globals.css", "styles/globals.css", "src/App.css"].find(
+    (f) => existsSync(f) && /@import\s+["']tailwindcss["']/.test(readFileSync(f, "utf8")),
+  );
+  let tokensStep = `Import the design tokens after Tailwind in your global CSS: @import "<path to>/${tokensFile}";`;
+  if (css) {
+    let s = readFileSync(css, "utf8");
+    const rel = importPath(css, tokensFile);
+    if (!s.includes("tokens.css")) {
+      s = s.replace(/(@import\s+["']tailwindcss["'];?)/, `$1\n@import "${rel}";`);
+      writeFileSync(css, s);
+      console.log(`  update ${css}`);
+    }
+    tokensStep = null;
+    // Rules after the import win: a starter's own --background/--foreground replace UI_calling's.
+    if (/:root\s*{[^}]*--(background|foreground)\s*:/.test(s)) {
+      done.push(`tokens imported in ${css}, but its own --background/--foreground override them; delete those to use UI_calling's`);
+    } else done.push(`tokens imported in ${css}`);
+  }
+
   const pm = existsSync("pnpm-lock.yaml") ? "pnpm add" : existsSync("yarn.lock") ? "yarn add" : existsSync("bun.lockb") || existsSync("bun.lock") ? "bun add" : "npm install";
-  const steps = [
-    `${pm} @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite zod`,
-    `Add .ui-calling/ to your .gitignore: it holds the SQLite database.`,
-    `Import the design tokens after Tailwind in your global CSS: @import "<path to>/${join(lib, "tokens.css")}";`,
-  ];
+  const steps = [`${pm} @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite zod`];
+  if (tokensStep) steps.push(tokensStep);
   if (framework !== "next") {
     steps.push(
       `Serve the API: mount uiCallingHandler(ui) from "@ui-calling/server" at /api/ui on your server (any framework that takes (Request) => Response; for Hono/Express-style apps, uiCallingRoutes(ui)).`,
@@ -214,12 +261,67 @@ function init() {
   console.log(`\n${done.length ? `Done: ${done.join("; ")}.\n\n` : ""}Next:\n${steps.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}\n\nGuide: npx ui-calling guide`);
 }
 
+/**
+ * `link` and `events`: talk to the dev routes of a running dev server (`uiCallingHandler(ui, { dev: true })`,
+ * which `init` sets up for `next dev`), so you can click through a screen without an agent.
+ */
+async function devCommand(which) {
+  const port = config?.framework === "vite" ? 5173 : 3000;
+  const base = flag("--url", `http://localhost:${port}/api/ui`).replace(/\/$/, "");
+  const subject = flag("--subject", "dev-user");
+  const reach = async (path, init) => {
+    const res = await fetch(base + path, init).catch(() => null);
+    if (!res) {
+      console.error(`Couldn't reach ${base}. Start your dev server, or pass --url (e.g. --url http://localhost:3001/api/ui).`);
+      process.exit(1);
+    }
+    if (res.status === 404 && !path.startsWith("/dev/links")) {
+      console.error(`${base}${path} isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js).`);
+      process.exit(1);
+    }
+    return res;
+  };
+  if (which === "events") {
+    const res = await reach(`/dev/events/${encodeURIComponent(`dev:${subject}`)}`);
+    process.stdout.write((await res.text()) + "\n");
+    return;
+  }
+  const [surface, ...pairs] = names;
+  if (!surface) {
+    console.error("Usage: ui-calling link <surface> [key=value...] [--subject id] [--locale es] [--url http://localhost:3000/api/ui]");
+    process.exit(1);
+  }
+  // key=value pairs become the tool input; numbers and true/false keep their type.
+  const input = Object.fromEntries(
+    pairs.map((p) => {
+      const [k, ...v] = p.split("=");
+      const value = v.join("=");
+      return [k, /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value === "true" ? true : value === "false" ? false : value];
+    }),
+  );
+  const res = await reach("/dev/links", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ surface: surface.replaceAll("-", "_"), input, subject, locale: flag("--locale") }),
+  });
+  const json = await res.json().catch(() => ({ message: `${base}/dev/links isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js).` }));
+  if (!res.ok) {
+    console.error(json.message ?? json.error ?? `HTTP ${res.status}`);
+    process.exit(1);
+  }
+  console.log(`${json.url}\n\nOpened for subject "${subject}". What the agent reads back: npx ui-calling events${subject === "dev-user" ? "" : ` --subject ${subject}`}`);
+}
+
 switch (cmd) {
   case "init":
     init();
     break;
   case "list":
-    for (const [name, b] of Object.entries(registry.blocks)) console.log(`${name.padEnd(16)} ${b.description}`);
+    console.log("Blocks: finished screens (contract, screen, server)");
+    for (const [name, b] of Object.entries(registry.blocks)) console.log(`  ${name.padEnd(18)} ${b.description}`);
+    console.log("\nParts: pieces to build screens from, copied into <dir>/parts/");
+    for (const [name, p] of Object.entries(registry.parts)) console.log(`  ${name.padEnd(18)} ${p.description}`);
+    console.log("\nAdd either with: npx ui-calling add <name>");
     break;
   case "tokens":
     copy(registry.tokens);
@@ -227,7 +329,7 @@ switch (cmd) {
     break;
   case "add": {
     if (!names.length) {
-      console.error("Usage: ui-calling add <block...> [--dir path] [--server-dir path] [--force]");
+      console.error("Usage: ui-calling add <block or part...> [--dir path] [--server-dir path] [--force]");
       process.exit(1);
     }
     refuseWorkspaceRoot("add");
@@ -235,9 +337,14 @@ switch (cmd) {
     const unregistered = [];
     let wroteServer = false;
     for (const name of names) {
+      if (registry.parts[name]) {
+        console.log(name);
+        addPart(name).dependencies.forEach((d) => deps.add(d));
+        continue;
+      }
       const block = registry.blocks[name];
       if (!block) {
-        console.error(`Unknown block "${name}". Run "ui-calling list".`);
+        console.error(`Unknown block or part "${name}". Run "ui-calling list".`);
         process.exit(1);
       }
       console.log(name);
@@ -255,7 +362,7 @@ switch (cmd) {
       const screenFile = join(outDir, basename(block.files.find((f) => f.endsWith(".tsx"))));
       if (!registerSurface(block.register, serverFile, screenFile)) unregistered.push(block);
     }
-    console.log(`\nMake sure these are installed: ${[...deps].join(" ")}`);
+    if (deps.size) console.log(`\nMake sure these are installed: ${[...deps].join(" ")}`);
     for (const { register: r } of unregistered) {
       console.log(`Register it: createUiCalling({ surfaces: [${r.impl}, ...] }), and render <${r.component} /> for "${r.surface}" on your surface route.`);
     }
@@ -265,10 +372,14 @@ switch (cmd) {
   case "new":
     refuseWorkspaceRoot("new");
     if (names.length !== 1) {
-      console.error("Usage: ui-calling new <name> [--dir path] [--server-dir path] [--force]");
+      console.error("Usage: ui-calling new <name> [--template surface|steps] [--dir path] [--server-dir path] [--force]");
       process.exit(1);
     }
     newSurface(names[0]);
+    break;
+  case "link":
+  case "events":
+    await devCommand(cmd);
     break;
   case "guide": {
     // `guide` is the whole guide; `guide recipes` lists the recipes; `guide <recipe>` prints one.
@@ -291,11 +402,17 @@ switch (cmd) {
                     --dir (default src/ui-calling or ui-calling), --deliver button|message,
                     --framework next|vite|other, --base-url
   new <name>        scaffold a surface (contract, screen, server) and register it
+                    --template steps: a screen with several steps, a saved draft and Back
                     --dir, --server-dir (default: from ui-calling.json)
   add <block...>    copy ready-made blocks and register them; their .server.ts is written once,
                     never overwritten (--dir, --server-dir, --force)
   list              show available blocks
   tokens            copy the design tokens only
+  link <surface> [key=value...]
+                    open a screen for a test user on your running dev server and print its link,
+                    e.g. link order-return order_id=A-0987. The test user's subject is
+                    dev-user unless you pass --subject (also --locale, --url)
+  events            print what the agent would read from that test user's screens (--subject, --url)
   guide [recipe]    print the guide for building surfaces (for people and coding agents);
                     "guide recipes" lists task-shaped recipes, "guide <recipe>" prints one`);
 }

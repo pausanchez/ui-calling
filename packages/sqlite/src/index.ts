@@ -7,12 +7,27 @@ import { UnknownEventError, type EventQuery, type SessionStatus, type UiEvent, t
  * Sessions and events in a SQLite file, on Node's built-in `node:sqlite`: nothing to install, nothing
  * to run. Links and the agent's context survive restarts and deploys on the same machine.
  *
- *   createUiCalling({ store: sqliteStore(), ... })   // .ui-calling/ui-calling.db
+ *   createUiCalling({ store: sqliteStore(), ... })   // see DEFAULT_PATH
  *
  * Needs a writable disk that outlives the process. On serverless platforms (e.g. Vercel functions)
  * use a hosted database instead: implement `UiStore` for it.
+ *
+ * `store.db` is the open `DatabaseSync`: keep your own tables (drafts, mock data) next to UI_calling's.
  */
-export function sqliteStore(path = ".ui-calling/ui-calling.db") {
+export function sqliteStore(path = DEFAULT_PATH()) {
+  return open(path);
+}
+
+/**
+ * `.ui-calling/ui-calling.db` in production. In development, `node_modules/.cache/ui-calling/`: Next's dev
+ * server watches the whole project, and a database inside it reloads the page on every event the
+ * screen records, so the screen never finishes loading. Dev servers ignore `node_modules`.
+ */
+function DEFAULT_PATH() {
+  return process.env.NODE_ENV === "production" ? ".ui-calling/ui-calling.db" : "node_modules/.cache/ui-calling/ui-calling.db";
+}
+
+function open(path: string) {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec(`

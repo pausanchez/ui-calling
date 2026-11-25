@@ -42,7 +42,9 @@ In the demo the reply is specific because the event names the step: "I saw you s
 - **Timers live in the process.** They're re-armed after a restart, but on serverless nothing runs between requests. There, check open sessions from a scheduled job instead.
 - **The link stays valid** until it expires, so "the link still works" is true. Check `ttlSeconds` before promising it.
 
-## In the repo
+## In the UI_calling repo
+
+Not in the package; for reading if you have the repo.
 
 - Setting: `abandonAfterMs` in [`ui.ts`](../../../apps/demo/server/ui.ts) (`ABANDON_AFTER_MS`, default 90 s in the demo)
 - Follow-ups: `scriptedFollowUp` in [`agent.ts`](../../../apps/demo/server/agent.ts)

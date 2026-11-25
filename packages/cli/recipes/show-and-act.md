@@ -49,13 +49,24 @@ await emit("reschedule_delivery", slot); // data updates with what the handler r
 <a href={returnUrl} onClick={() => void complete()}>Back to chat</a>
 ```
 
+## Try it
+
+With your dev server running, open it for a test user and see what the agent reads back:
+
+```bash
+npx ui-calling link order-status order_id=A-1042
+npx ui-calling events
+```
+
 ## Watch out
 
 - **Write `describe` as the request, not the result.** "User asked to move the delivery to…", never "Delivery was moved". If the handler fails, the agent reads your line as "did NOT go through. Attempted: …".
 - **Look data up by `ctx.subject`.** The order ID comes from the agent, so `getOrder` must check the order belongs to this user.
 - **Keep `summarize` to one line** with everything the screen shows. The agent answers later questions ("what was the tracking code?") from it.
 
-## In the repo
+## In the UI_calling repo
+
+Not in the package; for reading if you have the repo.
 
 - Contract: [`order-status.surface.ts`](../../../apps/demo/src/components/ui-calling/order-status.surface.ts)
 - Server: [`order-status.server.ts`](../../../apps/demo/server/order-status.server.ts)

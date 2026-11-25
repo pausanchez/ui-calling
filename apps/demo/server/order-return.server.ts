@@ -5,9 +5,14 @@ import { PickupFull, getReturn, saveDraft, submitReturn, type StoredReturn } fro
 
 type Return = SurfaceData<typeof orderReturn>;
 
-/** What the screen gets: the stored return plus the photos uploaded through this link. */
+/**
+ * What the screen gets: the stored return plus the photos it can show. That's the draft's photos, which may
+ * come from an earlier link the agent sent, and anything uploaded through this link since.
+ */
 async function withUploads(r: StoredReturn, ctx: SurfaceContext): Promise<Return> {
-  return { ...r, uploaded: (await ctx.files()).map((f) => ({ id: f.id, name: f.name })) };
+  const saved = await ctx.files(r.draft.photos.map((p) => p.id));
+  const fresh = (await ctx.files()).filter((f) => !saved.some((s) => s.id === f.id));
+  return { ...r, uploaded: [...saved, ...fresh].map((f) => ({ id: f.id, name: f.name })) };
 }
 
 const needsPhotos = (r: StoredReturn) => r.draft.lines.some((l) => l.reason && NEEDS_PHOTOS.includes(l.reason));

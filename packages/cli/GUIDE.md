@@ -18,7 +18,7 @@ This guide is for people and coding agents adding surfaces to a product. Print i
 | `<name>.server.ts` | server | **Implementation**: `resolve` (load data), `summarize` (one-line view for the agent), `on` (side effects for events) |
 | `<name>.tsx` | browser | **Screen**: React component using `useSurface(contract)`, with en/es strings |
 
-The contract is the single source of truth. Change it and the typechecker shows every place that has to follow.
+The contract is the single source of truth. Change it and the typechecker shows every place that has to follow. The server file calls your own data code (orders, drafts), which lives wherever your app keeps it.
 
 ## Create one
 
@@ -26,13 +26,28 @@ The contract is the single source of truth. Change it and the typechecker shows 
 npx ui-calling new shift-picker
 ```
 
-This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.server.ts` into `src/components/ui-calling` (`--dir`). Put the server file elsewhere with `--server-dir server`. The generated code compiles as-is. Then:
+This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.server.ts` into the folder `init` set up (`src/ui-calling`, from `ui-calling.json`; change it with `--dir`). Put the server file elsewhere with `--server-dir server`. The generated code compiles as-is. Then:
 
 1. **Contract.** Write `description` as "what the user sees and can do, and when to open it": the agent reads it to choose. Keep `input` to IDs. Model `data` on what the screen renders. Name `events` after facts ("shift_selected", not "button_clicked").
 2. **Server.** Make `resolve` load real data **scoped to `ctx.subject`**, the user the link was issued for. Write `summarize` (required) as everything the screen shows, in one line. Add `on` handlers for events with side effects, and return fresh data.
 3. **Screen.** Render `data`, call `emit(event, payload)`, call `complete()` when the user is done, and keep every string in the messages object.
 4. **Register** the implementation in `createUiCalling({ surfaces: [...] })` and render the component on your surface route.
 5. **Typecheck.**
+6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back. The test user's `subject` is `dev-user` (change it with `--subject`): in development, have `resolve` map it to a test customer, the way a WhatsApp subject maps to a real one.
+
+**A screen with several steps** (a return, a claim, an application): `npx ui-calling new <name> --template steps`. It writes a working three-step screen with a saved draft, resume, and the phone's back button, built on `useSurfaceSteps` and the parts below. Change the steps to yours.
+
+**Parts** to build screens from, so you don't draw them by hand: `npx ui-calling add <part>` copies one into `<your surfaces folder>/parts/`, and it's yours to change.
+
+| Part | What it is |
+|---|---|
+| `step-bar` | Progress through the steps; reached steps can be tapped |
+| `action-bar` | The sticky bottom bar: Back, the step's one action, and the last problem above them |
+| `choice-card` | An option as a full-width radio or checkbox card, with details when checked |
+| `quantity-stepper` | Minus, the number, plus, with 44px targets |
+| `photo-picker` | Camera or gallery into a file slot, thumbnails, remove, and why a photo was refused |
+
+`npx ui-calling list` shows parts and blocks. **Recipes** put it all together for one task each: `npx ui-calling guide recipes`.
 
 ## One-time setup in a product
 
@@ -41,20 +56,24 @@ npx ui-calling init
 ```
 
 Run it in your project's root. It detects Next.js or Vite and writes:
-- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and a SQLite store so links and context survive restarts.
+- `ui-calling/ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
+- `ui-calling/store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
+
+These paths are under the folder `init` picked: `src/ui-calling/` when your app has a `src` folder, `ui-calling/` otherwise, or `--dir`.
 - `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to.
-- `ui-calling/tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4: import it after `@import "tailwindcss";`. `npx ui-calling tokens` copies only this file.
-- **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`) and the landing page (`app/s/[token]/page.tsx`).
+- `ui-calling/tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use UI_calling's). `npx ui-calling tokens` copies only this file.
+- **Next.js only:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
+- **`.gitignore`:** adds `.ui-calling/`, where the production database goes. In development the database is in `node_modules/.cache/ui-calling/`, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading.
 - `ui-calling.json`: where things live. With it, `ui-calling new` and `ui-calling add` register each surface in `ui.ts` and `surface-screen.tsx` by themselves, from any folder of the app. In a monorepo, run `init` in the app that serves the screens, not at the root.
 - **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
 
 Without Next.js, mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
-- **`uiCallingHandler(ui, { basePath })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`.
-- **`uiCallingRoutes(ui)`** is a Hono app.
+- **`uiCallingHandler(ui, { basePath, dev })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`. Pass `dev: process.env.NODE_ENV === "development"` to get the routes behind `ui-calling link` and `events`. Serve GET, POST and DELETE.
+- **`uiCallingRoutes(ui, { dev })`** is a Hono app.
 
 Options: `--deliver message` (the model writes the link; for web chat and MCP), `--dir`, `--framework`, `--base-url`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
 
-On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`.
+On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`. Set `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise it shows your layout's title.
 
 Ready-made blocks: `npx ui-calling list`, then `npx ui-calling add order-status`. `add` copies the contract and the screen, and writes `order-status.server.ts` with example data so the screen renders right away. Replace the example with your data. Running `add --force` later updates the contract and screen but never overwrites the server file.
 
@@ -277,14 +296,15 @@ A surface isn't a page of your website. The user is mid-conversation, on a phone
 
 ### Screens with several steps
 
-One surface, with the steps inside the screen. The demo's `order_return` (items, reasons, photos, pickup, review) is a full example; `npx ui-calling guide multistep-form` walks through it.
+One surface, with the steps inside the screen. Start from `npx ui-calling new <name> --template steps`; `npx ui-calling guide multistep-form` walks through a full one.
 
-- **Each step is a quiet event that saves a draft.** Its handler validates the step, saves it, and returns fresh data. The agent sees how far the user got, and reopening the link resumes there.
+- **Each step is a quiet event that saves a draft.** Its handler validates the step, saves it with the furthest step reached, and returns fresh data. The agent sees how far the user got, and reopening the link resumes there. Keep drafts in your database; for a prototype, `sqliteStore()`'s `store.db` can hold a table.
 - **Only the last step wakes the agent.** Give `wake: true` to the event that finishes (e.g. `return_submitted`). `abandoned` treats it as the finish line: a user who saves a few steps and then goes quiet for `abandonAfterMs` gets an `abandoned` event that names the last step they saved.
-- **Let the agent fill in what it knows.** Put what the user already said in `input` (an item, a reason), and start the draft with it.
-- **The user's choice beats the prefill.** The user can change what the agent preselected, so `summarize` reports what was saved, never the tool's `input`. In the demo, the agent opened a return for the cracked blender and the user returned the bowls instead. The agent's reply named the bowls, because it read the outcome from `summarize`.
-- **Keep the answers when going back.** Hold them in component state and move between steps without losing them. Push a history entry per step, so the phone's back button goes to the previous step instead of closing the screen.
-- **Skip steps that don't apply** (no photos unless an item is damaged), and say "Step 2 of 4" for the steps the user will actually see.
+- **`useSurfaceSteps(path, { initial: data.draft.step })`** from `@ui-calling/react` keeps the step in the browser's history: the phone's back button goes to the previous step, a reload keeps the step, and a link opened straight onto step 3 gets steps 1 and 2 behind it.
+- **Render the steps once the data is there.** Keep the loading and error states in the screen's component, and the steps in a child component that takes `data`, so `useState(data.draft…)` starts from the draft. The template does this.
+- **Let the agent fill in what it knows.** Put what the user already said in `input` (an item, a reason), and start the draft with it while the user hasn't saved their own choice.
+- **The user's choice beats the prefill.** `summarize` reports what was saved, never the tool's `input`. In the demo, the agent opened a return for the cracked blender and the user returned the bowls instead. The agent's reply named the bowls, because it read the outcome from `summarize`.
+- **Skip steps that don't apply** (no photos unless an item is damaged): pass only the steps the user will see to `useSurfaceSteps` and the step bar.
 
 ### File uploads
 
@@ -298,10 +318,10 @@ defineSurface({
 });
 ```
 
-- **On the screen:** `const ref = await upload("photos", file)` (the slot name is typed), `removeFile(id)`, and `fileUrl(id)` for an `<img>`. A rejected file throws `SurfaceActionError` with `code: "invalid_file"` and a `reason`: `file_too_large`, `file_type_not_allowed`, `too_many_files`, `empty_file` or `unknown_slot`. Check size and type on the screen too, so the user doesn't wait for an upload that will be refused.
-- **In handlers:** `await ctx.files(p.photos)` returns only files uploaded through this link. Compare lengths to reject IDs from anywhere else.
+- **On the screen:** the `photo-picker` part does all of this (`npx ui-calling add photo-picker`). By hand: `const ref = await upload("photos", file)` (the slot name is typed), `removeFile(id)`, and `fileUrl(id)` for an `<img>`. A rejected file throws `SurfaceActionError` with `code: "invalid_file"` and a `reason`: `file_too_large`, `file_type_not_allowed`, `too_many_files`, `empty_file` or `unknown_slot`. Check size and type on the screen too, so the user doesn't wait for an upload that will be refused.
+- **In handlers:** `await ctx.files(p.photos)` returns the files this user may use: uploaded through this link, or through their earlier links to the same surface (a saved draft keeps those IDs when the agent opens the screen again). Compare lengths to reject anything else. `ctx.files()` with no IDs lists this link's uploads.
 - **Uploading records no event.** The step that uses the files reports them, so the agent reads "Attached 2 photos", not one line per upload.
-- **Safety.** `image/*` never matches SVG, which can carry scripts. Files are served only through their own link, with `nosniff` and a sandboxing CSP. File names are cut to the base name.
+- **Safety.** `image/*` never matches SVG, which can carry scripts. Files are served only to links of the user who uploaded them, for the same surface, with `nosniff` and a sandboxing CSP. File names are cut to the base name.
 - **Storage.** `sqliteStore()` keeps files as blobs in the same database, which is fine for photos on one machine. For more, implement the store's four file methods (`putFile`, `getFile`, `listFiles`, `deleteFile`) on object storage.
 
 ## WhatsApp: who is the `subject`?
@@ -367,6 +387,8 @@ await routes.request(`/sessions/${token}/events`, {
 console.log(formatEventsForAgent(await ui.events("t")));                  // exactly what the agent will read
 ```
 
+To click through a screen by hand instead, use `npx ui-calling link <surface> key=value...` against your dev server; it uses the dev routes above.
+
 Check three things: the outcome shows up in a `→ screen now shows` line, failures come back with the right `reason`, and `resolve` refuses data the `subject` doesn't own (call with someone else's ID and expect a `SurfaceError`). The link itself is a bearer token: anyone holding it can open it, so what protects the data is that scoping in `resolve`. The demo's `apps/demo/server/smoke.ts` is a full example.
 
 ## Done checklist
@@ -378,6 +400,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 - [ ] The screen handles `loading`, `expired`, `completed`, `error` with `errorCode === "upstream_error"`, and a failed `emit` (by `reason`).
 - [ ] `complete()` is called when the user is done.
 - [ ] The screen does one job, works at 375px with one thumb, and shows the outcome before sending the user back to the chat.
+- [ ] You clicked through it with `npx ui-calling link`, and `npx ui-calling events` shows what you expect the agent to read.
 - [ ] An in-process test covers the outcome, a failure and a foreign `subject`.
 - [ ] Every user-facing string is in the messages object, in en and es.
 - [ ] The implementation is registered, the component is routed, and the typecheck passes.
@@ -435,7 +458,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `files?` (slots: `{ accept, maxBytes, maxFiles? }`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent) |
 | `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data) => string`, `on?: { [event]: (payload, ctx) => Promise<data \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
-| `ctx` | `{ subject, conversationId, locale, session, files(ids?) }`; `files` lists this link's uploads |
+| `ctx` | `{ subject, conversationId, locale, session, files(ids?) }`; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface |
 | `new SurfaceError(code, message, { retryable? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason` |
 
 ### `UiEvent`
@@ -474,6 +497,7 @@ type UiEvent = {
 | `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"` |
 | `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `locale`, `emit(type, payload)`, `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
 | `useSurfaceName()` | `status`, `surface`, `locale`, `errorCode`, `returnUrl`: to pick which screen to render for a token |
+| `useSurfaceSteps(steps, { initial, key? })` | `step`, `index`, `count`, `isFirst`, `isLast`, `go(step)`, `next()`, `back()`: the steps of a screen in the browser's history, so Back and reloads work |
 | `SurfaceActionError` | Thrown by a failed `emit`, `reload` or `upload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |
 
 ### HTTP
@@ -487,6 +511,8 @@ What `@ui-calling/server` serves under your mount point. Any client can use it; 
 | `POST /sessions/:token/files/:slot`, multipart with a `file` field | `200 { file: { id, slot, name, type, size } }` |
 | `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
 | `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
+| `POST /dev/links` with `{ surface, input?, subject?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it |
+| `GET /dev/events/:conversationId` | Only with `dev: true`. What the agent would read, as text |
 
 Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:
 

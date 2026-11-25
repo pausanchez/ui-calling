@@ -56,7 +56,9 @@ verify_identity: async ({ email, code }, ctx) => {
 - **BSUIDs change when the user changes number.** Meta sends the old one; move the link (`identityChange` from `parseWhatsAppWebhook`).
 - **Restrict tools until linked.** Giving the agent every tool and hoping it asks first leaks data the first time it doesn't.
 
-## In the repo
+## In the UI_calling repo
+
+Not in the package; for reading if you have the repo.
 
 - Contract: [`link-account.surface.ts`](../../../apps/demo/src/components/ui-calling/link-account.surface.ts)
 - Server: [`link-account.server.ts`](../../../apps/demo/server/link-account.server.ts), [`identity.ts`](../../../apps/demo/server/identity.ts)

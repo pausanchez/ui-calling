@@ -17,7 +17,7 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
 | `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
 | `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |
-| `packages/cli` | `ui-calling` CLI, `registry/` (ready-made blocks + tokens), `templates/` (`ui-calling new`), `GUIDE.md`, `recipes/` (`ui-calling guide <recipe>`) |
+| `packages/cli` | `ui-calling` CLI, `registry/` (blocks, parts and tokens), `templates/` (`ui-calling new`, `--template steps`), `GUIDE.md`, `recipes/` (`ui-calling guide <recipe>`) |
 | `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
 
 ## Commands
@@ -38,7 +38,7 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 
 - Each package's `exports` lists `ui-calling-source` (→ `src/`) before `types`/`default` (→ `dist/`). The repo turns that condition on in `tsconfig.json` (`customConditions`), in every `tsx` call (`-C ui-calling-source`) and in the demo's Vite config. Never import from `dist/` inside the repo.
 - `npm run build` runs tsup in every package. tsup settings live in each `package.json` (`"tsup"`), including `removeNodeProtocol: false`: without it, `node:sqlite` is emitted as `sqlite` and breaks for users.
-- After changing the `init` templates, verify them in a real app, not only with the typecheck. TypeScript accepted a page that Next.js 16 refused to prerender. Use `create-next-app`, install the packed tarballs, run `init`, `new` and `next build`.
+- After changing the `init` templates, verify them in a real app, not only with the typecheck. TypeScript accepted a page that Next.js 16 refused to prerender. Use `create-next-app`, install the packed tarballs, run `init`, `new` (both templates) and `next build`, then open a screen in `next dev` with `npx ui-calling link`: a build can pass while the dev server never renders the page.
 
 ## Conventions
 
@@ -47,7 +47,8 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
   - Everything else is demo-only: create it with `ui-calling new` inside `apps/demo`.
   - The registry is the source of truth for its blocks. After editing one, copy it into the demo with `cd apps/demo && npx ui-calling add <block> --force --server-dir server`; never edit the demo copy alone. That keeps the demo's own `server/<block>.server.ts` (mock data, outage switches): `add` never overwrites a server file.
 - **Recipes** (`packages/cli/recipes/`): one task per file, each pointing to demo code that runs and a check that proves it. When you change a pattern the demo shows (a contract, a handler, a screen flow), update its recipe in the same change. A new recipe needs a row in `recipes/README.md`. `scripts/test-cli.mjs` checks that every recipe is listed and that its links point at real files.
-- **Templates:** `packages/cli/templates/surface` must stay valid TypeScript. Placeholders (`__name__`, `__surface__`, `__const__`, `__Component__`, `__MESSAGES__`) are real identifiers, so the typecheck covers generated code.
+- **Parts** (`registry/parts/`): pieces screens are built from, copied by `ui-calling add <part>` into `<surfaces dir>/parts/`. They take a `locale` and carry their own en/es strings. The `steps` template imports them from `../../registry/parts/` so the repo typechecks it; `new` copies them and rewrites the imports.
+- **Templates:** `packages/cli/templates/surface` and `templates/steps` must stay valid TypeScript. Placeholders (`__name__`, `__surface__`, `__const__`, `__Component__`, `__MESSAGES__`) are real identifiers, so the typecheck covers generated code.
 - **Strings:**
   - Text the user sees goes in en/es message objects.
   - Text the agent reads (`describe`, error descriptions, `summarize`) is English.

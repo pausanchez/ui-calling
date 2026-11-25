@@ -40,9 +40,20 @@ try {
   }
 
   // `init` then `new`, in the project shapes people have.
-  const next = project("init-next-src", { dependencies: { next: "15" } }, ["src/app"], { "AGENTS.md": "# Agents\n" });
+  const next = project("init-next-src", { dependencies: { next: "15" } }, ["src/app"], {
+    "AGENTS.md": "# Agents\n",
+    ".gitignore": "node_modules\n",
+    "src/app/globals.css": '@import "tailwindcss";\n\n:root {\n  --background: #ffffff;\n}\n',
+  });
   const out = run(next, "init");
   assert.match(out, /Next\.js/);
+  // The tokens go in right after Tailwind, and the starter's own --background is pointed out.
+  assert.match(read("init-next-src", "src/app/globals.css"), /@import "tailwindcss";\n@import "\.\.\/ui-calling\/tokens\.css";/);
+  assert.match(out, /override them/);
+  assert.match(read("init-next-src", ".gitignore"), /^\.ui-calling\/$/m);
+  // The store is its own file, so server code can use store.db without importing ui.ts.
+  assert.match(read("init-next-src", "src/ui-calling/store.ts"), /export const store = sqliteStore\(\)/);
+  assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /import \{ store \} from "\.\/store";/);
   run(next, "new", "shift-picker");
   run(next, "new", "link-account");
   run(next, "new", "shift-picker"); // again: files are skipped, registration stays single
@@ -55,6 +66,8 @@ try {
   assert.equal(read("init-next-src", "AGENTS.md").match(/<!-- ui-calling -->/g)?.length, 1);
   run(next, "init"); // re-running init doesn't clobber or duplicate
   assert.equal(read("init-next-src", "AGENTS.md").match(/<!-- ui-calling -->/g)?.length, 1);
+  assert.equal(read("init-next-src", "src/app/globals.css").match(/tokens\.css/g)?.length, 1);
+  assert.equal(read("init-next-src", ".gitignore").match(/\.ui-calling/g)?.length, 1);
   assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /shiftPickerImpl,/, "init without --force keeps registrations");
   // A block brings its server file and is registered; re-adding it updates the screen, never your data code.
   run(next, "add", "order-status");
@@ -68,6 +81,14 @@ try {
   run(join(next, "src/app"), "new", "payslip");
   assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /payslipImpl,/);
   assert.match(read("init-next-src", "src/ui-calling/payslip.tsx"), /Payslip/);
+  // A screen with several steps brings the parts it uses; parts can also be added on their own.
+  run(next, "new", "claim-form", "--template", "steps");
+  assert.match(read("init-next-src", "src/ui-calling/claim-form.tsx"), /from "\.\/parts\/step-bar"/);
+  assert.match(read("init-next-src", "src/ui-calling/parts/action-bar.tsx"), /export function ActionBar/);
+  assert.match(read("init-next-src", "src/ui-calling/ui.ts"), /claimFormImpl,/);
+  assert.match(run(next, "add", "step-bar", "photo-picker", "quantity-stepper"), /keep .*step-bar\.tsx/);
+  assert.match(read("init-next-src", "src/ui-calling/parts/photo-picker.tsx"), /export function PhotoPicker/);
+  assert.match(fails(next, "new", "x", "--template", "nope"), /Unknown template/);
   // Setting up again somewhere else would leave the registrations behind.
   assert.match(fails(next, "init", "--dir", "lib/ui"), /Already set up in src\/ui-calling/);
   console.log("generated  init-next-src (+4 surfaces)");

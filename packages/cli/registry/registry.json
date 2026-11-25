@@ -8,8 +8,56 @@
         "blocks/order-status/order-status.tsx"
       ],
       "server": "blocks/order-status/order-status.server.ts",
-      "register": { "impl": "orderStatusImpl", "component": "OrderStatus", "surface": "order_status" },
-      "dependencies": ["@ui-calling/core", "@ui-calling/react", "zod"]
+      "register": {
+        "impl": "orderStatusImpl",
+        "component": "OrderStatus",
+        "surface": "order_status"
+      },
+      "dependencies": [
+        "@ui-calling/core",
+        "@ui-calling/react",
+        "zod"
+      ]
+    }
+  },
+  "parts": {
+    "step-bar": {
+      "description": "Progress through a screen with several steps; reached steps can be tapped.",
+      "files": [
+        "parts/step-bar.tsx"
+      ],
+      "dependencies": []
+    },
+    "action-bar": {
+      "description": "Sticky Back and primary action, with the last problem above them.",
+      "files": [
+        "parts/action-bar.tsx"
+      ],
+      "dependencies": []
+    },
+    "choice-card": {
+      "description": "An option as a full-width radio or checkbox card, with details when checked.",
+      "files": [
+        "parts/choice-card.tsx"
+      ],
+      "dependencies": []
+    },
+    "quantity-stepper": {
+      "description": "Minus, number, plus, with 44px targets.",
+      "files": [
+        "parts/quantity-stepper.tsx"
+      ],
+      "dependencies": []
+    },
+    "photo-picker": {
+      "description": "Camera or gallery into a file slot, thumbnails, remove, and reasons when refused.",
+      "files": [
+        "parts/photo-picker.tsx"
+      ],
+      "dependencies": [
+        "@ui-calling/core",
+        "@ui-calling/react"
+      ]
     }
   }
 }
