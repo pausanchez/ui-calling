@@ -212,7 +212,7 @@ createUiCalling({ store: sqliteStore(), ... })   // .ui-calling/ui-calling.db, f
 - **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
-- **On serverless hosts without a lasting disk,** implement `UiStore` for your database.
+- **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](scripts/test-store.ts) run against any store; copy them into your tests.
 
 The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
 

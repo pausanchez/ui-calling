@@ -421,8 +421,12 @@ export function createUiCalling(opts: UiCallingOptions) {
       return { event, data: data ?? undefined };
     },
 
-    events(conversationId: string) {
-      return store.listEvents({ conversationId });
+    /**
+     * The conversation's events, oldest first. Pass `after` (the ID of the last event you handled) to get
+     * only newer ones, and `limit` to page. Throws `UnknownEventError` if `after` isn't a stored event.
+     */
+    events(conversationId: string, opts: { after?: string; limit?: number } = {}) {
+      return store.listEvents({ conversationId, ...opts });
     },
 
     /**
