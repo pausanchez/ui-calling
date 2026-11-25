@@ -136,7 +136,9 @@ await check("identity: codes link a subject once, expire, survive a reload, and 
   assert.deepEqual(short.verify("wa:6", old), { ok: false, reason: "expired" });
   assert.equal(identity.moveLink("wa:1", "wa:1-new"), true);
   assert.equal(identity.customerFor("wa:1-new"), "E-100");
-  assert.equal(identity.customerFor("wa:1"), undefined);
+  assert.equal(identity.customerFor("wa:1"), "E-100", "links already sent to the old number keep working");
+  identity.moveLink("wa:1-new", "wa:1-newer", { keepOld: false });
+  assert.equal(identity.customerFor("wa:1-new"), undefined);
 });
 
 await check("restart: a link sent before a restart still opens, and the agent's context is still there", async () => {

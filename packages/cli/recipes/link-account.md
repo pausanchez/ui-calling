@@ -8,7 +8,9 @@ Start from the block. It ships the screen and the security-critical half: links,
 npx ui-calling add link-account
 ```
 
-Then fill the three TODOs in `link-account.server.ts`: `findCustomer` (look the user up by what they typed), `sendCode` (email or SMS, never the chat) and `nameOf`.
+Then fill the three TODOs in `link-account.server.ts`: `findCustomer` (look the user up by what they typed), `sendCode` (email or SMS, never the chat) and `nameOf`. Replacing a screen of your own? `add link-account --replace` writes the block's server file over yours.
+
+Users who don't sign in with an email type something else: render `<LinkAccount identifier="text" locales={{ en: { identifierLabel: "Employee number", intro: "…" }, es: { identifierLabel: "Número de empleado", intro: "…" } }} />` (`"tel"` for phone numbers). The input's keyboard and autofill follow it; `locales` sets your strings per language.
 
 ## How it fits
 
@@ -19,10 +21,10 @@ Then fill the three TODOs in `link-account.server.ts`: `findCustomer` (look the 
 
 ## The identity helper
 
-`sqliteIdentity(store)` from `@ui-calling/sqlite` keeps its tables next to UI_calling's. The block's server file creates one and exports it as `identity`, so your other surfaces can use it:
+`sqliteIdentity(store)` from `@ui-calling/sqlite` keeps its tables next to UI_calling's. `add link-account` writes `identity.ts` next to `store.ts`, so your other surfaces, your webhook and your back office can import it without importing a surface:
 
 ```ts
-import { identity } from "./link-account.server";
+import { identity } from "./identity";
 
 resolve: async ({ shift_id }, ctx) => {
   const employeeId = identity.customerFor(ctx.subject);
@@ -39,7 +41,7 @@ resolve: async ({ shift_id }, ctx) => {
 | `pending(subject)` | A code is waiting: the screen resumes on "enter your code" after a reload |
 | `verify(subject, code)` | `{ ok: true, customerId }` and the subject is linked, or `{ ok: false, reason }`: `wrong_code` (with `attemptsLeft`), `expired`, `no_code`, `locked` |
 | `cancelVerification(subject)` | Drop the waiting code (the user starts over) |
-| `moveLink(previousSubject, subject)` | The user changed number and got a new BSUID: carry the link over |
+| `moveLink(previousSubject, subject, { keepOld? })` | The user changed number and got a new BSUID: link the new one too. The old one stays linked (links already sent keep working until they expire) unless `keepOld: false` |
 
 Options: `codeTtlMs` (10 minutes), `maxAttempts` (5), `lockMs` (15 minutes), `digits` (6).
 
@@ -69,12 +71,12 @@ export const linkAccount = defineSurface({
 - **Link the session's subject, never an ID from the screen.** The handler links `ctx.subject`; the payload only carries what the user typed.
 - **Attempts count per customer, not per link.** The agent can open new links on request; the helper's lock follows the customer across chats and links.
 - **Restrict tools until linked.** Giving the agent every tool and hoping it asks first leaks data the first time it doesn't.
-- **BSUIDs change when the user changes number.** Meta sends the old one (`identityChange` from `parseWhatsAppWebhook`); call `identity.moveLink`.
+- **BSUIDs change when the user changes number.** Meta sends the old one (`identityChange` from `parseWhatsAppWebhook`); call `identity.moveLink(old, new)`. The old one stays linked, so links already sent keep working until they expire.
 
 ## In the UI_calling repo
 
 Not in the package; for reading if you have the repo.
 
-- The block: [`link-account.surface.ts`](../registry/blocks/link-account/link-account.surface.ts), [`link-account.server.ts`](../registry/blocks/link-account/link-account.server.ts), [`link-account.tsx`](../registry/blocks/link-account/link-account.tsx)
+- The block: [`link-account.surface.ts`](../registry/blocks/link-account/link-account.surface.ts), [`link-account.server.ts`](../registry/blocks/link-account/link-account.server.ts), [`link-account.tsx`](../registry/blocks/link-account/link-account.tsx), [`identity.ts`](../registry/blocks/link-account/identity.ts)
 - The helper and its tests: [`identity.ts`](../../sqlite/src/identity.ts), the `identity:` check in [`test-store.ts`](../../../scripts/test-store.ts)
 - The demo's own version (phone linking, BSUID changes): [`identity.ts`](../../../apps/demo/server/identity.ts), the `identity:` checks in [`smoke.ts`](../../../apps/demo/server/smoke.ts)

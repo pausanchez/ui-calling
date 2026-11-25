@@ -68,12 +68,15 @@ export function sqliteIdentity(
     unlink(subject: string) {
       q.unlink.run(subject);
     },
-    /** The user changed phone number and got a new BSUID: carry the link over. False if the old one wasn't linked. */
-    moveLink(previousSubject: string, subject: string): boolean {
+    /**
+     * The user changed phone number and got a new BSUID: link the new one too. The old one stays linked unless you
+     * pass `keepOld: false`, so links already sent to it keep working until they expire. False if it wasn't linked.
+     */
+    moveLink(previousSubject: string, subject: string, opts: { keepOld?: boolean } = {}): boolean {
       const customerId = api.customerFor(previousSubject);
       if (!customerId) return false;
       api.link(subject, customerId);
-      q.unlink.run(previousSubject);
+      if (opts.keepOld === false) q.unlink.run(previousSubject);
       return true;
     },
     /**

@@ -26,13 +26,15 @@ const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")
 const fromRoot = (p) => (p ? resolve(root, p) : undefined);
 const config = raw && { ...raw, runtime: fromRoot(raw.runtime), screen: fromRoot(raw.screen), surfacesDir: fromRoot(raw.surfacesDir), serverDir: fromRoot(raw.serverDir) };
 
-const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url"];
+const VALUE_FLAGS = ["--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone"];
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (name, fallback) => {
   const i = rest.indexOf(name);
   return i >= 0 ? rest[i + 1] : fallback;
 };
 const force = rest.includes("--force");
+// `add --replace`: like --force, and also rewrites the block's server and support files (your data code).
+const replace = rest.includes("--replace");
 // Flags are relative to where you run the command; the config's paths, to its package.
 const outDir = flag("--dir") ? resolve(flag("--dir")) : (config?.surfacesDir ?? resolve(root, "src/components/ui-calling"));
 const serverDir = flag("--server-dir") ? resolve(flag("--server-dir")) : flag("--dir") ? outDir : (config?.serverDir ?? outDir);
@@ -55,10 +57,18 @@ function refuseWorkspaceRoot(what) {
 const names = rest.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.includes(rest[i - 1]));
 
 function write(target, content) {
-  if (existsSync(target) && !force) {
+  if (existsSync(target) && !force && !replace) {
     console.log(`  skip   ${relative(process.cwd(), target)} (exists, use --force to overwrite)`);
     return false;
   }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content);
+  console.log(`  write  ${relative(process.cwd(), target)}`);
+  return true;
+}
+
+/** Write a file even if it exists (for --replace). */
+function writeOver(target, content) {
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content);
   console.log(`  write  ${relative(process.cwd(), target)}`);
@@ -288,7 +298,9 @@ async function devCommand(which) {
     return res;
   };
   if (which === "events") {
-    const res = await reach(`/dev/events/${encodeURIComponent(`dev:${subject}`)}`);
+    // Same clock as your agent: pass the zone you give formatEventsForAgent (e.g. --time-zone Europe/Madrid).
+    const tz = flag("--time-zone");
+    const res = await reach(`/dev/events/${encodeURIComponent(`dev:${subject}`)}${tz ? `?timeZone=${encodeURIComponent(tz)}` : ""}`);
     process.stdout.write((await res.text()) + "\n");
     return;
   }
@@ -357,20 +369,25 @@ switch (cmd) {
       block.files.forEach(copy);
       block.dependencies.forEach((d) => deps.add(d));
       if (!block.server) continue;
-      // The server file is where your data comes from: written once, never overwritten, even with --force.
+      // Blocks import init's store from the registry (so the repo typechecks them); in your project it's ui-calling/store.ts.
+      const libDir = config?.runtime ? dirname(config.runtime) : outDir;
+      const storeFile = join(libDir, "store.ts");
+      // Support files (e.g. identity.ts) go next to store.ts, for the whole app to import: written once, like the server file.
+      const support = (block.support ?? []).map((rel) => ({ rel, target: join(libDir, basename(rel)) }));
+      for (const { rel, target } of support) {
+        if (existsSync(target) && !replace) console.log(`  keep   ${shown(target)} (yours now; --replace writes the block's again)`);
+        else writeOver(target, readFileSync(join(registryDir, rel), "utf8").replaceAll(`"../../../templates/init/store"`, `"${importPath(target, storeFile)}"`));
+      }
+      // The server file is where your data comes from: written once, never overwritten, even with --force (--replace does).
       const serverFile = join(serverDir, basename(block.server));
       const contract = block.files.find((f) => f.endsWith(".surface.ts"));
-      if (existsSync(serverFile)) console.log(`  keep   ${shown(serverFile)} (your data code; delete it to get the example again)`);
+      if (existsSync(serverFile) && !replace) console.log(`  keep   ${shown(serverFile)} (your data code; --replace writes the example again)`);
       else {
-        const s = readFileSync(join(registryDir, block.server), "utf8");
-        // Blocks import init's store from the registry (so the repo typechecks them); in your project it's ui-calling/store.ts.
-        const storeFile = join(config?.runtime ? dirname(config.runtime) : outDir, "store.ts");
-        wroteServer = write(
-          serverFile,
-          s
-            .replaceAll(`"./${basename(contract, ".ts")}"`, `"${importPath(serverFile, join(outDir, basename(contract)))}"`)
-            .replaceAll(`"../../../templates/init/store"`, `"${importPath(serverFile, storeFile)}"`),
-        );
+        let s = readFileSync(join(registryDir, block.server), "utf8")
+          .replaceAll(`"./${basename(contract, ".ts")}"`, `"${importPath(serverFile, join(outDir, basename(contract)))}"`)
+          .replaceAll(`"../../../templates/init/store"`, `"${importPath(serverFile, storeFile)}"`);
+        for (const { rel, target } of support) s = s.replaceAll(`"./${basename(rel, ".ts")}"`, `"${importPath(serverFile, target)}"`);
+        wroteServer = writeOver(serverFile, s);
       }
       const screenFile = join(outDir, basename(block.files.find((f) => f.endsWith(".tsx"))));
       if (!registerSurface(block.register, serverFile, screenFile)) unregistered.push(block);
@@ -418,14 +435,16 @@ switch (cmd) {
                     --template steps: a screen with several steps, a saved draft and Back
                     --dir, --server-dir (default: from ui-calling.json)
   add <block...>    copy ready-made blocks and register them; their .server.ts is written once,
-                    never overwritten (--dir, --server-dir, --force)
+                    never overwritten (--dir, --server-dir, --force; --replace rewrites everything,
+                    server file included, to swap your own screen for the block)
   list              show available blocks
   tokens            copy the design tokens only
   link <surface> [key=value...]
                     open a screen for a test user on your running dev server and print its link,
                     e.g. link order-return order_id=A-0987. The test user's subject is
                     dev-user unless you pass --subject (also --locale, --url)
-  events            print what the agent would read from that test user's screens (--subject, --url)
+  events            print what the agent would read from that test user's screens
+                    (--subject, --url, --time-zone Europe/Madrid)
   guide [recipe]    print the guide for building surfaces (for people and coding agents);
                     "guide recipes" lists task-shaped recipes, "guide <recipe>" prints one`);
 }

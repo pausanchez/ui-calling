@@ -68,9 +68,29 @@ const LINK_ACCOUNT_MESSAGES = {
 
 export type LinkAccountMessages = (typeof LINK_ACCOUNT_MESSAGES)["en"];
 
-export function LinkAccount({ messages }: { messages?: Partial<LinkAccountMessages> }) {
+/** What users type to be found: the input's type, keyboard and autofill follow it. */
+const IDENTIFIER = {
+  email: { type: "email", inputMode: "email", autoComplete: "email" },
+  tel: { type: "tel", inputMode: "tel", autoComplete: "tel" },
+  text: { type: "text", inputMode: "text", autoComplete: "username" },
+} as const;
+
+export function LinkAccount({
+  identifier: kind = "email",
+  locales,
+  messages,
+}: {
+  /** "email" (default), "tel" for phone numbers, "text" for anything else (an employee number). Change the label in `locales`. */
+  identifier?: keyof typeof IDENTIFIER;
+  /** Your strings per language, e.g. { en: { identifierLabel: "Employee number" }, es: { identifierLabel: "Número de empleado" } }. */
+  locales?: Record<string, Partial<LinkAccountMessages>>;
+  /** Strings for every language at once. */
+  messages?: Partial<LinkAccountMessages>;
+}) {
   const { status, data, locale, emit, complete, returnUrl } = useSurface(linkAccount);
-  const t: LinkAccountMessages = { ...pickLocalized(LINK_ACCOUNT_MESSAGES, locale)!, ...messages };
+  // Your strings only for the language they're written in: no English label on a Spanish screen.
+  const own = locales?.[locale] ?? locales?.[locale.split("-")[0]];
+  const t: LinkAccountMessages = { ...pickLocalized(LINK_ACCOUNT_MESSAGES, locale)!, ...own, ...messages };
   const [identifier, setIdentifier] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -131,7 +151,7 @@ export function LinkAccount({ messages }: { messages?: Partial<LinkAccountMessag
           </header>
           <label className="flex flex-col gap-1.5 text-sm font-medium">
             {t.identifierLabel}
-            <input type="email" autoComplete="email" required value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder={t.identifierPlaceholder} className={input} />
+            <input {...IDENTIFIER[kind]} required value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder={t.identifierPlaceholder} className={input} />
           </label>
           {problem && <p role="alert" className="text-sm text-destructive">{problem}</p>}
           <button type="submit" disabled={busy || !identifier.trim()} className={btn("primary")}>{t.sendCode}</button>

@@ -36,6 +36,9 @@
         "@ui-calling/react",
         "@ui-calling/sqlite",
         "zod"
+      ],
+      "support": [
+        "blocks/link-account/identity.ts"
       ]
     }
   },

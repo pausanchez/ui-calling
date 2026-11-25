@@ -43,7 +43,10 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
       if (!run.ok) return c.json({ error: "tool_failed", message: run.content }, 400);
       return c.json({ url: run.link?.url, conversationId, toolResult: run.content });
     });
-    app.get("/dev/events/:conversationId", async (c) => c.text(formatEventsForAgent(await ui.events(c.req.param("conversationId"))) || "(no events yet)"));
+    app.get("/dev/events/:conversationId", async (c) => {
+      const timeZone = c.req.query("timeZone");
+      return c.text(formatEventsForAgent(await ui.events(c.req.param("conversationId")), timeZone ? { timeZone } : {}) || "(no events yet)");
+    });
   }
 
   app.post(
