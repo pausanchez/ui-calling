@@ -59,15 +59,20 @@ Open http://localhost:5173 and ask "¿Dónde está mi pedido?", "The blender arr
 
 The demo also answers a real WhatsApp number, using a Meta test number on the WhatsApp Cloud API.
 
-1. In a Meta app with the WhatsApp product, open WhatsApp → API Setup. Add your phone as a recipient of the test number.
+1. In a Meta app with the WhatsApp product, open WhatsApp → API Setup. Add your phone as a recipient of the test number. A test number only messages numbers on that list, up to five; for other people, add theirs too (Meta texts them a code).
 2. Put four keys in `.env`:
 
    | Key | Where it comes from |
    |---|---|
-   | `WHATSAPP_TOKEN` | WhatsApp → API Setup → access token. The temporary one lasts about a day; a system user's token (Meta Business settings → System users) doesn't expire. |
+   | `WHATSAPP_TOKEN` | A system user's token, which can be set never to expire (steps below). The temporary token on API Setup works too, but it can expire within hours. |
    | `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp → API Setup, under the test number |
    | `WHATSAPP_APP_SECRET` | App settings → Basic → App secret. Signed webhooks are checked against it. |
    | `WHATSAPP_VERIFY_TOKEN` | Any string you choose. Meta sends it back when it verifies the webhook. |
+
+   A token that doesn't expire, made once in Meta Business settings (business.facebook.com/settings):
+   1. Users → System users → Add, with the Admin role.
+   2. Assign assets: the app (full control), and the WhatsApp account with the test number (full control).
+   3. Generate new token: your app, expiration **Never**, permissions `whatsapp_business_messaging` and `whatsapp_business_management`. Meta shows it once.
 
 3. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (`brew install cloudflared`), then run:
 

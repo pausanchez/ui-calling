@@ -1,0 +1,18 @@
+# Recipes
+
+Each recipe starts from a task and gives the whole answer: the contract, the server, the screen, what went wrong when we built it, and the demo code that does it in full. The rules and the API reference stay in the guide (`npx ui-calling guide`).
+
+Print one with `npx ui-calling guide <recipe>`.
+
+| Recipe | Use it when |
+|---|---|
+| [`show-and-act`](show-and-act.md) | Seeing beats reading (an order, a booking), and the user may change something from there |
+| [`pick-from-options`](pick-from-options.md) | The user picks one of a few things that can run out: shifts, slots, seats |
+| [`multistep-form`](multistep-form.md) | The user gives several answers in order and may stop and come back |
+| [`file-upload`](file-upload.md) | The user has to send a photo or a document |
+| [`prefill`](prefill.md) | The user already said in the chat what the screen asks for |
+| [`link-account`](link-account.md) | You must know which customer this WhatsApp user is before showing anything personal |
+| [`third-party-failures`](third-party-failures.md) | A system behind the screen can fail, and both the user and the agent should know |
+| [`follow-up-abandoned`](follow-up-abandoned.md) | It matters that the user finishes, and the agent should nudge once if they stop |
+
+Links to `apps/demo/...` point into the UI_calling repo, where each recipe runs and is tested.
