@@ -27,7 +27,7 @@ on: {
 
 What happens next, without more code:
 - The agent gets an `error` event with the code and message, worded as "did NOT go through. Attempted: …" from your `describe`. The first error of each kind wakes it, unless it's a refusal (`refused: true`): the screen explains those while the user is still on it, and the agent reads them on its next turn.
-- The screen gets `errorCode` (load) or a `SurfaceActionError` with `reason` and `retryable` (action).
+- The screen gets `errorCode` and `errorReason` (load) or a `SurfaceActionError` with `reason` and `retryable` (action). `errorReason` and `reason` are your `SurfaceError` code.
 - A failed load returns 502 with `error: "upstream_error"`.
 
 ## Screen

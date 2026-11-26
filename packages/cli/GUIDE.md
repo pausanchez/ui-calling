@@ -4,7 +4,7 @@ A **surface** is a screen an AI agent can open for a user, the way it calls a fu
 
 Unlike a webview that returns one result when it closes, the agent decides when to open a surface, and it hears about the screen's whole life: what the user saw, tried, finished or gave up on, and what failed and why. That's what lets it follow up in the chat instead of answering blind.
 
-This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`, or one section at a time: `npx ui-calling guide toc` lists them, and `npx ui-calling guide <section>` prints one (a word is enough: `guide vite`, `guide agent`, `guide testing`).
+This guide is for people and coding agents adding surfaces to a product. Print it any time with `npx ui-calling guide`, or one section at a time: `npx ui-calling guide toc` lists them, and `npx ui-calling guide <section>` prints one (a word is enough: `guide vite`, `guide router`, `guide agent`, `guide testing`).
 
 **Starting from a task?** The recipes give the whole answer for one job: a form with several steps, a photo upload, picking a slot that can fill up, linking a WhatsApp user, and more. List them with `npx ui-calling guide recipes` and print one with `npx ui-calling guide <recipe>`. This guide holds the rules and the reference they build on.
 
@@ -57,19 +57,18 @@ npx ui-calling init
 ```
 
 Run it in your project's root. It detects Next.js, Vite or React Router and writes:
-- `ui.ts`: your runtime, with `createUiCalling`, the surfaces list and `onEvent`.
+- `ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and `timeZone`, the zone times are written in for the agent (your machine's; `--time-zone` to choose).
 - `store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
-
-The screens go in the folder `init` picked: `app/ui-calling/` on React Router, `src/ui-calling/` when your app has a `src` folder, `ui-calling/` otherwise, or `--dir`. Server code (`ui.ts`, `store.ts`, every `.server.ts`) goes next to them on Next.js, and in `server/` otherwise, because there `src/` is bundled for the browser (`--server-dir` to change it).
-- `ui.ts` also sets `timeZone`, the zone times are written in for the agent: your machine's (`--time-zone` to choose).
-- `ui-calling/surface-screen.tsx`: renders whichever surface a link's token points to. It also sets `Referrer-Policy: no-referrer` on the page, so the token in its address doesn't leak to sites the screen links to.
-- `ui-calling/tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use UI_calling's). `npx ui-calling tokens` copies only this file.
+- `surface-screen.tsx`: renders whichever surface a link's token points to. It also sets `Referrer-Policy: no-referrer` on the page, so the token in its address doesn't leak to sites the screen links to.
+- `tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use UI_calling's), or paints `html`/`body` with a background of its own. `npx ui-calling tokens` copies only this file.
 - **Next.js:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
 - **Vite:** see "Vite" below: an API server, the `/api` proxy and the `/s/:token` route.
 - **React Router:** see "React Router" below: two routes.
-- **`.gitignore`:** adds `.ui-calling/`, where the database goes. On Next.js the development database is in `node_modules/.cache/ui-calling/` instead, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading. A clean install (`rm -rf node_modules`, `npm ci`) wipes it, with linked test accounts and drafts. Elsewhere it's `.ui-calling/dev.db`.
+- **`.gitignore`:** adds `.ui-calling/`, where the database goes. On Next.js the development database is in `node_modules/.cache/ui-calling/` instead, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading. A clean install (`rm -rf node_modules`, `npm ci`) wipes it, with linked test accounts and drafts. Elsewhere it's `.ui-calling/dev.db`. Either way, `UI_CALLING_DB` points it at another file.
 - `ui-calling.json`: where things live. With it, `ui-calling new` and `ui-calling add` register each surface in `ui.ts` and `surface-screen.tsx` by themselves, from any folder of the app. In a monorepo, run `init` in the app that serves the screens, not at the root.
 - **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
+
+**Where files go.** The screens (`surface-screen.tsx`, `tokens.css`, every contract and screen) go in `app/ui-calling/` on React Router, `src/ui-calling/` when your app has a `src` folder, `ui-calling/` otherwise, or `--dir`. Server code (`ui.ts`, `store.ts`, every `.server.ts`) goes next to them on Next.js, and in `server/` otherwise, because there the screens' folder is bundled for the browser (`--server-dir` to change it).
 
 ### Vite
 
@@ -156,7 +155,7 @@ convo.messages = [...runner.params.messages, { role: "assistant", content: final
 **Anthropic SDK, manual loop** (`client.messages.create` in your own loop): `anthropicTools(ui, filter?)` for `tools`, and `anthropicToolResult(ui, block, who, filter?)` for each `tool_use`. It returns `{ result, run }`: send `result` back, deliver `run.link` when `run.ok`. It never throws.
 
 ```ts
-const filter = (name: string) => true;   // the same filter for the tool list and for running calls
+const filter = (name: string) => true;   // e.g. only show_link_account until the user is known; same for both calls
 const links: SurfaceLink[] = [];
 for (let round = 0; round < 6; round++) {
   const reply = await client.messages.create({
@@ -204,9 +203,9 @@ convo.messages.push(...result.responseMessages);   // `result.response.messages`
 
 **Any MCP client** (`@ui-calling/mcp`): `createUiCallingMcpServer(ui, { who: (extra) => … })`, connected to any transport. MCP knows nothing of your end user, so `who` derives the user from the request (e.g. `extra.authInfo`).
 
-**Only some surfaces for this agent:** every adapter takes a `filter`, e.g. `anthropicRunnableTools(ui, who, { filter: (name) => name !== "show_link_account" })`. The OpenAI and `anthropicTools` helpers take it as their second argument. Use it to offer a sign-in surface until the user is identified, and the rest after.
+**Only some surfaces for this agent:** every adapter takes a `filter`, e.g. `anthropicRunnableTools(ui, who, { filter: (name) => name !== "show_link_account" })`. The OpenAI and `anthropicTools` helpers take it as their second argument, and the helpers that run a call (`anthropicToolResult`, `runResponsesFunctionCall`, `runChatToolCall`, `ui.runTool`) as their last: pass the same one, so a tool the model wasn't offered is refused. Use it to offer a sign-in surface until the user is identified, and the rest after.
 
-**Anything else:** `ui.tools()` gives JSON Schema tools, and `ui.runTool(name, input, who)` returns `{ ok, content, link }`. `content` is what goes back to the model, and errors come back as results, not exceptions.
+**Anything else:** `ui.tools()` gives JSON Schema tools, and `ui.runTool(name, input, who, filter?)` returns `{ ok, content, link }`. `content` is what goes back to the model, and errors come back as results, not exceptions.
 
 **What the model reads back** from a tool call is JSON:
 - `status`: `"link_ready"`, or `"error"` with `code` and `message`;

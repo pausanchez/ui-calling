@@ -264,6 +264,7 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 
 - **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
 - **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own; on Vite, `init` passes `.ui-calling/dev.db`, which survives a clean install.
+- **Tests** set `UI_CALLING_DB` (a temp file, or `:memory:`) before importing your runtime, so they never touch the dev database.
 - **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
