@@ -19,7 +19,7 @@ export const ui = createUiCalling({
   // model. "message": the model writes the URL in its reply, for channels you can't attach a button to (MCP, SMS).
   deliverLinks: "__DELIVER__",
   // The business's time zone: times the agent reads are written in it (see moment.time() in summarize).
-  timeZone: "UTC",
+  timeZone: "__TIME_ZONE__",
   // Wake the agent if a user opens a screen and does nothing for 10 minutes.
   abandonAfterMs: 10 * 60_000,
   onEvent: async (event) => {

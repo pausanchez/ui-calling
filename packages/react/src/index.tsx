@@ -25,6 +25,8 @@ type ContextValue = {
   /** e.g. "upstream_error" when the data source failed (the agent already knows), "not_found" for a bad
    * link, or "network" when the server couldn't be reached. */
   errorCode?: string;
+  /** For `errorCode === "upstream_error"` or `"refused"`: `resolve`'s `SurfaceError` code (e.g. "account_not_linked"). */
+  errorReason?: string;
   emit: (type: string, payload?: unknown) => Promise<unknown>;
   reload: () => Promise<void>;
   reportError: (err: unknown, context?: string) => void;
@@ -99,6 +101,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     data?: unknown;
     error?: string;
     errorCode?: string;
+    errorReason?: string;
   }>({ status: "loading" });
   const opened = useRef(false);
 
@@ -191,7 +194,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
         if (res.status === 410) return setState({ status: "expired", locale, error: json.message });
         if (!res.ok) {
           const errorCode = res.status >= 500 && !json.surface ? "network" : (json.error ?? "network");
-          return setState({ status: "error", surface: json.surface, locale, error: json.message ?? json.error, errorCode });
+          return setState({ status: "error", surface: json.surface, locale, error: json.message ?? json.error, errorCode, errorReason: json.reason });
         }
         setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
         if (!opened.current) {
@@ -226,13 +229,15 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     document.documentElement.lang = locale;
   }, [locale]);
 
-  // "Back to chat" on a computer: the chat (WhatsApp Web, a web chat) is still open in the tab the screen came
-  // from, and following a wa.me link there lands on WhatsApp's "open the app" page. So close this tab instead,
-  // whichever link points at returnUrl. Phones follow the link back into the app as before.
+  // "Back to chat" on a computer, when the screen opened in a tab of its own: the chat (WhatsApp Web, a web chat)
+  // is still open in the tab it came from, and following a wa.me link there lands on WhatsApp's "open the app"
+  // page. So close this tab instead, whichever link points at returnUrl. A screen opened in the chat's own tab
+  // follows the link back, as phones do. A new tab starts with one history entry; read it before steps add more.
+  const [ownTab] = useState(() => typeof window !== "undefined" && (window.history.length <= 1 || Boolean(window.opener)));
   const [closeHint, setCloseHint] = useState(false);
   useEffect(() => {
     const target = props.returnUrl;
-    if (!target) return;
+    if (!target || !ownTab) return;
     const onClick = (e: MouseEvent) => {
       const link = (e.target as Element | null)?.closest?.("a");
       if (!link || link.getAttribute("href") !== target || !onComputer()) return;
@@ -243,7 +248,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [props.returnUrl]);
+  }, [props.returnUrl, ownTab]);
 
   const value = useMemo<ContextValue>(
     () => ({ ...state, locale, data: state.data, emit, reload, reportError, upload, removeFile, fileUrl, returnUrl: props.returnUrl }),
@@ -308,6 +313,7 @@ export function useSurface<S extends AnySurface>(surface: S) {
     status: ctx.status,
     error: ctx.error,
     errorCode: ctx.errorCode,
+    errorReason: ctx.errorReason,
     reload: ctx.reload,
     reportError: ctx.reportError,
     locale: ctx.locale,
@@ -322,7 +328,7 @@ export function useSurface<S extends AnySurface>(surface: S) {
   };
 }
 
-/** The link's state (status, surface, locale, errorCode, returnUrl), before you know which screen it is: for routing between surfaces on one page. */
+/** The link's state (status, surface, locale, errorCode, errorReason, returnUrl), before you know which screen it is: for routing between surfaces on one page. */
 export function useSurfaceSession() {
   const ctx = useContext(SurfaceContext);
   return {
@@ -331,6 +337,7 @@ export function useSurfaceSession() {
     locale: ctx?.locale,
     error: ctx?.error,
     errorCode: ctx?.errorCode,
+    errorReason: ctx?.errorReason,
     returnUrl: ctx?.returnUrl,
   };
 }

@@ -187,7 +187,7 @@ await check("restart: a link sent before a restart still opens, and the agent's 
   const open = await second.open(token);
   assert.equal(open.locale, "es");
   const { event } = await second.emit(token, "close", {});
-  assert.match(event.state ?? "", /Ticket T-7 closed/);
+  assert.match(event?.state ?? "", /Ticket T-7 closed/);
   const all = await second.events("conv");
   assert.deepEqual(all.map((e) => e.type), ["opened", "close"]);
   // The cursor survives the restart: catch up from the last event handled before it.

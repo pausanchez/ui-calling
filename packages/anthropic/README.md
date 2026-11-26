@@ -11,4 +11,4 @@ const runner = client.beta.messages.toolRunner({
 });
 ```
 
-Manual loop: `anthropicTools(ui)` and `anthropicToolResult(ui, toolUseBlock, who)`. A whole agent: `npx ui-calling guide agent`.
+Manual loop: `anthropicTools(ui, filter?)` for `tools`, and `anthropicToolResult(ui, block, who, filter?)` for each `tool_use`, which returns `{ result, run }` and never throws. Both, with a whole loop: `npx ui-calling guide agent`. Turns started by the screens: `npx ui-calling guide running`.

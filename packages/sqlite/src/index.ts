@@ -46,11 +46,13 @@ export function sqliteStore(path = DEFAULT_PATH()): SqliteStore {
 export type SqliteStore = UiStore & { db: DatabaseSync; close(): void };
 
 /**
- * `.ui-calling/ui-calling.db` in production. In development, `node_modules/.cache/ui-calling/`: Next's dev
- * server watches the whole project, and a database inside it reloads the page on every event the
- * screen records, so the screen never finishes loading. Dev servers ignore `node_modules`.
+ * `UI_CALLING_DB` when set (a test's own file, or `:memory:`). Otherwise `.ui-calling/ui-calling.db` in production,
+ * and in development `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database
+ * inside it reloads the page on every event the screen records, so the screen never finishes loading. Dev servers
+ * ignore `node_modules`.
  */
 function DEFAULT_PATH() {
+  if (process.env.UI_CALLING_DB) return process.env.UI_CALLING_DB;
   return process.env.NODE_ENV === "production" ? ".ui-calling/ui-calling.db" : "node_modules/.cache/ui-calling/ui-calling.db";
 }
 

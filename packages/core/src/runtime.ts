@@ -40,7 +40,17 @@ export type SurfaceContext<S extends AnySurface = AnySurface> = {
   files: (ids?: string[]) => Promise<UiFileRef[]>;
   /** Run `resolve` again with the link's input: a handler returns `ctx.resolve()` instead of rebuilding `data` by hand. */
   resolve: () => Promise<SurfaceData<S>>;
+  /**
+   * Nothing happened, e.g. a double tap on a step already submitted: `return ctx.unchanged()`. The event isn't
+   * recorded and doesn't wake the agent; the screen gets `data` (or `resolve`'s, when you pass none).
+   */
+  unchanged: (data?: SurfaceData<S>) => Unchanged<S>;
 };
+
+const UNCHANGED = Symbol("ui-calling.unchanged");
+/** What `ctx.unchanged()` returns: a handler's way to say the event changed nothing. */
+export type Unchanged<S extends AnySurface = AnySurface> = { readonly [UNCHANGED]: true; data?: SurfaceData<S> };
+const isUnchanged = (v: unknown): v is Unchanged => typeof v === "object" && v !== null && UNCHANGED in v;
 
 /** Added to every surface's tool schema so the screen speaks the conversation's language. */
 const LOCALE = z
@@ -75,7 +85,7 @@ export type SurfaceImpl<S extends AnySurface = AnySurface> = {
     [K in SurfaceEventName<S>]?: (
       payload: SurfaceEventPayload<S, K>,
       ctx: SurfaceContext<S>,
-    ) => Promise<SurfaceData<S> | void>;
+    ) => Promise<SurfaceData<S> | Unchanged<S> | void>;
   };
 };
 
@@ -275,6 +285,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         return found.filter((f): f is UiFile => Boolean(f)).map(fileRef);
       },
       resolve: () => impls.get(session.surface)!.resolve(session.input as never, ctx),
+      unchanged: (data) => ({ [UNCHANGED]: true, data }) as Unchanged,
     };
     return ctx;
   }
@@ -598,6 +609,10 @@ export function createUiCalling(opts: UiCallingOptions) {
             : new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code),
           session,
         );
+      }
+      // The handler said nothing happened (a repeat): no event, no wake, just the screen's current data.
+      if (isUnchanged(data)) {
+        return { event: undefined, data: data.data ?? (await ctxOf(session).resolve().catch(() => undefined)) };
       }
       const event = await record(session, {
         type,

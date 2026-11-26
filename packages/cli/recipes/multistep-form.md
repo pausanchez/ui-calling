@@ -40,7 +40,7 @@ export const claim = defineSurface({
 
 ## Server
 
-Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and submits once even on a double tap.
+Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and on a double tap returns `ctx.unchanged()`: no second event, so the agent hears one submission.
 
 ```ts
 // Your drafts table, in the store `init` wrote (store.ts): store.db is a node:sqlite DatabaseSync. The steps
@@ -68,7 +68,7 @@ export const claimImpl = implement(claim, {
     choice_saved: async ({ choice }, ctx) => save(ctx.input.id, ctx.subject, { choice }, "review"),
     submitted: async (_p, ctx) => {
       const d = load(ctx.input.id, ctx.subject);
-      if (d.submitted) return d; // a double tap submits once
+      if (d.submitted) return ctx.unchanged(d); // a double tap: no second event, no second wake
       if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing", { refused: true });
       return submitClaim(d); // your system; throw SurfaceError(..., { retryable: true }) if it fails
     },

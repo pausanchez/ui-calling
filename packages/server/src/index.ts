@@ -67,7 +67,10 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     });
     app.get("/dev/events/:conversationId", async (c) => {
       const timeZone = c.req.query("timeZone");
-      return c.text(formatEventsForAgent(await ui.events(c.req.param("conversationId")), timeZone ? { timeZone } : {}) || "(no events yet)");
+      // ?hide=left,returned leaves out event types, as an agent usually does with tab switches.
+      const hide = new Set((c.req.query("hide") ?? "").split(",").filter(Boolean));
+      const events = (await ui.events(c.req.param("conversationId"))).filter((e) => !hide.has(e.type));
+      return c.text(formatEventsForAgent(events, timeZone ? { timeZone } : {}) || "(no events yet)");
     });
   }
 
@@ -79,7 +82,8 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     const body = await c.req.json<{ type?: string; payload?: unknown }>().catch(() => ({}) as { type?: string; payload?: unknown });
     if (!body.type) return c.json({ error: "invalid_payload", message: "Missing event type" }, 400);
     const { event, data } = await ui.emit(c.req.param("token"), body.type, body.payload);
-    return c.json({ event: { id: event.id, type: event.type }, data });
+    // No event when the handler returned ctx.unchanged(): a repeat that changed nothing.
+    return c.json({ event: event ? { id: event.id, type: event.type } : null, data });
     },
   );
 
