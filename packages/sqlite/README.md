@@ -10,4 +10,4 @@ createUiCalling({ store, ... });
 store.db; // the DatabaseSync: keep your own tables next to UI_calling's
 ```
 
-`sqliteIdentity(store)` links a chat user to your customer or employee record with one-time codes (used by the `link-account` block). On hosts without a lasting disk, implement `UiStore` for your database.
+`UI_CALLING_DB` overrides the default path (a test's own file, or `:memory:`). `sqliteIdentity(store)` links a chat user to your customer or employee record with one-time codes (used by the `link-account` block). On hosts without a lasting disk, implement `UiStore` for your database.

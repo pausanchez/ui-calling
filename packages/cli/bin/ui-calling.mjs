@@ -43,7 +43,7 @@ const replace = rest.includes("--replace");
 const outDir = flag("--dir") ? resolve(flag("--dir")) : (config?.surfacesDir ?? resolve(root, "src/components/ui-calling"));
 const serverDir = flag("--server-dir") ? resolve(flag("--server-dir")) : flag("--dir") ? outDir : (config?.serverDir ?? outDir);
 
-/** A monorepo root that isn't itself a Next.js or Vite app. */
+/** A monorepo root that isn't itself an app. */
 function isWorkspaceRoot(dir) {
   if (!existsSync(join(dir, "package.json"))) return false;
   const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
@@ -504,7 +504,7 @@ async function devCommand(which) {
       process.exit(1);
     }
     if (res.status === 404 && !path.startsWith("/dev/links")) {
-      console.error(`${base}${path} isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js).`);
+      console.error(`${base}${path} isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js, Vite and React Router).`);
       process.exit(1);
     }
     return res;
@@ -547,7 +547,7 @@ async function devCommand(which) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ surface: surface.replaceAll("-", "_"), input, subject, conversationId, locale: flag("--locale") }),
   });
-  const json = await res.json().catch(() => ({ message: `${base}/dev/links isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js).` }));
+  const json = await res.json().catch(() => ({ message: `${base}/dev/links isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js, Vite and React Router).` }));
   if (!res.ok) {
     // A refusal from resolve: say which, and the usual cause (the test user isn't linked to anyone yet).
     if (json.error && json.error !== "unknown_surface" && json.error !== "invalid_payload" && res.status === 422) {
