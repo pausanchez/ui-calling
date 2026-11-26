@@ -133,7 +133,7 @@ export type UiCallingOptions = {
   /**
    * How links reach the user, which changes what `runTool` tells the model:
    * - "button" (default): your channel attaches the link as a button (e.g. a WhatsApp CTA), so the model never sees the URL.
-   * - "message": the model gets the URL and is told to include it in its reply (web chat, SMS…).
+   * - "message": the model gets the URL and is told to include it in its reply. For channels you can't attach a button to (MCP clients, SMS); in a web chat you render, use "button".
    */
   deliverLinks?: "button" | "message";
   /** Events one link may record before the screen gets 429s. Default 500. */

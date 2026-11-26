@@ -1,6 +1,6 @@
 # @ui-calling/sqlite
 
-Sessions, events and uploaded files in a SQLite file, on Node's built-in `node:sqlite` (Node 22.5+): nothing to install or run. Links and the agent's context survive restarts.
+Sessions, events and uploaded files in a SQLite file, on Node's built-in `node:sqlite` (Node 22.13+): nothing to install or run. Links and the agent's context survive restarts.
 
 ```ts
 import { sqliteStore, sqliteIdentity } from "@ui-calling/sqlite";

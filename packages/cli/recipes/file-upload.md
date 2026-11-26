@@ -87,7 +87,6 @@ By hand: `upload("photos", file)` returns `{ id, name, type, size }` or throws `
 
 Not in the package; for reading if you have the repo.
 
-
 - Contract and handler: [`order-return.surface.ts`](../../../apps/demo/src/components/ui-calling/order-return.surface.ts), [`order-return.server.ts`](../../../apps/demo/server/order-return.server.ts)
 - Screen: the photos step in [`order-return.tsx`](../../../apps/demo/src/components/ui-calling/order-return.tsx)
 - Proof: "photos upload through the link" in [`smoke.ts`](../../../apps/demo/server/smoke.ts), and the file checks in [`test-runtime.ts`](../../../scripts/test-runtime.ts)

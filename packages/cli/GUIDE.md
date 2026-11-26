@@ -89,9 +89,9 @@ Mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} 
 
 Options: `--deliver message` (the model writes the link in its reply; for MCP and plain-text channels), `--dir`, `--server-dir`, `--framework`, `--base-url` (your dev address; also saved as `devUrl` for `link` and `events`). To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
 
-On Next.js, set `UI_CALLING_RETURN_URL` (e.g. `https://wa.me/<business number>`) so screens show "Back to chat". Without it they show "Finish", which also calls `complete()`. Set `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise it shows your layout's title.
+Screens show "Back to chat" when they know where the chat is (e.g. `https://wa.me/<business number>`, or your web chat's page), and "Finish" otherwise, which also calls `complete()`. On Next.js, set `UI_CALLING_RETURN_URL`, and `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise the tab shows your layout's title. On Vite, pass `returnUrl` to `<SurfaceScreen>` in `surface-route.tsx`.
 
-Ready-made blocks: `npx ui-calling list`, then `npx ui-calling add order-status`. `add` copies the contract and the screen, and writes `order-status.server.ts` with example data so the screen renders right away. Replace the example with your data. Running `add --force` later updates the contract and screen but never overwrites the server file.
+Ready-made blocks: `npx ui-calling list`, then `npx ui-calling add order-status`. `add` copies the contract and the screen, and writes `order-status.server.ts` with example data so the screen renders right away. Replace the example with your data. Running `add --force` later updates the contract and screen but never overwrites the server file; `add --replace` rewrites all three, to swap a screen of your own for the block.
 
 What the generated files amount to, if you'd rather write it by hand:
 
@@ -519,6 +519,8 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `describeError` | generic `unexpected` | Turns unexpected errors into `{ code, message, retryable }` for the agent; by default the real error is only logged. `SurfaceError`s pass as they are |
 | `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
 | `maxEventsPerSession` | `500` | Events one link may record; after that the screen gets 429 |
+| `maxWakesPerMinute` | `6` | `wake: true` events one link may send per minute before they're recorded quietly, so a script holding a link can't run up agent turns |
+| `deviceClaimGraceMs` | `5000` | For `bindToDevice`: how long after the first open a request without the cookie still gets it (pages often load twice at once) |
 
 ### The runtime
 
@@ -526,7 +528,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 |---|---|
 | `ui.tools()` | Tool definitions with JSON Schema, one per surface |
 | `ui.isUiTool(name)` | Whether a tool name belongs to UI_calling |
-| `ui.runTool(name, input, who)` | `{ ok: true, content, link, summary }` or `{ ok: false, content, error }`; never throws for bad input |
+| `ui.runTool(name, input, who, filter?)` | `{ ok: true, content, link, summary }` or `{ ok: false, content, error }`; never throws for bad input. With `filter`, a tool it excludes is refused, even if the model calls it by name |
 | `ui.call(name, input, who)` | `{ url, sessionId, surface, locale, ctaLabel, expiresAt, summary }`; throws on bad input |
 | `ui.events(conversationId, { after?, limit? })` | The conversation's events, oldest first; with `after` (an event ID), only newer ones. Throws `UnknownEventError` for an unknown `after` |
 | `ui.onEvent(handler)` | Get every event from code that imports `ui` (your agent module), like the `onEvent` option. Returns an unsubscribe function |
@@ -572,7 +574,7 @@ type UiEvent = {
 | `left` | The tab is hidden or closed | No |
 | `returned` | The user comes back to a screen they'd left | No |
 | `completed` | `complete()` is called; the link closes | No |
-| `abandoned` | No event with `wake: true` (and no failed action) by `abandonAfterMs` after the last activity; names the last step saved, if any. Off unless set | Yes |
+| `abandoned` | No event with `wake: true` (and no failed action that woke the agent) by `abandonAfterMs` after the last activity; names the last step saved, if any. A refused action doesn't count as finishing. Off unless set | Yes |
 | `error` | `resolve`, a handler, `reportError` or a render crash failed | First of each kind |
 
 ### React
@@ -603,12 +605,12 @@ Errors are `{ error, message, retryable, reason }`. Once the link is known (`exp
 
 | Status | `error` | Meaning |
 |---|---|---|
-| 400 | `invalid_payload`, `unknown_event` | The body didn't match the contract |
+| 400 | `invalid_payload`, `unknown_event` | The body didn't match the contract (for `POST /dev/links`, also `unknown_surface`) |
 | 400 | `invalid_file` | An upload was refused; `reason` says why (`file_too_large`, `file_type_not_allowed`, `too_many_files`…) |
 | 404 | `not_found` | No such link |
 | 410 | `expired`, `completed` | The link ran out, or the user already finished |
-| 413 | `payload_too_large`, `invalid_file` | The event body is over 64 KB, or an upload is bigger than any slot accepts |
 | 403 | `other_device` | A `bindToDevice` link was already opened on another device |
+| 413 | `payload_too_large`, `invalid_file` | The event body is over 64 KB, or an upload is bigger than any slot accepts |
 | 422 | `refused` | A handler or `resolve` threw `SurfaceError(..., { refused: true })`: a business refusal, not an outage; `reason` is its code |
 | 429 | `too_many_events` | The link reached `maxEventsPerSession` |
 | 502 | `upstream_error` | `resolve` or a handler threw; `reason` is your `SurfaceError` code |
