@@ -75,7 +75,7 @@ export const __const__Impl = implement(__const__, {
     submitted: async (_p, ctx) => {
       const id = ctx.input.id;
       const d = load(id, ctx.subject);
-      if (d.submitted) return d; // a double tap submits once
+      if (d.submitted) return ctx.unchanged(d); // a double tap: no second event, no second wake
       if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing", { refused: true });
       // TODO: do the real thing here. Throw SurfaceError(code, message, { retryable: true }) if a system behind it fails.
       writeDraft(`${ctx.subject}:${id}`, { draft: d.draft, submitted: { reference: `R-${Math.floor(1000 + Math.random() * 9000)}` } });

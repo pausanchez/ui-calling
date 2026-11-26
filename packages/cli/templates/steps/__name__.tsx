@@ -30,6 +30,8 @@ const __MESSAGES__ = {
     errors: { details_missing: "Write a few words first.", unknown_choice: "That option isn't available any more." } as Record<string, string>,
     unavailable: "This page isn't available right now",
     unavailableBody: "Your assistant already knows and will follow up in the chat.",
+    refused: "This page can't be shown",
+    refusedBody: "Go back to the chat: your assistant can help.",
     expired: "This link has expired",
     otherDevice: "This link was already opened on another device",
     loadError: "We couldn't load this page",
@@ -55,6 +57,8 @@ const __MESSAGES__ = {
     errors: { details_missing: "Escribe unas palabras primero.", unknown_choice: "Esa opción ya no está disponible." } as Record<string, string>,
     unavailable: "Esta página no está disponible ahora mismo",
     unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
+    refused: "Esta página no se puede mostrar",
+    refusedBody: "Vuelve al chat: tu asistente te ayuda.",
     expired: "Este enlace ha caducado",
     otherDevice: "Este enlace ya se abrió en otro dispositivo",
     loadError: "No hemos podido cargar esta página",
@@ -73,14 +77,17 @@ export function __Component__({ messages }: { messages?: Partial<__Component__Me
 
   if (status === "loading") return <Shell><Skeleton /></Shell>;
   if (status !== "ready" || !data) {
-    // upstream_error: your data source failed and the agent was told, so send the user back to the chat.
+    // upstream_error: your data source failed and the agent was told. refused: resolve said no; `errorReason` from
+    // useSurface() is its SurfaceError code (e.g. "account_not_linked") if one deserves a message of its own.
+    // Both send the user back to the chat.
     const upstream = errorCode === "upstream_error";
+    const refused = errorCode === "refused";
     return (
       <Shell>
         <Card>
-          <p className="font-medium">{status === "expired" ? t.expired : errorCode === "other_device" ? t.otherDevice : upstream ? t.unavailable : t.loadError}</p>
-          <p className="mt-1 text-sm text-muted-foreground">{upstream ? t.unavailableBody : t.askNewLink}</p>
-          {upstream && returnUrl && <a href={returnUrl} className={btn("outline", "mt-3 w-full")}>{t.backToChat}</a>}
+          <p className="font-medium">{status === "expired" ? t.expired : errorCode === "other_device" ? t.otherDevice : refused ? t.refused : upstream ? t.unavailable : t.loadError}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{refused ? t.refusedBody : upstream ? t.unavailableBody : t.askNewLink}</p>
+          {(upstream || refused) && returnUrl && <a href={returnUrl} className={btn("outline", "mt-3 w-full")}>{t.backToChat}</a>}
         </Card>
       </Shell>
     );

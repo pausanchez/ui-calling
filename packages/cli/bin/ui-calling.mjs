@@ -283,6 +283,50 @@ function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg }) {
   }
 }
 
+/**
+ * React Router 7 (framework mode) has its own server: the API is a resource route with uiCallingHandler, and the
+ * screen is a route of its own. routes.ts gets both when it has create-react-router's shape.
+ */
+function setUpReactRouter({ runtime, screen, done, todo }) {
+  const api = "app/routes/api.ui.ts";
+  const page = "app/routes/s.$token.tsx";
+  write(api, fill("rr-api-route.ts", { __UI_IMPORT__: importPath(api, runtime) }));
+  write(page, fill("rr-surface-page.tsx", { __SCREEN_IMPORT__: importPath(page, screen) }));
+  const entries = `  // UI_calling: its API (uiCallingHandler) and the screen a link opens.\n  route("api/ui/*", "routes/api.ui.ts"),\n  route("s/:token", "routes/s.$token.tsx"),\n`;
+  const file = ["app/routes.ts", "app/routes.tsx"].find((f) => existsSync(f));
+  const r = file && readFileSync(file, "utf8");
+  // create-react-router's shape: `export default [index("routes/home.tsx")] satisfies RouteConfig;` (on one line or
+  // several), importing from @react-router/dev/routes.
+  const opening = r?.match(/export default \[\n?/);
+  const imports = r?.match(/import \{([^}]*)\} from "@react-router\/dev\/routes";/);
+  if (r && !r.includes("api/ui") && opening && imports) {
+    const names = imports[1].split(",").map((n) => n.trim()).filter(Boolean);
+    const withRoute = names.includes("route") ? r : r.replace(imports[0], `import { ${[...names, "route"].join(", ")} } from "@react-router/dev/routes";`);
+    writeFileSync(file, withRoute.replace(opening[0], `export default [\n${entries}${opening[0].endsWith("\n") ? "" : "  "}`));
+    console.log(`  update ${file}`);
+    done.push(`API at /api/ui (${api}) and screens at /s/:token (${page})`);
+  } else if (!r?.includes("api/ui")) {
+    todo.push(`In app/routes.ts, add route("api/ui/*", "routes/api.ui.ts") and route("s/:token", "routes/s.$token.tsx").`);
+  }
+  // React Router doesn't put .env in process.env for server code (Vite only exposes VITE_* to the browser).
+  const u = readFileSync(runtime, "utf8");
+  const lastImport = [...u.matchAll(/^import .*$/gm)].at(-1);
+  if (lastImport && !u.includes("loadEnvFile")) {
+    const at = lastImport.index + lastImport[0].length;
+    const load = `\n\n// React Router doesn't put .env in process.env for server code: load it here. Production sets real variables.\ntry {\n  process.loadEnvFile();\n} catch {\n  // no .env file\n}`;
+    writeFileSync(runtime, u.slice(0, at) + load + u.slice(at));
+    done.push(`.env loaded in ${runtime}`);
+  }
+}
+
+/** Frameworks built on Vite that bring their own server: Vite's setup (a Hono API and a proxy) would be wrong there. */
+const OWN_SERVER = { "@remix-run/dev": "Remix", "@tanstack/react-start": "TanStack Start", "@sveltejs/kit": "SvelteKit", astro: "Astro", nuxt: "Nuxt", "vike": "Vike" };
+
+/** The port in the dev script (`--port 5320`, `-p 3001`), if it names one. */
+function devScriptPort(pkg) {
+  return pkg.scripts?.dev?.match(/(?:--port|-p)[ =](\d{2,5})\b/)?.[1];
+}
+
 function init() {
   if (!existsSync("package.json")) {
     console.error("No package.json here. Run `npx ui-calling init` in your project's root.");
@@ -294,9 +338,14 @@ function init() {
     console.error("This is a monorepo root. Run `npx ui-calling init` in the app that serves your screens (e.g. apps/web), or pass --force.");
     process.exit(1);
   }
-  const framework = flag("--framework", deps.next ? "next" : deps.vite ? "vite" : "other");
+  const ownServer = Object.keys(OWN_SERVER).find((d) => deps[d]);
+  const framework = flag("--framework", deps.next ? "next" : deps["@react-router/dev"] ? "react-router" : ownServer ? "other" : deps.vite ? "vite" : "other");
+  if (!["next", "vite", "react-router", "other"].includes(framework)) {
+    console.error(`--framework is next, vite, react-router or other, not "${framework}".`);
+    process.exit(1);
+  }
   const src = existsSync("src");
-  const lib = flag("--dir", raw?.surfacesDir ?? (src ? "src/ui-calling" : "ui-calling"));
+  const lib = flag("--dir", raw?.surfacesDir ?? (framework === "react-router" ? "app/ui-calling" : src ? "src/ui-calling" : "ui-calling"));
   if (raw && relative(raw.surfacesDir, lib) !== "" && !force) {
     // `new` registers in the files the config points at: two setups would leave one of them unused.
     console.error(`Already set up in ${raw.surfacesDir} (see ${CONFIG_FILE}). To move it, move those files and edit ${CONFIG_FILE}, or pass --force to set up again in ${lib}.`);
@@ -308,7 +357,8 @@ function init() {
   const serverLib = flag("--server-dir", raw?.serverDir ?? (framework === "next" ? lib : "server"));
   const runtime = join(serverLib, "ui.ts");
   const screen = join(lib, "surface-screen.tsx");
-  console.log(`Setting up UI_calling for ${framework === "other" ? "your project" : framework === "next" ? "Next.js" : "Vite"}\n`);
+  const label = { next: "Next.js", vite: "Vite", "react-router": "React Router" }[framework] ?? (ownServer && !flag("--framework") ? `${OWN_SERVER[ownServer]} (its own server: the API is yours to mount)` : "your project");
+  console.log(`Setting up UI_calling for ${label}\n`);
 
   // Flags become string literals in ui.ts: escape them, so a quote can't break the file.
   const literal = (v) => JSON.stringify(String(v)).slice(1, -1);
@@ -316,8 +366,12 @@ function init() {
     console.error(`--deliver is "button" or "message", not "${deliver}".`);
     process.exit(1);
   }
-  const devUrl = flag("--base-url", raw?.devUrl ?? (framework === "vite" ? "http://localhost:5173" : "http://localhost:3000"));
-  write(runtime, fill("ui.ts", { __BASE_URL__: literal(devUrl), __DELIVER__: deliver }));
+  // Your dev address: --base-url, else the port in your dev script, else the framework's default.
+  const guessedPort = devScriptPort(pkg) ?? (framework === "vite" || framework === "react-router" ? "5173" : "3000");
+  const devUrl = flag("--base-url", raw?.devUrl ?? `http://localhost:${guessedPort}`);
+  // The zone times are written in for the agent: --time-zone, else this machine's (usually the business's).
+  const timeZone = flag("--time-zone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  write(runtime, fill("ui.ts", { __BASE_URL__: literal(devUrl), __DELIVER__: deliver, __TIME_ZONE__: literal(timeZone) }));
   // "use client" is a Next.js directive: elsewhere it only reads as if this were Next-only.
   write(screen, framework === "next" ? fill("surface-screen.tsx", {}) : fill("surface-screen.tsx", {}).replace(/^"use client";\n/, ""));
   // Next's dev server watches the project, so its development database lives in node_modules/.cache; elsewhere
@@ -329,7 +383,7 @@ function init() {
       ? storeCode
       : storeCode
           .replace("or node_modules/.cache/ui-calling/ in development, where the\n * dev server doesn't watch it.", "or .ui-calling/dev.db in development.")
-          .replace("sqliteStore();", `sqliteStore(process.env.NODE_ENV === "production" ? undefined : ".ui-calling/dev.db");`),
+          .replace("sqliteStore();", `sqliteStore(process.env.UI_CALLING_DB ?? (process.env.NODE_ENV === "production" ? undefined : ".ui-calling/dev.db"));`),
   );
   write(join(lib, "tokens.css"), readFileSync(join(registryDir, registry.tokens)));
 
@@ -345,6 +399,11 @@ function init() {
   }
   const todo = [];
   if (framework === "vite") setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg });
+  if (framework === "react-router") setUpReactRouter({ runtime, screen, done, todo });
+  done.push(`times for the agent in ${timeZone} (timeZone in ${runtime}; --time-zone to change)`);
+  if (framework === "other" && !flag("--base-url") && !raw?.devUrl) {
+    todo.push(`Links and \`ui-calling link\` assume your dev server is at ${devUrl}. If it isn't, run init again with --base-url http://localhost:<port> --force, or edit devUrl in ${CONFIG_FILE} and baseUrl in ${runtime}.`);
+  }
 
   writeFileSync(CONFIG_FILE, JSON.stringify({ framework, runtime, screen, surfacesDir: lib, serverDir: serverLib, devUrl }, null, 2) + "\n");
   console.log(`  write  ${CONFIG_FILE}`);
@@ -366,10 +425,11 @@ function init() {
 
   // Without the tokens, the screens' classes (bg-primary, text-muted-foreground...) style nothing.
   const tokensFile = join(lib, "tokens.css");
-  const css = ["src/app/globals.css", "app/globals.css", "src/index.css", "src/styles.css", "src/globals.css", "styles/globals.css", "src/App.css"].find(
-    (f) => existsSync(f) && /@import\s+["']tailwindcss["']/.test(readFileSync(f, "utf8")),
-  );
-  let tokensStep = `Import the design tokens after Tailwind in your global CSS: @import "<path to>/${tokensFile}";`;
+  // The usual places first, then any CSS file directly in src/, app/ or styles/ that imports Tailwind.
+  const known = ["src/app/globals.css", "app/globals.css", "app/app.css", "app/tailwind.css", "src/index.css", "src/styles.css", "src/globals.css", "styles/globals.css", "src/App.css"];
+  const nearby = ["src", "app", "styles"].flatMap((d) => (existsSync(d) ? readdirSync(d).filter((f) => f.endsWith(".css")).map((f) => join(d, f)) : []));
+  const css = [...known, ...nearby].find((f) => existsSync(f) && /@import\s+["']tailwindcss["']/.test(readFileSync(f, "utf8")));
+  let tokensStep = `Import the design tokens after Tailwind in your global CSS: @import "<the path from that CSS file to ${tokensFile}>";`;
   if (css) {
     let s = readFileSync(css, "utf8");
     const rel = importPath(css, tokensFile);
@@ -385,7 +445,11 @@ function init() {
     } else done.push(`tokens imported in ${css}`);
     // create-vite's starter page styles bare elements (#root, h1, p…) outside Tailwind's layers, so they win on the
     // screens too: a centered, oversized title.
-    if (/^(#root|h1|h2|p|body)\s*\{/m.test(s)) {
+    // A starter's page colours on html/body (React Router's bg-white dark:bg-gray-950) paint over --background.
+    if (/(html|body)[^{]*\{[^}]*@apply[^}]*\bbg-(?!background\b)/.test(s)) {
+      todo.push(`${css} sets its own background on html/body (@apply bg-…): use bg-background text-foreground there, so the screens get your tokens.`);
+    }
+    if (framework === "vite" && /^(#root|h1|h2|p|body)\s*\{/m.test(s)) {
       todo.push(`${css} still has starter styles for #root, h1, p…, which also style the screens. Remove them when you replace the starter page.`);
     }
   }
@@ -409,7 +473,7 @@ function init() {
   if (framework === "other") {
     steps.push(
       `Serve the API: mount uiCallingHandler(ui) from "@ui-calling/server" at /api/ui on your server (any framework that takes (Request) => Response; for Hono/Express-style apps, uiCallingRoutes(ui)).`,
-      `Route /s/:token in your app to <SurfaceScreen token={token} /> from ${screen}.`,
+      `Route /s/:token in your app to <SurfaceScreen token={token} /> from ${screen}, with Referrer-Policy: no-referrer on that page.`,
     );
   }
   steps.push(
@@ -425,7 +489,7 @@ function init() {
  */
 async function devCommand(which) {
   // Where the app runs: --url, else ui-calling.json's devUrl (init writes it), else the framework's default port.
-  const fallback = config?.devUrl ?? `http://localhost:${config?.framework === "vite" ? 5173 : 3000}`;
+  const fallback = config?.devUrl ?? `http://localhost:${config?.framework === "vite" || config?.framework === "react-router" ? 5173 : 3000}`;
   const from = flag("--url") ? "--url" : config?.devUrl ? `devUrl in ${CONFIG_FILE}` : "the default";
   // --url can be the app (http://localhost:3100) or its API (http://localhost:3100/api/ui).
   const given = new URL(flag("--url", fallback));
@@ -447,8 +511,10 @@ async function devCommand(which) {
   };
   if (which === "events") {
     // Same clock as your agent: pass the zone you give formatEventsForAgent (e.g. --time-zone Europe/Madrid).
+    // Tab switches (left, returned) are noise to an agent, which usually filters them: --all shows them too.
     const tz = flag("--time-zone");
-    const res = await reach(`/dev/events/${encodeURIComponent(conversationId)}${tz ? `?timeZone=${encodeURIComponent(tz)}` : ""}`);
+    const query = new URLSearchParams({ ...(tz ? { timeZone: tz } : {}), ...(rest.includes("--all") ? {} : { hide: "left,returned" }) });
+    const res = await reach(`/dev/events/${encodeURIComponent(conversationId)}?${query}`);
     process.stdout.write((await res.text()) + "\n");
     return;
   }
@@ -457,12 +523,23 @@ async function devCommand(which) {
     console.error("Usage: ui-calling link <surface> [key=value...] [--subject id] [--conversation id] [--locale es] [--url http://localhost:3000]");
     process.exit(1);
   }
-  // key=value pairs become the tool input; numbers and true/false keep their type.
+  // key=value pairs become the tool input. Values that read as JSON keep their type: numbers, true/false, and
+  // arrays or objects (faulty='["door_seal"]'); anything else is a string.
+  const asValue = (value) => {
+    if (/^(-?\d+(\.\d+)?|true|false|null)$/.test(value) || /^[[{"]/.test(value)) {
+      try {
+        return JSON.parse(value);
+      } catch {
+        console.error(`Couldn't read ${value} as JSON. Quote it for your shell: key='["a","b"]'`);
+        process.exit(1);
+      }
+    }
+    return value;
+  };
   const input = Object.fromEntries(
     pairs.map((p) => {
       const [k, ...v] = p.split("=");
-      const value = v.join("=");
-      return [k, /^-?\d+(\.\d+)?$/.test(value) ? Number(value) : value === "true" ? true : value === "false" ? false : value];
+      return [k, asValue(v.join("="))];
     }),
   );
   const res = await reach("/dev/links", {
@@ -496,7 +573,7 @@ function repoLinks(md) {
   return md.replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui_calling/blob/main/${posix.normalize(posix.join("packages/cli/recipes", rel))})`);
 }
 
-// `<command> --help` shows the usage instead of running the command.
+// `<command> --help` shows that command's usage instead of running it.
 switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
   case "init":
     init();
@@ -583,7 +660,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
     break;
   case "whatsapp": {
     const { whatsapp } = await import("./whatsapp.mjs");
-    await whatsapp(names[0], { flag, devCommand: passThrough, defaultPort: config?.framework === "vite" ? "5173" : "3000" });
+    await whatsapp(names[0], { flag, devCommand: passThrough, defaultPort: config?.devUrl ? new URL(config.devUrl).port || "80" : config?.framework === "vite" || config?.framework === "react-router" ? "5173" : "3000" });
     break;
   }
   case "link":
@@ -622,13 +699,14 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
     }
     break;
   }
-  default:
-    console.log(`ui-calling <command>
+  default: {
+    const help = `ui-calling <command>
 
-  init              set up UI_calling in this project (detects Next.js or Vite)
-                    --dir (default src/ui-calling or ui-calling), --server-dir (default: the same
-                    for Next.js, server/ otherwise), --deliver button|message,
-                    --framework next|vite|other, --base-url (your dev address, e.g. http://localhost:5173)
+  init              set up UI_calling in this project (detects Next.js, Vite or React Router)
+                    --dir (default src/ui-calling, app/ui-calling or ui-calling), --server-dir
+                    (default: the same for Next.js, server/ otherwise), --deliver button|message,
+                    --framework next|vite|react-router|other, --base-url (your dev address, e.g.
+                    http://localhost:5173), --time-zone (default: this machine's, e.g. Europe/Madrid)
   new <name>        scaffold a surface (contract, screen, server) and register it
                     --template steps: a screen with several steps, a saved draft and Back
                     --dir, --server-dir (default: from ui-calling.json)
@@ -640,15 +718,29 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
   tokens            copy the design tokens only
   link <surface> [key=value...]
                     open a screen for a test user on your running dev server and print its link,
-                    e.g. link order-return order_id=A-0987. The test user's subject is
-                    dev-user unless you pass --subject. --url is your app (http://localhost:3100)
-                    or its API; --conversation puts the screen in your agent's conversation
+                    e.g. link order-return order_id=A-0987; JSON values keep their type
+                    (items='["A","B"]'). The test user's subject is dev-user unless you pass
+                    --subject. --locale es, --url is your app (http://localhost:3100) or its API;
+                    --conversation puts the screen in your agent's conversation
   events            print what the agent would read from that test user's screens
-                    (--subject, --conversation, --url, --time-zone Europe/Madrid)
+                    (--subject, --conversation, --url, --time-zone Europe/Madrid; --all keeps
+                    the left/returned tab switches, hidden by default)
   whatsapp check    is the WhatsApp setup right? (token, where Meta delivers; --url, --webhook-path)
   whatsapp dev      tunnel + your dev server with PUBLIC_URL + point Meta's webhook there
                     (--port 3000, --webhook-path /api/whatsapp/webhook, -- your dev command)
   guide             print the guide for building surfaces (for people and coding agents)
   guide toc         list its sections and the recipes; "guide <section>" prints one section
-                    (a word is enough: guide vite, guide testing), "guide <recipe>" one recipe`);
+                    (a word is enough: guide vite, guide testing), "guide <recipe>" one recipe`;
+    // `init --help`: only that command's lines (a command starts at two spaces of indent; its options at more).
+    const lines = help.split("\n");
+    const start = cmd && cmd !== "help" ? lines.findIndex((l) => l.startsWith(`  ${cmd} `) || l === `  ${cmd}`) : -1;
+    if (start === -1) console.log(help);
+    else {
+      let end = start + 1;
+      while (end < lines.length && /^ {3,}/.test(lines[end])) end++;
+      // `whatsapp` and `guide` have two entries each.
+      while (end < lines.length && lines[end].startsWith(`  ${cmd} `)) for (end++; end < lines.length && /^ {3,}/.test(lines[end]); end++);
+      console.log(`ui-calling ${cmd}\n\n${lines.slice(start, end).join("\n")}\n\nAll commands: npx ui-calling help`);
+    }
+  }
 }

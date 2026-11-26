@@ -82,7 +82,7 @@ export const orderReturnImpl = implement(orderReturn, {
     return_submitted: async (_p, ctx) => {
       const orderId = ctx.input.order_id;
       const r = getReturn(orderId, ctx.subject);
-      if (r.submitted) return withUploads(r, ctx);
+      if (r.submitted) return ctx.unchanged(await withUploads(r, ctx)); // a double tap: the agent hears one submission
       if (!r.draft.lines.length || r.draft.lines.some((l) => !l.reason) || !r.draft.refund || !r.draft.pickup) {
         throw new SurfaceError("return_incomplete", "The return is missing items, reasons, refund or pickup", { refused: true });
       }

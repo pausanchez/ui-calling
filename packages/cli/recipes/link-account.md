@@ -24,6 +24,14 @@ if (process.env.NODE_ENV !== "production") identity.link("dev-user", "C-1001");
 2. If Meta shared a phone number that matches a customer, link by phone and skip the screen: `identity.link(subject, customer.id)`.
 3. Otherwise the agent only gets one tool, `show_link_account`, until the chat is linked. The adapters take a filter: `anthropicTools(ui, (name) => (name === "show_link_account") !== linked)`. Pass the same filter when you run a tool call (`anthropicToolResult(ui, block, who, filter)`), so a tool the model wasn't offered is refused.
 4. Every other surface checks the link before loading anything.
+5. The system prompt says what's true now, in words that agree with the history. Built every turn, it changes once the code is entered, but the conversation still holds the verification the agent asked for. Write the after-state so both read right:
+
+   ```text
+   Before: This chat isn't verified yet. You only have show_link_account: open it before anything personal, with what they asked for in continue_with.
+   After:  This chat is verified as Sam Taylor (C-1001), through the verification screen earlier in this conversation (it was needed).
+   ```
+
+   Without the last part, a model that reads "verified" may apologise for having asked.
 
 ## The identity helper
 
@@ -34,7 +42,8 @@ import { identity } from "./identity";
 
 resolve: async ({ shift_id }, ctx) => {
   const employeeId = identity.customerFor(ctx.subject);
-  if (!employeeId) throw new SurfaceError("account_not_linked", "This chat isn't linked to an employee yet");
+  // refused: it isn't an outage, so the screen gets 422 with errorReason "account_not_linked", not a 502.
+  if (!employeeId) throw new SurfaceError("account_not_linked", "This chat isn't linked to an employee yet", { refused: true });
   return loadShift(shift_id, employeeId); // only this employee's shifts
 },
 ```

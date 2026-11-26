@@ -159,6 +159,38 @@ try {
   assert.match(fails(vite, "add", "link-account", "--identifier", "fax"), /email, tel, text/);
   console.log("generated  init-vite (+2 surfaces, +1 block)");
 
+  // React Router 7 builds on Vite but has its own server: two routes, no Hono, no proxy.
+  const rr = project("init-react-router", { scripts: { dev: "react-router dev --port 5320" }, dependencies: { "react-router": "7" }, devDependencies: { "@react-router/dev": "7", vite: "7" } }, ["app/routes/+types"], {
+    "app/routes.ts": 'import { type RouteConfig, index } from "@react-router/dev/routes";\n\nexport default [index("routes/home.tsx")] satisfies RouteConfig;\n',
+    "app/app.css": '@import "tailwindcss";\n\nhtml,\nbody {\n  @apply bg-white dark:bg-gray-950;\n}\n',
+    // What `react-router typegen` would generate for the two routes, so the typecheck below covers them.
+    "app/routes/+types/api.ui.ts": "export namespace Route {\n  export type LoaderArgs = { request: Request };\n  export type ActionArgs = { request: Request };\n}\n",
+    "app/routes/+types/s.$token.ts":
+      "export namespace Route {\n  type Data = { returnUrl?: string; title?: string };\n  export type HeadersFunction = () => Record<string, string>;\n  export type MetaFunction = (args: { loaderData: Data | undefined }) => unknown[];\n  export type ComponentProps = { params: { token: string }; loaderData: Data };\n}\n",
+  });
+  const rrOut = run(rr, "init", "--time-zone", "Europe/Madrid");
+  assert.match(rrOut, /Setting up UI_calling for React Router/);
+  assert.doesNotMatch(rrOut, /dev:api/);
+  assert.ok(!existsSync(join(rr, "server/index.ts")), "no Hono server: React Router has its own");
+  assert.match(read("init-react-router", "app/routes.ts"), /import \{ type RouteConfig, index, route \}[\s\S]*route\("api\/ui\/\*", "routes\/api\.ui\.ts"\),\n  route\("s\/:token", "routes\/s\.\$token\.tsx"\),\n  index\("routes\/home\.tsx"\)\] satisfies/);
+  assert.match(read("init-react-router", "app/routes/api.ui.ts"), /from "\.\.\/\.\.\/server\/ui"/);
+  assert.match(read("init-react-router", "app/routes/s.$token.tsx"), /from "\.\.\/ui-calling\/surface-screen"/);
+  assert.match(read("init-react-router", "server/ui.ts"), /http:\/\/localhost:5320/, "the port from the dev script");
+  assert.match(read("init-react-router", "server/ui.ts"), /timeZone: "Europe\/Madrid"/);
+  assert.match(read("init-react-router", "server/ui.ts"), /process\.loadEnvFile\(\)/);
+  assert.match(read("init-react-router", "app/app.css"), /@import "\.\/ui-calling\/tokens\.css";/);
+  assert.match(rrOut, /bg-background text-foreground/, "the starter's html/body background is pointed out");
+  run(rr, "init", "--force"); // again: routes.ts isn't patched twice
+  assert.equal(read("init-react-router", "app/routes.ts").match(/api\/ui/g)?.length, 1);
+  run(rr, "new", "todays-route");
+  assert.match(read("init-react-router", "server/ui.ts"), /todaysRouteImpl,/);
+  // `<command> --help` prints that command only.
+  const help = run(rr, "init", "--help");
+  assert.match(help, /--framework next\|vite\|react-router\|other/);
+  assert.doesNotMatch(help, /whatsapp dev/);
+  rmSync(join(rr, "app/routes.ts")); // the fixture's own file: it imports @react-router/dev, which the repo doesn't install
+  console.log("generated  init-react-router (+1 surface)");
+
   // A monorepo root isn't an app: refuse instead of writing files nothing uses.
   const mono = project("monorepo", { workspaces: ["apps/*"] }, ["apps/web"]);
   assert.match(fails(mono, "init"), /monorepo root/);
