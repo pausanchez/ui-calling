@@ -106,7 +106,7 @@ npm test
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts. Also `sqliteIdentity`: account links and one-time codes with attempt limits |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
-| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes |
+| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js or Vite); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
 
 ## Add it to your project
 
@@ -157,7 +157,7 @@ const ui = createUiCalling({
 });
 
 ui.tools();                                     // → tool definitions for any function-calling LLM
-await ui.call(toolName, input, { conversationId, subject });  // → { url, summary, expiresAt }
+await ui.runTool(toolName, input, { conversationId, subject });  // → { content for the model, link for the user }
 ```
 
 **3. Screen:**
@@ -213,7 +213,7 @@ The demo has switches in the side panel to simulate both outages.
 
 Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:
 
-- `ui.call()` returns `ctaLabel`, picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
+- The link's `label` (from `runTool` or `onLink`) is picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
 - `useSurface()` returns `locale` for dates and currency (`Intl`), and the provider sets `<html lang>`.
 - Blocks keep their strings in a dictionary at the top of the component file (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
 - `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
@@ -245,7 +245,7 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 ```
 
 - **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
-- **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own.
+- **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own; on Vite, `init` passes `.ui-calling/dev.db`, which survives a clean install.
 - **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
@@ -264,7 +264,7 @@ The demo keeps its own state in the same file, so you can restart it mid-convers
 - **Dev routes answer on localhost only,** and never when `NODE_ENV` is `"production"`.
 - Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
 - Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks).
-- API responses are `no-store` and send `Referrer-Policy: no-referrer`. The `/s/[token]` page from `init` on Next.js sets it too; on other frameworks, set it on `/s/*` yourself so the token doesn't leak to sites the screen links to.
+- API responses are `no-store` and send `Referrer-Policy: no-referrer`. `SurfaceScreen` from `init` adds `<meta name="referrer" content="no-referrer">` to the page, and the Next.js page also sets it in its HTML, so the token doesn't leak to sites the screen links to. With a screen of your own, set it on `/s/*` yourself.
 - Once the user finishes (`complete()`), the link is closed: reads and actions are refused, so a tab left open or a forwarded link can't act again.
 - Link-preview crawlers don't run JavaScript, so they never fetch data or trigger `opened`.
 - Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
@@ -281,17 +281,17 @@ This builds every package with tsup into `dist/` (ESM, `.d.ts` and source maps).
 To try a release before publishing, create the app first, then pack the packages and install the tarballs into it (installing them before `create-next-app` makes it refuse a non-empty folder):
 
 ```bash
-npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli --pack-destination /tmp/ui-calling
+npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp --pack-destination /tmp/ui-calling
 ```
 
 ```bash
 cd my-app && npm install /tmp/ui-calling/*.tgz
 ```
 
-This was verified end to end on a new Next.js 16 app (`create-next-app` defaults), installed from tarballs:
-- `npx ui-calling init` and `npx ui-calling new ticket`;
-- `next build` and `next start`;
-- a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
+This was verified end to end, installed from tarballs:
+- **Next.js 16** (`create-next-app` defaults): `init`, `new` with both templates, `next build` and `next start`, and a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
+- **Vite** (`npm create vite@latest -- --template react-ts`, plus Tailwind): `init`, `new` with both templates, `add link-account`, `tsc -b` and `vite build`, then screens opened at 375px with `npm run dev` and `npm run dev:api` running.
+- **Two pilot apps** built from the packages alone: one on Next.js with the Anthropic SDK, one on Vite and Hono with the AI SDK, both against the real model.
 
 Before the first publish, decide:
 - **The npm `@ui-calling` scope.** Create the npm organization, and check that the unscoped `ui-calling` name for the CLI is free.
@@ -302,7 +302,7 @@ Before the first publish, decide:
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
-- Live, model-backed tests for the AI SDK, OpenAI and MCP adapters (they're tested in-process; the Anthropic one also runs in the demo)
+- Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK one ran in a pilot)
 - More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
 - A PIN step before a sensitive screen shows its data (`bindToDevice` already stops a forwarded link from working on another device)
 - More languages in the blocks (en and es today)

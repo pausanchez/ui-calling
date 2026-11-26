@@ -636,7 +636,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
                     never overwritten (--dir, --server-dir, --force; --replace rewrites everything,
                     server file included, to swap your own screen for the block).
                     link-account: --identifier email|tel|text, what users type to be found
-  list              show available blocks
+  list              show available blocks and parts
   tokens            copy the design tokens only
   link <surface> [key=value...]
                     open a screen for a test user on your running dev server and print its link,

@@ -15,7 +15,7 @@ UI_calling goes public only after it runs in a real project (decided 2026-11-24)
 
 ## 2. Before publishing
 
-- [ ] The pilot's findings are fixed.
+- [x] The pilots' findings are fixed: the Next.js + Anthropic SDK pilot (PRs #22, #23) and the Vite + AI SDK pilot (PR #24).
 - [x] The security review's findings are fixed or listed under "Known limits" below (see the PR that added this file).
 - [ ] `npm test` passes.
 - [ ] Remove the pre-release notes:
@@ -24,11 +24,11 @@ UI_calling goes public only after it runs in a real project (decided 2026-11-24)
   - The docs page artifact, if it's still shared: its "Pre-release" badge and note.
 - [ ] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite` and the adapters (`^0.1.0`).
 - [ ] `npm run build`.
-- [ ] Try the packed tarballs in a fresh app, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`.
+- [ ] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; and the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running).
 
 ## Known limits (from the security review, accepted for 0.1)
 
-- No retention: expired sessions, events and uploaded files stay in the database. Add a purge (e.g. `store.purge({ olderThan })`) before handling sensitive documents at scale.
+- No automatic retention: expired sessions, events and uploaded files stay in the database until you run `ui.forget({ expiredBefore })` (on a schedule) or `ui.forget({ subject })` (a deletion request).
 - Uploaded files are typed by what the browser says, not by their bytes. They're served safely (sandboxed, `nosniff`, non-images download), but check magic bytes before forwarding them elsewhere.
 - The token is in the URL path, so it can reach access logs (documented in the README's security model).
 

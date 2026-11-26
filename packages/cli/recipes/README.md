@@ -4,7 +4,7 @@ Each recipe starts from a task and gives the whole answer: the contract, the ser
 
 Print one with `npx ui-calling guide <recipe>`. They build on:
 - `npx ui-calling new <name> --template steps` for screens with several steps;
-- parts you copy and own: `step-bar`, `action-bar`, `choice-card`, `quantity-stepper`, `photo-picker` (`npx ui-calling add <part>`, `npx ui-calling list`);
+- parts you copy and own: `screen-kit`, `step-bar`, `action-bar`, `choice-card`, `quantity-stepper`, `photo-picker` (`npx ui-calling add <part>`, `npx ui-calling list`);
 - `npx ui-calling link <surface> key=value...` to open a screen for a test user while you build, and `npx ui-calling events` to see what the agent reads.
 
 | Recipe | Use it when |
