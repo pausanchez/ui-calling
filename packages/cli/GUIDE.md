@@ -1,4 +1,4 @@
-# Building surfaces with UI_calling
+# Building surfaces with ui-calling
 
 A **surface** is a screen an AI agent can open for a user, the way it calls a function. The agent gets a secure link to send (e.g. as a WhatsApp button). The user opens a real UI, and everything that happens there flows back into the agent's context: what the user saw, what they did, what resulted, and what failed. When the user keeps chatting, the agent can talk about it.
 
@@ -60,7 +60,7 @@ Run it in your project's root. It detects Next.js, Vite or React Router (with Ex
 - `ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and `timeZone`, the zone times are written in for the agent (your machine's; `--time-zone` to choose).
 - `store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
 - `surface-screen.tsx`: renders whichever surface a link's token points to. It also sets `Referrer-Policy: no-referrer` on the page, so the token in its address doesn't leak to sites the screen links to.
-- `tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use UI_calling's), or paints `html`/`body` with a background of its own. `npx ui-calling tokens` copies only this file.
+- `tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use ui-calling's), or paints `html`/`body` with a background of its own. `npx ui-calling tokens` copies only this file.
 - **Next.js:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
 - **Vite:** see "Vite" below: an API server, the `/api` proxy and the `/s/:token` route.
 - **React Router:** see "React Router" below: two routes.
@@ -351,7 +351,7 @@ async function runTurn(conversationId: string, subject: string, userText?: strin
 
 ## Prompting the agent
 
-The model decides when to open a screen and reads what comes back, so the system prompt matters as much as the code. This one comes from UI_calling's demo shop; each paragraph does one job:
+The model decides when to open a screen and reads what comes back, so the system prompt matters as much as the code. This one comes from ui-calling's demo shop; each paragraph does one job:
 
 ```text
 You are the assistant of Acme Store, chatting with a customer on WhatsApp.
@@ -515,7 +515,7 @@ npx ui-calling whatsapp check             # is the token valid, and where does M
 
 ### Sending on WhatsApp
 
-UI_calling builds the message; your server sends it through the Cloud API:
+ui-calling builds the message; your server sends it through the Cloud API:
 
 ```ts
 import { whatsappCtaMessage, insideServiceWindow } from "@ui-calling/core/whatsapp";
@@ -537,7 +537,7 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 }
 ```
 
-- **The 24-hour window.** Free-form messages are only allowed within 24 hours of the user's last message, and using the screen doesn't count as one. A link sent at hour 23 and used at hour 25 wakes the agent, but Meta rejects its reply (error 131047). Check `insideServiceWindow()` first; outside it, send an approved template (UI_calling doesn't build those) or wait for the user to write.
+- **The 24-hour window.** Free-form messages are only allowed within 24 hours of the user's last message, and using the screen doesn't count as one. A link sent at hour 23 and used at hour 25 wakes the agent, but Meta rejects its reply (error 131047). Check `insideServiceWindow()` first; outside it, send an approved template (ui-calling doesn't build those) or wait for the user to write.
 - **The webhook.** Answer Meta's `GET` subscription check (`hub.verify_token`, echo `hub.challenge`). On `POST`, check the signature, start the agent turn after responding (Meta retries slow deliveries), and skip message IDs you've already handled. Subscribe to the `messages` field: it carries incoming messages and the statuses of what you sent.
 - **Delivery failures.** A send can fail after Meta accepted it. `parseWhatsAppStatuses(body)` reads `sent`, `delivered`, `read` and `failed` (with its error code) from the same webhook.
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
@@ -679,7 +679,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | Method | Returns |
 |---|---|
 | `ui.tools()` | Tool definitions with JSON Schema, one per surface |
-| `ui.isUiTool(name)` | Whether a tool name belongs to UI_calling |
+| `ui.isUiTool(name)` | Whether a tool name belongs to ui-calling |
 | `ui.runTool(name, input, who, filter?)` | `{ ok: true, content, link, summary }` or `{ ok: false, content, error }`; never throws for bad input. With `filter`, a tool it excludes is refused, even if the model calls it by name |
 | `ui.call(name, input, who)` | `{ url, sessionId, surface, locale, ctaLabel, expiresAt, summary? }` (`summary` is missing when `summarize` failed); throws on bad input |
 | `ui.events(conversationId, { after?, limit? })` | The conversation's events, oldest first; with `after` (an event ID), only newer ones. Throws `UnknownEventError` for an unknown `after` |

@@ -8,7 +8,7 @@ export type VerifyResult =
 /**
  * Who a chat user is: links between a session subject (e.g. a WhatsApp BSUID) and your customer or employee ID,
  * and the one-time codes that prove it. The security-critical half of the link-account screen, in tables next to
- * UI_calling's own (`ui_links`, `ui_codes`, `ui_code_attempts`).
+ * ui-calling's own (`ui_links`, `ui_codes`, `ui_code_attempts`).
  *
  *   const identity = sqliteIdentity(store);
  *   identity.customerFor(ctx.subject)               // undefined until linked

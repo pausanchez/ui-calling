@@ -46,7 +46,7 @@ Returnable orders: A-0987, delivered 2026-11-19: BL-200 Countertop blender, GB-3
 - **Without the IDs in the prompt, the model can't prefill.** Ours called the tool without `sku` until the prompt listed the SKUs.
 - **A prefill that only works the first time looks like a bug.** If an empty draft already exists from an earlier link, the prefill must still apply; the check above uses "has the user saved items yet", not "does a draft exist".
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 

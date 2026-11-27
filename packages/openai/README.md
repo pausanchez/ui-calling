@@ -1,6 +1,6 @@
 # @ui-calling/openai
 
-UI_calling surfaces as function tools for OpenAI's Responses or Chat Completions API. No SDK dependency.
+ui-calling surfaces as function tools for OpenAI's Responses or Chat Completions API. No SDK dependency.
 
 ```ts
 import { openaiResponsesTools, runResponsesFunctionCall } from "@ui-calling/openai";

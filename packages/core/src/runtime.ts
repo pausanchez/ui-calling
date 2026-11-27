@@ -181,7 +181,7 @@ function safeSummary(impl: SurfaceImpl<any>, data: unknown, moment: SummaryMomen
     const summary = impl.summarize?.(data as never, moment as never);
     return summary === undefined ? undefined : scrubSecrets(summary, impl.surface.secret, data);
   } catch (err) {
-    console.error(`[ui_calling] ${impl.surface.name} summarize failed`, err);
+    console.error(`[ui-calling] ${impl.surface.name} summarize failed`, err);
     return undefined;
   }
 }
@@ -212,7 +212,7 @@ function checkSecretPaths(surface: string, paths: string[] | undefined, data: un
       if (!(key in v)) {
         if (!warnedPaths.has(`${surface}:${path}`)) {
           warnedPaths.add(`${surface}:${path}`);
-          console.warn(`[ui_calling] ${surface}: secret path "${path}" matches no field in its data, so it protects nothing. Check the spelling.`);
+          console.warn(`[ui-calling] ${surface}: secret path "${path}" matches no field in its data, so it protects nothing. Check the spelling.`);
         }
         break;
       }
@@ -233,7 +233,7 @@ function safeDescribe(def: { describe: (p: any) => string }, payload: unknown, t
   try {
     return def.describe(payload);
   } catch (err) {
-    console.error(`[ui_calling] describe for ${type} failed`, err);
+    console.error(`[ui-calling] describe for ${type} failed`, err);
     return `User sent ${type}`;
   }
 }
@@ -329,9 +329,9 @@ export function createUiCalling(opts: UiCallingOptions) {
     // The event is stored: the agent's handler can't undo it, slow it down or fail the user's action.
     for (const handler of [opts.onEvent, ...listeners]) {
       try {
-        void Promise.resolve(handler?.(ev)).catch((err) => console.error("[ui_calling] onEvent failed", err));
+        void Promise.resolve(handler?.(ev)).catch((err) => console.error("[ui-calling] onEvent failed", err));
       } catch (err) {
-        console.error("[ui_calling] onEvent failed", err);
+        console.error("[ui-calling] onEvent failed", err);
       }
     }
     return ev;
@@ -343,7 +343,7 @@ export function createUiCalling(opts: UiCallingOptions) {
     }
     if (opts.describeError) return opts.describeError(err);
     // Raw messages can carry redacted values, SQL or hostnames: log them here, give the agent a generic line.
-    console.error("[ui_calling] unexpected error", err);
+    console.error("[ui-calling] unexpected error", err);
     return { code: "unexpected", message: "An unexpected error happened on the server", retryable: false };
   }
 
@@ -366,7 +366,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       if (fromScreen) return p.source === "client" || p.source === "render";
       return p.source === source && p.code === info.code && p.action === action;
     });
-    console.warn(`[ui_calling] ${session.surface} ${source} error ${info.code}: ${info.message}`);
+    console.warn(`[ui-calling] ${session.surface} ${source} error ${info.code}: ${info.message}`);
     return record(session, {
       type: "error",
       kind: "error",
@@ -423,7 +423,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         });
       } catch (err) {
         // A timer has nobody to report to; an unhandled rejection here would stop the process.
-        console.error("[ui_calling] abandon check failed", err);
+        console.error("[ui-calling] abandon check failed", err);
       }
     }, delayMs);
     (t as { unref?: () => void }).unref?.();
@@ -441,7 +441,7 @@ export function createUiCalling(opts: UiCallingOptions) {
             if (!s.openedAt || Date.parse(s.expiresAt) < Date.now() || !abandonMs(s.surface)) continue;
             watchAbandon(s.id, s.surface, Math.max(0, Date.parse(s.openedAt) + abandonMs(s.surface) - Date.now()));
           }
-        }, (err) => console.error("[ui_calling] couldn't restore abandon timers", err))
+        }, (err) => console.error("[ui-calling] couldn't restore abandon timers", err))
       : Promise.resolve());
 
   const api = {

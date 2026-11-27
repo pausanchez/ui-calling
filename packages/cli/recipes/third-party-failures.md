@@ -69,7 +69,7 @@ An outage (the API is down, a timeout) is `upstream_error` (502), and can be `re
 - **Keep the user's work.** A failed submit in a [multistep form](multistep-form.md) keeps the saved draft; say "your return is saved, try again in a minute".
 - **Test it.** Give each third party an outage switch in development, as the demo does, and check that the agent's reply never claims success.
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 

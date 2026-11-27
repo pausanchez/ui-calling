@@ -1,4 +1,4 @@
-# UI_calling
+# ui-calling
 
 **Send a screen from any chat. Your agent hears what happens on it.**
 
@@ -20,7 +20,7 @@ It writes back in the chat: "Want to send the photos later? The link keeps your 
 
 ![The demo: a WhatsApp-style chat on the left; on the right, the "Agent context" tab with the events from the return screen, ending in the abandon that woke the agent](docs/abandon.png)
 
-That's UI_calling. The screen a tool opens is a *surface*: a link that works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
+That's ui-calling. The screen a tool opens is a *surface*: a link that works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
 
 Most events are just recorded for the agent's next turn. The ones that matter (a finished task, an abandon, a failure) **wake** the agent: they start a turn on their own, so it can write first, as in the return above.
 
@@ -37,9 +37,9 @@ user acts ──▶ "User rescheduled the delivery to 2026-11-27, 16:00–20:00"
 agent follows up in the chat: "Done ✅ …"
 ```
 
-## Why UI_calling
+## Why ui-calling
 
-Other tools let a bot open screens. UI_calling lets your agent know what happens on them.
+Other tools let a bot open screens. ui-calling lets your agent know what happens on them.
 
 - **The agent decides to open a screen,** the way it calls a function, in the middle of any conversation. There's no predesigned flow.
 - **Events cover the screen's whole life,** written for the model to read, not one result on close.
@@ -49,7 +49,7 @@ Other tools let a bot open screens. UI_calling lets your agent know what happens
 - **Typed end to end.** One `defineSurface` is the tool schema, the server's validation and the screen's types.
 - **No new platform.** It plugs into the agent you have, and the screens are yours, copied into your project as source you own and can edit (the way shadcn/ui works), not installed as a dependency.
 
-Automation tools count the conversations they handled. UI_calling is for the ones that would otherwise be lost: the user who stopped halfway, the payment that failed, the slot that disappeared.
+Automation tools count the conversations they handled. ui-calling is for the ones that would otherwise be lost: the user who stopped halfway, the payment that failed, the slot that disappeared.
 
 ## How it compares
 
@@ -58,9 +58,9 @@ Automation tools count the conversations they handled. UI_calling is for the one
 | MCP Apps, or the AI SDK's tool parts | The user is already in a client that renders UI inline: Claude, ChatGPT, your own web chat |
 | WhatsApp Flows | A short form whose fields you know in advance; it never leaves WhatsApp |
 | LangGraph interrupts, or a durable workflow engine | You need to pause and resume an agent, with no screen of your own |
-| **UI_calling** | The user is in a channel that can only carry a link, the screen is your own, and what happens on it (a stall, a failure, partial progress) should change what the agent says next |
+| **ui-calling** | The user is in a channel that can only carry a link, the screen is your own, and what happens on it (a stall, a failure, partial progress) should change what the agent says next |
 
-They combine: a UI_calling event can resume a paused workflow, and a surface is just a page, so it can also open from a web chat.
+They combine: a ui-calling event can resume a paused workflow, and a surface is just a page, so it can also open from a web chat.
 
 ## When not to use it
 

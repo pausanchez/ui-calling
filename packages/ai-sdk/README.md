@@ -1,6 +1,6 @@
 # @ui-calling/ai-sdk
 
-UI_calling surfaces as tools for the Vercel AI SDK (6 or 7).
+ui-calling surfaces as tools for the Vercel AI SDK (6 or 7).
 
 ```ts
 import { aiSdkTools } from "@ui-calling/ai-sdk";

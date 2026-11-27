@@ -18,4 +18,4 @@ Print one with `npx ui-calling guide <recipe>`. They build on:
 | [`third-party-failures`](third-party-failures.md) | A system behind the screen can fail, and both the user and the agent should know |
 | [`follow-up-abandoned`](follow-up-abandoned.md) | It matters that the user finishes, and the agent should nudge once if they stop |
 
-Each recipe's code is complete enough to follow on its own. The "In the UI_calling repo" links at the end point to the demo, where each one runs and is tested; they're not in the package.
+Each recipe's code is complete enough to follow on its own. The "In the ui-calling repo" links at the end point to the demo, where each one runs and is tested; they're not in the package.

@@ -155,7 +155,7 @@ function Steps({ data }: { data: Data }) {
 - **Photos in a draft:** a draft outlives its link. `ctx.files(ids)` accepts this user's uploads from earlier links to the same surface, so the draft's photo IDs still work when the agent opens the screen again. See [file-upload](file-upload.md).
 - **Where drafts live:** in your database. In memory, a restart loses them; in a JSON file inside the project, `next dev` reloads the page on every save.
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 

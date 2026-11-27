@@ -5,7 +5,7 @@ import { ui } from "__UI_IMPORT__";
 
 /**
  * Your API server. In development Vite proxies /api here (vite.config), so the screens and the CLI reach it at
- * your Vite address. Add your agent's routes (chat, webhook) next to UI_calling's.
+ * your Vite address. Add your agent's routes (chat, webhook) next to ui-calling's.
  * Run it with `npm run dev:api` next to `npm run dev`.
  */
 const app = new Hono();

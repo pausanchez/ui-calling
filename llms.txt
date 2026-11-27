@@ -1,4 +1,4 @@
-# UI_calling
+# ui-calling
 
 > Function calling, but the function is a screen. An AI agent opens a prebuilt UI for a user (e.g. from WhatsApp) through a secure link, and what the user sees, does, and what fails there flows back into the agent's context.
 

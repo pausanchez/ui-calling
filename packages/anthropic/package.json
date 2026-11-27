@@ -1,7 +1,7 @@
 {
   "name": "@ui-calling/anthropic",
   "version": "0.0.1",
-  "description": "Use UI_calling surfaces as tools with the Anthropic SDK (tool runner or manual loop).",
+  "description": "Use ui-calling surfaces as tools with the Anthropic SDK (tool runner or manual loop).",
   "license": "MIT",
   "repository": {
     "type": "git",

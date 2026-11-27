@@ -35,7 +35,7 @@ if (process.env.NODE_ENV !== "production") identity.link("dev-user", "C-1001");
 
 ## The identity helper
 
-`sqliteIdentity(store)` from `@ui-calling/sqlite` keeps its tables next to UI_calling's. `add link-account` writes `identity.ts` next to `store.ts`, so your other surfaces, your webhook and your back office can import it without importing a surface:
+`sqliteIdentity(store)` from `@ui-calling/sqlite` keeps its tables next to ui-calling's. `add link-account` writes `identity.ts` next to `store.ts`, so your other surfaces, your webhook and your back office can import it without importing a surface:
 
 ```ts
 import { identity } from "./identity";
@@ -88,7 +88,7 @@ export const linkAccount = defineSurface({
 - **Restrict tools until linked.** Giving the agent every tool and hoping it asks first leaks data the first time it doesn't.
 - **BSUIDs change when the user changes number.** Meta sends the old one (`identityChange` from `parseWhatsAppWebhook`); call `identity.moveLink(old, new)`. The old one stays linked, so links already sent keep working until they expire.
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 

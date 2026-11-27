@@ -1,6 +1,6 @@
 # @ui-calling/anthropic
 
-UI_calling surfaces as tools for the Anthropic SDK, with the tool runner or a manual loop.
+ui-calling surfaces as tools for the Anthropic SDK, with the tool runner or a manual loop.
 
 ```ts
 import { anthropicRunnableTools } from "@ui-calling/anthropic";

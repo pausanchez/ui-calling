@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. To build surfaces *with* UI_calling, read [packages/cli/GUIDE.md](packages/cli/GUIDE.md) (also `npx ui-calling guide`).
+Guidance for coding agents working in this repository. To build surfaces *with* ui-calling, read [packages/cli/GUIDE.md](packages/cli/GUIDE.md) (also `npx ui-calling guide`).
 
 ## What this is
 
-UI_calling lets an AI agent open a screen for a user the way it calls a function, and keeps the conversation's context in sync with what happens on that screen. Read [README.md](README.md) for the concepts.
+ui-calling lets an AI agent open a screen for a user the way it calls a function, and keeps the conversation's context in sync with what happens on that screen. Read [README.md](README.md) for the concepts.
 
 **Priority:** adoption by developers and coding agents. Prefer zero-config defaults, one-command setup, typed contracts that fail at typecheck, and docs an agent can follow without guessing.
 
@@ -70,7 +70,7 @@ Each chat message becomes the webhook Meta would send (`server/whatsapp-sim.ts`)
 
 ## Demo state
 
-The demo keeps UI_calling's sessions and events, and its own state, in `apps/demo/.ui-calling/demo.db`. Its own state is:
+The demo keeps ui-calling's sessions and events, and its own state, in `apps/demo/.ui-calling/demo.db`. Its own state is:
 - chat;
 - links;
 - mock orders, returns and shifts;

@@ -1,7 +1,7 @@
 {
   "name": "@ui-calling/mcp",
   "version": "0.0.1",
-  "description": "Expose UI_calling surfaces as tools on an MCP server, so any MCP client can open screens.",
+  "description": "Expose ui-calling surfaces as tools on an MCP server, so any MCP client can open screens.",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -64,7 +64,7 @@ npx ui-calling events
 - **Look data up by `ctx.subject`.** The order ID comes from the agent, so `getOrder` must check the order belongs to this user.
 - **Keep `summarize` to one line** with everything the screen shows. The agent answers later questions ("what was the tracking code?") from it.
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 
