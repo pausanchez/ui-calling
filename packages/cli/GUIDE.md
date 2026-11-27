@@ -273,7 +273,7 @@ Tell the agent in its system prompt:
 
 ## Running the agent on events
 
-Two kinds of events reach `onEvent`. Quiet ones (`opened`, `left`, small domain events) ride along with the next turn. `wake` events start a turn now, without a message from the user. Both share one queue per conversation with the user's own messages, or a screen event and a new message can run the agent twice at once.
+Two kinds of events reach `onEvent`. Quiet ones (`opened`, `left`, small domain events) ride along with the next turn. `wake` events start a turn now, without a message from the user. Run both, and the user's own messages, through `ui.turn(conversationId, fn)`, or a screen event and a new message can run the agent twice at once and it answers twice. It queues turns per conversation, and takes a lease in the store so the same holds across instances.
 
 A whole agent module with the Vercel AI SDK. The other adapters change only the `generateText` call; with the Anthropic SDK, put the tool runner or the manual loop from "Wiring the agent" in its place:
 
@@ -292,22 +292,15 @@ declare function send(conversationId: string, text: string, links: SurfaceLink[]
 declare const SYSTEM_PROMPT: string; // see "Prompting the agent"
 const TIME_ZONE = "Europe/Madrid";
 
-// One queue per conversation: a user message and a screen event never run the agent at the same time.
-const queues = new Map<string, Promise<void>>();
-function enqueue(conversationId: string, turn: () => Promise<void>) {
-  const next = (queues.get(conversationId) ?? Promise.resolve()).then(turn).catch(console.error);
-  queues.set(conversationId, next);
-  return next;
-}
-
 // A screen woke the agent. The event names the user (`subject`), so the turn can run the tools for them.
+// ui.turn runs one turn per conversation at a time, on every instance that shares the store.
 ui.onEvent((e) => {
-  if (e.wake) void enqueue(e.conversationId, () => runTurn(e.conversationId, e.subject));
+  if (e.wake) ui.turn(e.conversationId, () => runTurn(e.conversationId, e.subject)).catch(console.error);
 });
 
 // Your chat route or webhook calls this for every message the user writes.
 export const onUserMessage = (conversationId: string, subject: string, text: string) =>
-  enqueue(conversationId, () => runTurn(conversationId, subject, text));
+  ui.turn(conversationId, () => runTurn(conversationId, subject, text));
 
 async function runTurn(conversationId: string, subject: string, userText?: string) {
   const convo = db.get(conversationId) ?? { id: conversationId, subject, messages: [] };
@@ -353,10 +346,11 @@ async function runTurn(conversationId: string, subject: string, userText?: strin
   - **Send nothing when it's called.** The adapters call `onSilent(reason)`; the run helpers return `run.silent`. Drop any text the model writes in that turn, and end the loop there rather than asking the model again.
   - **Count it.** `createUiCalling({ onSilentWake })` or `ui.onSilentWake((s) => metrics.increment("silent_wake", { reason: s.reason }))` gets `{ conversationId, subject, reason, at }` for each one. Many silent wakes from one surface mean its events wake the agent for nothing: drop `wake: true` there, or set `abandonAfterMs: false`.
   - **Only on woken turns.** Never offer it on a turn the user wrote: they always get an answer. `filter` doesn't remove it; `woken` decides.
-- **Show that it's thinking.** A woken turn starts while the user is on the screen. Count turns running per conversation in `enqueue` and show "typing…" in your chat while it's above zero.
+- **One turn at a time, everywhere.** `ui.turn` waits for the conversation's running turn, then runs yours with a lease in the store (`acquireTurn`/`releaseTurn`; `sqliteStore()` and `MemoryStore` have them). The lease is renewed while the turn runs and expires `ttlMs` (60 s) after a process dies mid-turn, so a crash doesn't block the conversation. A turn that waits longer than `waitMs` (5 min) for another instance throws `TurnBusyError`. Read the cursor inside the turn, as `runTurn` does: then a wake event recorded while another turn ran is picked up by the next one, never handled twice.
+- **Show that it's thinking.** A woken turn starts while the user is on the screen. Count turns waiting or running per conversation around `ui.turn` and show "typing…" in your chat while it's above zero.
 - **The agent module must be loaded for its `ui.onEvent` to run.** Where routes load lazily (React Router, serverless functions), a server that just restarted has no listener until something imports the agent, and a screen event's wake is lost (its context isn't: the cursor picks it up on the next message). Import the agent module from the route that mounts the API.
 - **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
-- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. Use a job per conversation instead of the in-memory queue, and on serverless hand the turn to that queue (or `waitUntil`) instead of running it inside the request.
+- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. `ui.turn` keeps turns apart across instances as long as they share a store that implements `acquireTurn`/`releaseTurn` (see "Persistence"); a store without them only serializes within one process, and says so in a warning. On serverless, keep the function alive for the turn with `waitUntil(ui.turn(...))` instead of returning before it ends, or hand it to a job queue.
 
 ## Prompting the agent
 
@@ -597,6 +591,19 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
 - **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](../../scripts/test-store.ts) run against any store; copy them into your tests.
+- **Turn leases on several instances:** implement `acquireTurn(conversationId, holder, ttlMs)` and `releaseTurn(conversationId, holder)` too, or `ui.turn` keeps turns apart only within one process. `acquireTurn` must be one atomic write that succeeds when the lease is free, expired or already `holder`'s (that renews it). In Postgres:
+
+  ```sql
+  -- acquireTurn: true when a row came back
+  INSERT INTO ui_turns (conversation_id, holder, expires_at) VALUES ($1, $2, now() + $3 * interval '1 millisecond')
+  ON CONFLICT (conversation_id) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
+  WHERE ui_turns.expires_at <= now() OR ui_turns.holder = excluded.holder
+  RETURNING 1;
+  -- releaseTurn
+  DELETE FROM ui_turns WHERE conversation_id = $1 AND holder = $2;
+  ```
+
+  `sqliteStore()` does the same in its `ui_turns` table, so processes sharing one file (a cluster on one machine) keep turns apart too.
 
 The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
 
@@ -690,7 +697,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `surfaces` | required | The `implement(…)` results to expose as tools |
 | `baseUrl` | required | Public origin of your screens; links are `baseUrl + pathPrefix + token` |
 | `pathPrefix` | `"/s/"` | Path in front of the token |
-| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after` |
+| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after`; add `acquireTurn`/`releaseTurn` so `ui.turn` works across instances |
 | `ttlSeconds` | `3600` | Link lifetime; a surface's own `ttlSeconds` wins |
 | `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen goes this long without activity and hasn't finished (no event with `wake: true`) |
 | `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
@@ -715,6 +722,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `ui.call(name, input, who)` | `{ url, sessionId, surface, locale, ctaLabel, expiresAt, summary? }` (`summary` is missing when `summarize` failed); throws on bad input |
 | `ui.events(conversationId, { after?, limit? })` | The conversation's events, oldest first; with `after` (an event ID), only newer ones. Throws `UnknownEventError` for an unknown `after` |
 | `ui.onEvent(handler)` | Get every event from code that imports `ui` (your agent module), like the `onEvent` option. Returns an unsubscribe function |
+| `ui.turn(conversationId, fn, { ttlMs?, waitMs? })` | What `fn` returns, after running it as the conversation's only agent turn, here and on instances sharing the store. Throws `TurnBusyError` after waiting `waitMs` (default 5 min) |
 | `ui.onSilentWake(handler)` | Like the `onSilentWake` option, from code that imports `ui`. Returns an unsubscribe function |
 | `ui.forget({ conversationId } \| { subject } \| { expiredBefore })` | Deletes matching sessions with their events and files: a deletion request, or a retention policy run on a schedule. Returns the counts |
 | `ui.ready` | Resolves once abandon timers from before a restart are re-armed |

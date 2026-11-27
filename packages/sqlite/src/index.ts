@@ -40,6 +40,8 @@ export function sqliteStore(path = DEFAULT_PATH()): SqliteStore {
     listFiles: lazy("listFiles"),
     deleteFile: lazy("deleteFile"),
     forget: lazy("forget"),
+    acquireTurn: lazy("acquireTurn"),
+    releaseTurn: lazy("releaseTurn"),
   } as SqliteStore;
 }
 
@@ -61,6 +63,8 @@ function open(path: string) {
   const db = new DatabaseSync(path);
   db.exec(`
     PRAGMA journal_mode = WAL;
+    -- Several processes can share the file (turn leases are for that): wait for a writer instead of failing.
+    PRAGMA busy_timeout = 5000;
     CREATE TABLE IF NOT EXISTS ui_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT NOT NULL UNIQUE,
@@ -86,6 +90,11 @@ function open(path: string) {
       bytes BLOB NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ui_files_session ON ui_files (session_id, seq);
+    CREATE TABLE IF NOT EXISTS ui_turns (
+      conversation_id TEXT PRIMARY KEY,
+      holder TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
   `);
 
   const q = {
@@ -104,6 +113,12 @@ function open(path: string) {
     deleteEventsOf: db.prepare("DELETE FROM ui_events WHERE session_id = ?"),
     deleteFilesOf: db.prepare("DELETE FROM ui_files WHERE session_id = ?"),
     deleteSession: db.prepare("DELETE FROM ui_sessions WHERE id = ?"),
+    // One statement, so two processes can't both take the lease: the update only happens if it expired or is ours.
+    acquireTurn: db.prepare(`
+      INSERT INTO ui_turns (conversation_id, holder, expires_at) VALUES (?, ?, ?)
+      ON CONFLICT (conversation_id) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
+      WHERE ui_turns.expires_at <= ? OR ui_turns.holder = excluded.holder`),
+    releaseTurn: db.prepare("DELETE FROM ui_turns WHERE conversation_id = ? AND holder = ?"),
   };
   // One statement per combination of filters, so each query can use the (…, seq) indexes.
   const eventQueries = new Map<string, ReturnType<DatabaseSync["prepare"]>>();
@@ -178,6 +193,13 @@ function open(path: string) {
     },
     async deleteFile(id: string) {
       q.deleteFile.run(id);
+    },
+    async acquireTurn(conversationId: string, holder: string, ttlMs: number) {
+      const now = Date.now();
+      return Number(q.acquireTurn.run(conversationId, holder, now + ttlMs, now).changes) > 0;
+    },
+    async releaseTurn(conversationId: string, holder: string) {
+      q.releaseTurn.run(conversationId, holder);
     },
     async forget(filter: ForgetFilter) {
       // The session's subject and expiry live in its JSON: pick the sessions in code, then delete by ID.
