@@ -24,7 +24,7 @@ It writes back in the chat: "Want to send the photos later? Your progress is sav
 
 That's ui-calling: tool calling lets an agent call your functions, ui-calling lets it call a screen. A screen's link works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
 
-Most events are just recorded for the agent's next turn. The ones that matter (a finished task, an abandon, a failure) **wake** the agent: they start a turn on their own, so it can write first, as in the return above.
+Most events are just recorded for the agent's next turn. The ones that matter (a finished task, an abandon, a failure) **wake** the agent: they start a turn on their own, so it can write first, as in the return above. When a follow-up wouldn't help, the agent calls the built-in `stay_silent` tool instead of writing, and `ui.onSilentWake` counts those turns, so you can see which screens wake it for nothing.
 
 ```
 agent ──tool call──▶ show_order_return({ order_id })

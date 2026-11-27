@@ -25,7 +25,8 @@ const { createHmac } = await import("node:crypto");
 type Chat = {
   chat: { from: string; text: string; cta?: { label: string; url: string } }[];
   timeline: UiEvent[];
-  calls: { tool: string; whatsapp?: Json }[];
+  calls: { tool: string; silent?: string; whatsapp?: Json }[];
+  silentWakes: number;
   inbound: { match: string; subject: string } | null;
   identity: { bsuid?: string; customer: { id: string } | null };
 };
@@ -97,6 +98,27 @@ await check("order: a failing data source makes the page say so, with a reason",
   const r = await call("GET", `/api/ui/sessions/${t}`);
   assert.equal(r.status, 502);
   assert.equal(r.json.reason, "orders_api_unavailable");
+});
+
+await check("order: a wake with nothing new to say ends in stay_silent, is counted, and sends nothing", async () => {
+  await call("POST", "/api/chat/reset");
+  const a = token((await say("Where is my order?")).cta!.url);
+  const b = token((await say("Where is my order?")).cta!.url);
+  await call("POST", "/api/demo/failures", { carrierApi: true });
+  const move = { date: "2026-11-28", window: "10:00–14:00" };
+  await event(a, "opened");
+  await event(a, "reschedule_delivery", move);
+  const before = await chat();
+  assert.equal(before.silentWakes, 0);
+  assert.equal(before.calls.at(-1)?.tool, "show_order_status", "the first failure got an apology");
+  // The second screen fails the same way: its error wakes the agent, but the apology was already sent.
+  await event(b, "opened");
+  await event(b, "reschedule_delivery", move);
+  const after = await chat();
+  assert.equal(after.chat.length, before.chat.length, "nothing new in the chat");
+  assert.equal(after.calls.at(-1)?.tool, "stay_silent");
+  assert.match(after.calls.at(-1)?.silent ?? "", /order_status error/);
+  assert.equal(after.silentWakes, 1, "ui.onSilentWake counted it");
 });
 
 await check("shifts: Spanish chat opens the picker in Spanish", async () => {

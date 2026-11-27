@@ -6,6 +6,10 @@ export type AiSdkAdapterOptions = {
   onLink?: (link: SurfaceLink) => void;
   /** Offer only some surfaces, e.g. hide everything but an account-linking screen until the user is known. */
   filter?: (toolName: string) => boolean;
+  /** A screen event started this turn, not a user message: also offer `stay_silent`. */
+  woken?: boolean;
+  /** Called when the model calls `stay_silent`: send nothing this turn, whatever text it writes after. */
+  onSilent?: (reason: string) => void;
 };
 
 /**
@@ -20,8 +24,7 @@ export type AiSdkAdapterOptions = {
 export function aiSdkTools(ui: UiCalling, who: Who | (() => Who), opts: AiSdkAdapterOptions = {}): ToolSet {
   return Object.fromEntries(
     ui
-      .tools()
-      .filter((t) => !opts.filter || opts.filter(t.name))
+      .tools({ woken: opts.woken, filter: opts.filter })
       .map((t) => [
         t.name,
         tool({
@@ -29,7 +32,8 @@ export function aiSdkTools(ui: UiCalling, who: Who | (() => Who), opts: AiSdkAda
           inputSchema: jsonSchema(t.input_schema as Parameters<typeof jsonSchema>[0]),
           execute: async (input: unknown) => {
             const run = await ui.runTool(t.name, input, typeof who === "function" ? who() : who);
-            if (run.ok) opts.onLink?.(run.link);
+            if (run.ok && run.silent) opts.onSilent?.(run.reason);
+            else if (run.ok) opts.onLink?.(run.link);
             // The model reads this object as the tool output; failures say why instead of throwing.
             return JSON.parse(run.content) as Record<string, unknown>;
           },

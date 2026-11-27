@@ -27,11 +27,13 @@ The finish line is any event with `wake: true`, or a failed action that woke the
 
 ## Prompt
 
-A woken turn has no new message from the user. Let the agent stay quiet when a follow-up wouldn't help:
+A woken turn has no new message from the user. Offer `stay_silent` on it (`woken: true` on the adapter, see GUIDE.md, "A woken turn may say nothing") so the agent can stay quiet when a follow-up wouldn't help:
 
 ```text
-If the screen shows the user stopped partway, offer once to help with the step they stopped at, in one sentence. Don't repeat the whole screen. If a follow-up would add nothing, reply exactly NO_REPLY.
+If the screen shows the user stopped partway, offer once to help with the step they stopped at, in one sentence. Don't repeat the whole screen. If a follow-up would add nothing, call stay_silent.
 ```
+
+Count the silences with `ui.onSilentWake`: if most abandons end in `stay_silent`, the wait is too short or the surface is one people only read (set `abandonAfterMs: false` on it).
 
 In the demo the reply is specific because the event names the step: "I saw you stopped at the pickup step of your return. Need a hand? Your progress is saved, so the same link picks up where you left off."
 
@@ -47,5 +49,6 @@ In the demo the reply is specific because the event names the step: "I saw you s
 Not in the package; for reading if you have the repo.
 
 - Setting: `abandonAfterMs` in [`ui.ts`](../../../apps/demo/server/ui.ts) (`ABANDON_AFTER_MS`, default 90 s in the demo)
-- Follow-ups: `scriptedFollowUp` in [`agent.ts`](../../../apps/demo/server/agent.ts)
+- Follow-ups: `scriptedFollowUp` in [`agent.ts`](../../../apps/demo/server/agent.ts); a woken turn with nothing to add ends in `scriptedSilence`, and `runClaude(c, true)` offers Claude `stay_silent`
+- Proof of a silent wake: "a wake with nothing new to say ends in stay_silent" in [`smoke.ts`](../../../apps/demo/server/smoke.ts)
 - Proof: the abandon checks in [`test-runtime.ts`](../../../scripts/test-runtime.ts) (untouched screen, a failed action, stopping partway, still moving)

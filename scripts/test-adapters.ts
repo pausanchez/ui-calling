@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { SurfaceError, createUiCalling, defineSurface, event, implement, type SurfaceLink } from "@ui-calling/core";
+import { STAY_SILENT, SurfaceError, createUiCalling, defineSurface, event, implement, type SilentWake, type SurfaceLink } from "@ui-calling/core";
 import { anthropicRunnableTools, anthropicToolResult, anthropicTools } from "@ui-calling/anthropic";
 import { aiSdkTools } from "@ui-calling/ai-sdk";
 import { openaiChatTools, openaiResponsesTools, runChatToolCall, runResponsesFunctionCall } from "@ui-calling/openai";
@@ -50,7 +50,7 @@ const isLink = (l: SurfaceLink | undefined) => {
 
 await check("core: runTool returns the tool result and the link, and errors as results", async () => {
   const ok = await ui.runTool("show_ticket", input, who);
-  assert.ok(ok.ok);
+  assert.ok(ok.ok && !ok.silent);
   isLink(ok.link);
   assert.match(ok.content, /Ticket T-1 is open/);
   assert.doesNotMatch(ok.content, /https:/, "button mode keeps the URL away from the model");
@@ -62,8 +62,28 @@ await check("core: runTool returns the tool result and the link, and errors as r
 await check("core: deliverLinks 'message' gives the model the URL", async () => {
   const web = createUiCalling({ baseUrl: "https://ui.example.com", deliverLinks: "message", surfaces: [implement(ticket, { resolve: async () => ({ id: "T-1", status: "open" }), summarize: () => "" })] });
   const run = await web.runTool("show_ticket", input, who);
-  assert.ok(run.ok);
+  assert.ok(run.ok && !run.silent);
   assert.equal(JSON.parse(run.content).url, run.link.url);
+});
+
+await check("core: stay_silent is offered only on woken turns, ignores the surface filter, and is counted", async () => {
+  const silences: SilentWake[] = [];
+  const off = ui.onSilentWake((s) => void silences.push(s));
+  const onlyLinking = (name: string) => name === "show_link_account";
+  assert.deepEqual(ui.tools().map((t) => t.name), ["show_ticket"]);
+  assert.deepEqual(ui.tools({ woken: true, filter: onlyLinking }).map((t) => t.name), [STAY_SILENT]);
+  const run = await ui.runTool(STAY_SILENT, { reason: "screen already shows the ticket" }, who, onlyLinking);
+  assert.ok(run.ok && run.silent);
+  assert.equal(run.reason, "screen already shows the ticket");
+  assert.equal(JSON.parse(run.content).status, "silent");
+  assert.deepEqual(silences.map((s) => [s.conversationId, s.subject, s.reason]), [["c1", "user-1", "screen already shows the ticket"]]);
+  const noReason = await ui.runTool(STAY_SILENT, {}, who);
+  assert.ok(noReason.ok && noReason.silent && noReason.reason === "", "a missing reason still keeps the turn quiet");
+  off();
+  assert.throws(
+    () => createUiCalling({ baseUrl: "https://ui.example.com", toolPrefix: "stay_", surfaces: [implement(defineSurface({ ...ticket, name: "silent" }), { resolve: async () => ({ id: "", status: "" }), summarize: () => "" })] }),
+    /reserves/,
+  );
 });
 
 await check("anthropic: tool definitions, manual tool_result, runnable tools", async () => {
@@ -80,6 +100,13 @@ await check("anthropic: tool definitions, manual tool_result, runnable tools", a
   const out = await runnable.run(input as never);
   assert.match(String(out), /link_ready/);
   isLink(link);
+  assert.deepEqual(anthropicTools(ui, undefined, { woken: true }).map((t) => t.name), ["show_ticket", STAY_SILENT]);
+  const quiet = await anthropicToolResult(ui, { id: "tu_3", name: STAY_SILENT, input: { reason: "nothing new" } }, who);
+  assert.ok(quiet.run.ok && quiet.run.silent && !quiet.result.is_error);
+  let reason: string | undefined;
+  const woken = anthropicRunnableTools(ui, who, { woken: true, onSilent: (r) => (reason = r) });
+  await woken.find((t) => t.name === STAY_SILENT)!.run({ reason: "nothing new" } as never);
+  assert.equal(reason, "nothing new");
 });
 
 await check("ai-sdk: tools keyed by name; execute returns an object and reports the link", async () => {
@@ -89,6 +116,12 @@ await check("ai-sdk: tools keyed by name; execute returns an object and reports 
   const out = await tools.show_ticket.execute!(input, { toolCallId: "1", messages: [] } as never);
   assert.equal((out as { status: string }).status, "link_ready");
   isLink(link);
+  let reason: string | undefined;
+  const woken = aiSdkTools(ui, who, { woken: true, onSilent: (r) => (reason = r) });
+  assert.deepEqual(Object.keys(woken), ["show_ticket", STAY_SILENT]);
+  const quiet = await woken[STAY_SILENT].execute!({ reason: "they're still on the screen" }, { toolCallId: "2", messages: [] } as never);
+  assert.equal((quiet as { status: string }).status, "silent");
+  assert.equal(reason, "they're still on the screen");
 });
 
 await check("openai: Responses and Chat Completions shapes, bad JSON becomes an error result", async () => {
@@ -96,12 +129,16 @@ await check("openai: Responses and Chat Completions shapes, bad JSON becomes an 
   assert.equal(openaiChatTools(ui)[0].function.name, "show_ticket");
   const r = await runResponsesFunctionCall(ui, { call_id: "call_1", name: "show_ticket", arguments: JSON.stringify(input) }, who);
   assert.equal(r.item.type, "function_call_output");
-  assert.ok(r.run.ok);
+  assert.ok(r.run.ok && !r.run.silent);
   isLink(r.run.link);
   const c = await runChatToolCall(ui, { id: "call_2", function: { name: "show_ticket", arguments: "{oops" } }, who);
   assert.equal(c.message.role, "tool");
   assert.ok(!c.run.ok);
   assert.equal(c.run.error.code, "invalid_arguments");
+  assert.deepEqual(openaiResponsesTools(ui, undefined, { woken: true }).map((t) => t.name), ["show_ticket", STAY_SILENT]);
+  assert.equal(openaiChatTools(ui, undefined, { woken: true })[1].function.name, STAY_SILENT);
+  const quiet = await runResponsesFunctionCall(ui, { call_id: "call_3", name: STAY_SILENT, arguments: '{"reason":"nothing new"}' }, who);
+  assert.ok(quiet.run.ok && quiet.run.silent);
 });
 
 await check("mcp: a client lists the surfaces and calls one through the protocol", async () => {
@@ -119,13 +156,27 @@ await check("mcp: a client lists the surfaces and calls one through the protocol
   isLink(link);
   const missing = await client.callTool({ name: "show_ticket", arguments: { ticket_id: "missing" } });
   assert.equal(missing.isError, true);
+  const refused = await client.callTool({ name: STAY_SILENT, arguments: { reason: "x" } });
+  assert.equal(refused.isError, true, "not listed unless staySilent is on");
   await client.close();
+
+  let reason: string | undefined;
+  const quietServer = createUiCallingMcpServer(ui, { who: () => who, staySilent: true, onSilent: (r) => (reason = r) });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await quietServer.connect(st);
+  const quietClient = new Client({ name: "test", version: "0.0.1" });
+  await quietClient.connect(ct);
+  assert.deepEqual((await quietClient.listTools()).tools.map((t) => t.name), ["show_ticket", STAY_SILENT]);
+  const quiet = await quietClient.callTool({ name: STAY_SILENT, arguments: { reason: "nothing new" } });
+  assert.ok(!quiet.isError);
+  assert.equal(reason, "nothing new");
+  await quietClient.close();
 });
 
 await check("server: uiCallingHandler serves the routes as a plain fetch handler, errors included", async () => {
   const handler = uiCallingHandler(ui);
   const run = await ui.runTool("show_ticket", input, who);
-  assert.ok(run.ok);
+  assert.ok(run.ok && !run.silent);
   const token = run.link.url.split("/s/")[1];
   const open = await handler(new Request(`https://app.example.com/api/ui/sessions/${token}`));
   assert.equal(open.status, 200);
@@ -138,7 +189,7 @@ await check("server: uiCallingHandler serves the routes as a plain fetch handler
 await check("server: uiCallingNodeHandler serves Node (req, res), mounted under Express's originalUrl", async () => {
   const node = uiCallingNodeHandler(ui);
   const run = await ui.runTool("show_ticket", input, who);
-  assert.ok(run.ok);
+  assert.ok(run.ok && !run.silent);
   const token = run.link.url.split("/s/")[1];
   // Express inside app.use("/api/ui", …): req.url loses the mount path, originalUrl keeps it.
   const send = async (method: string, path: string, body?: unknown) => {
