@@ -19,7 +19,7 @@ UI_calling goes public only after it runs in a real project (decided 2026-11-24)
 - [x] The security review's findings are fixed or listed under "Known limits" below (see the PR that added this file).
 - [ ] `npm test` passes.
 - [ ] Remove the pre-release notes:
-  - `README.md`: the "Not on npm yet" note and the tarball install under "Add it to your project". The tarball steps for trying a change live in AGENTS.md.
+  - `README.md`: the "Preview" note at the top. `docs/getting-started.md`: the "Not on npm yet" note and the tarball install under "Install and set up". The tarball steps for trying a change live in AGENTS.md.
   - The `v0.0.1-preview` GitHub release: delete it, or mark it superseded.
   - `packages/cli/GUIDE.md`: the "Not on npm yet" note at the top.
   - The docs page artifact, if it's still shared: its "Pre-release" badge and note.
