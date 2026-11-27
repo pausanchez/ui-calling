@@ -71,7 +71,8 @@ export const claimImpl = implement(claim, {
       const d = load(ctx.input.id, ctx.subject);
       if (d.submitted) return ctx.unchanged(d); // a double tap: no second event, no second wake
       if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing", { refused: true });
-      return submitClaim(d); // your system; throw SurfaceError(..., { retryable: true }) if it fails
+      // Your system; throw SurfaceError(..., { retryable: true }) if it fails. Save ctx.session.id with the result (sentIn).
+      return submitClaim(d, ctx.session.id);
     },
   },
 });

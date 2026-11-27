@@ -117,14 +117,14 @@ npm test
 | Package | What it does |
 |---|---|
 | `@ui-calling/core` | `defineSurface`, `implement`, `createUiCalling` (tools, sessions, events), `formatEventsForAgent`, WhatsApp CTA adapter |
-| `@ui-calling/server` | Hono routes the screen talks to (`GET /sessions/:token`, `POST /sessions/:token/events`) |
+| `@ui-calling/server` | The routes the screen talks to (`GET /sessions/:token`, `POST /sessions/:token/events`): a Hono app, a `(Request) => Response` handler, and a Node `(req, res)` handler for Express and Fastify (`@ui-calling/server/node`) |
 | `@ui-calling/react` | `<SurfaceProvider>`, `useSurface(contract)`: typed data, typed `emit`, automatic lifecycle tracking |
 | `@ui-calling/anthropic` | Surfaces as Anthropic SDK tools: tool runner (`anthropicRunnableTools`) or manual loop (`anthropicTools`, `anthropicToolResult`) |
 | `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts. Also `sqliteIdentity`: account links and one-time codes with attempt limits |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
-| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js, Vite or React Router); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
+| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js, Vite, React Router, and Express, Fastify or Koa); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
 
 ## Add it to your project
 
@@ -311,6 +311,8 @@ cd my-app && npm install /tmp/ui-calling/*.tgz
 This was verified end to end, installed from tarballs:
 - **Next.js 16** (`create-next-app` defaults): `init`, `new` with both templates, `next build` and `next start`, and a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
 - **Vite** (`npm create vite@latest -- --template react-ts`, plus Tailwind): `init`, `new` with both templates, `add link-account`, `tsc -b` and `vite build`, then screens opened at 375px with `npm run dev` and `npm run dev:api` running.
+- **React Router 7** (`create-react-router`): `init`, `new` with both templates, `add link-account`, `npm run typecheck` and `react-router build`, then screens opened at 375px in `react-router dev`.
+- **Express 5**: `init`, `new` with both templates, `uiCallingNodeHandler` mounted before `express.json()`, then `link` and `events` against it.
 - **Four pilot apps** built from the packages alone, against the real model: Next.js with the Anthropic tool runner, Vite and Hono with the AI SDK, React Router 7 with the Anthropic manual loop, and Express with the OpenAI Responses API.
 
 Before the first publish, decide:

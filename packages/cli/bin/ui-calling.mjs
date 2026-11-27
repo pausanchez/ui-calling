@@ -726,7 +726,8 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
   default: {
     const help = `ui-calling <command>
 
-  init              set up UI_calling in this project (detects Next.js, Vite or React Router)
+  init              set up UI_calling in this project (detects Next.js, Vite, React Router,
+                    and Express, Fastify or Koa for the API step)
                     --dir (default src/ui-calling, app/ui-calling or ui-calling), --server-dir
                     (default: the same for Next.js, server/ otherwise), --deliver button|message,
                     --framework next|vite|react-router|other, --base-url (your dev address, e.g.

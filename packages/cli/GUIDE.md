@@ -56,7 +56,7 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 npx ui-calling init
 ```
 
-Run it in your project's root. It detects Next.js, Vite or React Router and writes:
+Run it in your project's root. It detects Next.js, Vite or React Router (with Express, Fastify or Koa it writes the same files and tells you how to mount the API), and writes:
 - `ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and `timeZone`, the zone times are written in for the agent (your machine's; `--time-zone` to choose).
 - `store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
 - `surface-screen.tsx`: renders whichever surface a link's token points to. It also sets `Referrer-Policy: no-referrer` on the page, so the token in its address doesn't leak to sites the screen links to.
@@ -102,7 +102,7 @@ Mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} 
   app.use("/api/ui", uiCallingNodeHandler(ui, { dev: process.env.NODE_ENV !== "production" }));
   app.use(express.json()); // your own routes after it
   ```
-- **`uiCallingHandler(ui, { basePath, dev })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`. Pass `dev: process.env.NODE_ENV === "development"` to get the routes behind `ui-calling link` and `events`. Serve GET, POST and DELETE.
+- **`uiCallingHandler(ui, { basePath, dev })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`. Pass `dev: process.env.NODE_ENV !== "production"` to get the routes behind `ui-calling link` and `events` (they answer on localhost only). Serve GET, POST and DELETE.
 - **`uiCallingRoutes(ui, { dev })`** is a Hono app; mount it with `app.route("/api/ui", …)`. It has no `basePath`.
 - **Keep `ui.ts` out of the browser bundle.** It opens the database and reads `process.env`: import it only from server code.
 - **The screens are a React page.** Install `react react-dom @ui-calling/react` and Tailwind v4, and bundle one entry that renders `<SurfaceScreen token={token} returnUrl={…} />` when the path is `/s/<token>`. With a plain Node server, Vite works well:
@@ -641,6 +641,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `ui.onEvent(handler)` | Get every event from code that imports `ui` (your agent module), like the `onEvent` option. Returns an unsubscribe function |
 | `ui.forget({ conversationId } \| { subject } \| { expiredBefore })` | Deletes matching sessions with their events and files: a deletion request, or a retention policy run on a schedule. Returns the counts |
 | `ui.ready` | Resolves once abandon timers from before a restart are re-armed |
+| `ui.timeZone` | The zone times are written in for the agent (`timeZone`, default `"UTC"`): pass it to `formatEventsForAgent` |
 
 `who` is `{ conversationId, subject }`: the conversation events report to, and the user the data is scoped to.
 
@@ -697,7 +698,7 @@ type UiEvent = {
 
 ### HTTP
 
-What `@ui-calling/server` serves under your mount point. Any client can use it; React is optional. Every API response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Your `/s/:token` page is served by your app: set `Referrer-Policy: no-referrer` there too, so the token in its URL doesn't leak to sites the screen links to. `SurfaceScreen` from `init` adds the `<meta name="referrer">` itself, and the Next.js page also has it in its HTML.
+What `@ui-calling/server` serves under your mount point, whichever handler you use (Hono, `uiCallingHandler`, `uiCallingNodeHandler`). Any client can use it; React is optional. Every API response has `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Your `/s/:token` page is served by your app: set `Referrer-Policy: no-referrer` there too, so the token in its URL doesn't leak to sites the screen links to. `SurfaceScreen` from `init` adds the `<meta name="referrer">` itself, and the Next.js page also has it in its HTML.
 
 | Request | Success |
 |---|---|
@@ -707,7 +708,7 @@ What `@ui-calling/server` serves under your mount point. Any client can use it; 
 | `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
 | `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
 | `POST /dev/links` with `{ surface, input?, subject?, conversationId?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it. `422 { error, message }` when `resolve` refuses (e.g. `account_not_linked`) |
-| `GET /dev/events/:conversationId?hide=left,returned&timeZone=…` | Only with `dev: true`. What the agent would read, as text; `hide` leaves out event types |
+| `GET /dev/events/:conversationId?hide=left,returned&timeZone=…` | Only with `dev: true`. What the agent would read, as text, in the runtime's `timeZone` unless you pass one; `hide` leaves out event types |
 
 Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:
 

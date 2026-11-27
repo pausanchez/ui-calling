@@ -15,7 +15,7 @@ UI_calling goes public only after it runs in a real project (decided 2026-11-24)
 
 ## 2. Before publishing
 
-- [x] The pilots' findings are fixed: the Next.js + Anthropic SDK pilot (PRs #22, #23), the Vite + AI SDK pilot (PR #24) the React Router + Anthropic manual loop pilot (PR #26) and the Express + OpenAI Responses pilot (PR #29).
+- [x] The pilots' findings are fixed: the Next.js + Anthropic SDK pilot (PRs #22, #23), the Vite + AI SDK pilot (PR #24), the React Router + Anthropic manual loop pilot (PR #26) and the Express + OpenAI Responses pilot (PR #29).
 - [x] The security review's findings are fixed or listed under "Known limits" below (see the PR that added this file).
 - [ ] `npm test` passes.
 - [ ] Remove the pre-release notes:
