@@ -191,6 +191,18 @@ try {
   rmSync(join(rr, "app/routes.ts")); // the fixture's own file: it imports @react-router/dev, which the repo doesn't install
   console.log("generated  init-react-router (+1 surface)");
 
+  // A plain Express app: the Node handler, the screens' page, and a .gitignore when there's none.
+  const ex = project("init-express", { scripts: { dev: "tsx watch server.ts" }, dependencies: { express: "5" } });
+  const exOut = run(ex, "init", "--time-zone", "Europe/Madrid");
+  assert.match(exOut, /Setting up UI_calling for Express/);
+  assert.match(exOut, /uiCallingNodeHandler\(ui, \{ dev:/);
+  assert.match(exOut, /before any body parser/);
+  assert.match(exOut, /react react-dom vite @vitejs\/plugin-react tailwindcss @tailwindcss\/vite/, "the screens' page needs React and a bundler");
+  assert.match(read("init-express", ".gitignore"), /^\.ui-calling\/$/m, "created when missing: Tailwind v4 scans what git doesn't ignore");
+  const bare = project("init-bare", {});
+  assert.match(run(bare, "init"), /using the generic setup/);
+  console.log("generated  init-express, init-bare");
+
   // A monorepo root isn't an app: refuse instead of writing files nothing uses.
   const mono = project("monorepo", { workspaces: ["apps/*"] }, ["apps/web"]);
   assert.match(fails(mono, "init"), /monorepo root/);

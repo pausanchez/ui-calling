@@ -13,7 +13,7 @@ UI_calling lets an AI agent open a screen for a user the way it calls a function
 | Path | What |
 |---|---|
 | `packages/core` | Contracts (`defineSurface`, `event`), runtime (`createUiCalling`, sessions, events, errors), store interface, WhatsApp helper |
-| `packages/server` | Hono routes for the screen (`GET /sessions/:token`, `POST /sessions/:token/events`) |
+| `packages/server` | Routes for the screen (`GET /sessions/:token`, `POST /sessions/:token/events`): Hono app, fetch handler, and a Node `(req, res)` handler in `src/node.ts` (`@ui-calling/server/node`) |
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
 | `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
 | `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |

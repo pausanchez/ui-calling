@@ -117,14 +117,14 @@ npm test
 | Package | What it does |
 |---|---|
 | `@ui-calling/core` | `defineSurface`, `implement`, `createUiCalling` (tools, sessions, events), `formatEventsForAgent`, WhatsApp CTA adapter |
-| `@ui-calling/server` | Hono routes the screen talks to (`GET /sessions/:token`, `POST /sessions/:token/events`) |
+| `@ui-calling/server` | The routes the screen talks to (`GET /sessions/:token`, `POST /sessions/:token/events`): a Hono app, a `(Request) => Response` handler, and a Node `(req, res)` handler for Express and Fastify (`@ui-calling/server/node`) |
 | `@ui-calling/react` | `<SurfaceProvider>`, `useSurface(contract)`: typed data, typed `emit`, automatic lifecycle tracking |
 | `@ui-calling/anthropic` | Surfaces as Anthropic SDK tools: tool runner (`anthropicRunnableTools`) or manual loop (`anthropicTools`, `anthropicToolResult`) |
 | `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts. Also `sqliteIdentity`: account links and one-time codes with attempt limits |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
-| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js, Vite or React Router); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
+| `ui-calling` (CLI) | `init` sets UI_calling up in your project (detects Next.js, Vite, React Router, and Express, Fastify or Koa); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
 
 ## Add it to your project
 
@@ -138,7 +138,7 @@ npx ui-calling init
 npx ui-calling new shift-picker
 ```
 
-`init` detects Next.js, Vite or React Router and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page. On Vite it writes a small Hono API server in `server/`, proxies `/api` to it and renders screens on `/s/:token`. On React Router it writes the API as a resource route and the `/s/:token` route; elsewhere it tells you how to mount them. Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
+`init` detects Next.js, Vite or React Router and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page. On Vite it writes a small Hono API server in `server/`, proxies `/api` to it and renders screens on `/s/:token`. On React Router it writes the API as a resource route and the `/s/:token` route. On Express, Fastify and other servers it tells you how to mount them (`uiCallingNodeHandler` for Node servers). Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
 
 ## The primitives
 
@@ -311,7 +311,9 @@ cd my-app && npm install /tmp/ui-calling/*.tgz
 This was verified end to end, installed from tarballs:
 - **Next.js 16** (`create-next-app` defaults): `init`, `new` with both templates, `next build` and `next start`, and a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
 - **Vite** (`npm create vite@latest -- --template react-ts`, plus Tailwind): `init`, `new` with both templates, `add link-account`, `tsc -b` and `vite build`, then screens opened at 375px with `npm run dev` and `npm run dev:api` running.
-- **Three pilot apps** built from the packages alone, against the real model: Next.js with the Anthropic tool runner, Vite and Hono with the AI SDK, and React Router 7 with the Anthropic manual loop.
+- **React Router 7** (`create-react-router`): `init`, `new` with both templates, `add link-account`, `npm run typecheck` and `react-router build`, then screens opened at 375px in `react-router dev`.
+- **Express 5**: `init`, `new` with both templates, `uiCallingNodeHandler` mounted before `express.json()`, then `link` and `events` against it.
+- **Four pilot apps** built from the packages alone, against the real model: Next.js with the Anthropic tool runner, Vite and Hono with the AI SDK, React Router 7 with the Anthropic manual loop, and Express with the OpenAI Responses API.
 
 Before the first publish, decide:
 - **The npm `@ui-calling` scope.** Create the npm organization, and check that the unscoped `ui-calling` name for the CLI is free.
@@ -323,7 +325,7 @@ Before the first publish, decide:
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
-- Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK one ran in a pilot)
+- Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK and OpenAI ones ran in pilots)
 - More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
 - A PIN step before a sensitive screen shows its data (`bindToDevice` already stops a forwarded link from working on another device)
 - More languages in the blocks (en and es today)

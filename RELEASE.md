@@ -15,7 +15,7 @@ UI_calling goes public only after it runs in a real project (decided 2026-11-24)
 
 ## 2. Before publishing
 
-- [x] The pilots' findings are fixed: the Next.js + Anthropic SDK pilot (PRs #22, #23), the Vite + AI SDK pilot (PR #24) and the React Router + Anthropic manual loop pilot (PR #26).
+- [x] The pilots' findings are fixed: the Next.js + Anthropic SDK pilot (PRs #22, #23), the Vite + AI SDK pilot (PR #24), the React Router + Anthropic manual loop pilot (PR #26) and the Express + OpenAI Responses pilot (PR #29).
 - [x] The security review's findings are fixed or listed under "Known limits" below (see the PR that added this file).
 - [ ] `npm test` passes.
 - [ ] Remove the pre-release notes:
@@ -24,7 +24,7 @@ UI_calling goes public only after it runs in a real project (decided 2026-11-24)
   - The docs page artifact, if it's still shared: its "Pre-release" badge and note.
 - [ ] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite` and the adapters (`^0.1.0`).
 - [ ] `npm run build`.
-- [ ] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running), and on create-react-router (`npm run typecheck`, `react-router build`).
+- [ ] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running), on create-react-router (`npm run typecheck`, `react-router build`), and on a plain Express app (`init`, `uiCallingNodeHandler`, `link`, `events`).
 
 ## Known limits (from the security review, accepted for 0.1)
 
