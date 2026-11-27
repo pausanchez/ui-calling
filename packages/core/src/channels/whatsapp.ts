@@ -46,7 +46,7 @@ export function insideServiceWindow(lastUserMessageAt: Date, now = new Date()) {
 }
 
 /**
- * The `subject` to use for UI_calling sessions: a BSUID is only unique within its portfolio,
+ * The `subject` to use for ui-calling sessions: a BSUID is only unique within its portfolio,
  * so the portfolio is part of the key. Use the same string as the key of your BSUID → customer links.
  */
 export function whatsappSubject(portfolioId: string, bsuid: string) {

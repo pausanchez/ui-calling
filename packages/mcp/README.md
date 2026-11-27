@@ -1,6 +1,6 @@
 # @ui-calling/mcp
 
-UI_calling surfaces as tools on an MCP server, so any MCP client can open screens.
+ui-calling surfaces as tools on an MCP server, so any MCP client can open screens.
 
 ```ts
 import { createUiCallingMcpServer } from "@ui-calling/mcp";

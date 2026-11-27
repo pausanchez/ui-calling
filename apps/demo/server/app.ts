@@ -24,7 +24,7 @@ import { demoUser, demoUserState, inboundNumberChange, inboundText, seedDemoUser
 export const CONVERSATION = "demo";
 onUiEvent(handleUiEvent);
 
-// The demo's own state (chat, links, mock data) lives next to UI_calling's sessions and events, in the
+// The demo's own state (chat, links, mock data) lives next to ui-calling's sessions and events, in the
 // same SQLite file, so a restart loses nothing. A real product keeps these in its own database.
 store.db.exec("CREATE TABLE IF NOT EXISTS demo_state (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
 const STATE = { orders: ordersState, returns: returnsState, shifts: shiftsState, links: linksState, user: demoUserState, conversations: conversationsState };

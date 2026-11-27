@@ -1,5 +1,5 @@
 /*
- * UI_calling design tokens. Same names as shadcn/ui so blocks pick up an
+ * ui-calling design tokens. Same names as shadcn/ui so blocks pick up an
  * existing theme; override the values to match your brand.
  * Requires Tailwind v4 (`@import "tailwindcss";` before this file).
  */

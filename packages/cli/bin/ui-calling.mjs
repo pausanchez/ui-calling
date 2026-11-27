@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// ui-calling: set up UI_calling in a project and copy surfaces into it. You own the code afterwards.
+// ui-calling: set up ui-calling in a project and copy surfaces into it. You own the code afterwards.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -209,7 +209,7 @@ Patterns and rules: npx ui-calling guide`);
  * `next dev` serves its own scripts only to localhost unless a host is listed in `allowedDevOrigins`: a screen opened
  * on a phone through a tunnel (PUBLIC_URL) stays blank. Add PUBLIC_URL's host there, once.
  */
-const ALLOW_TUNNEL = `  // UI_calling: screens open on phones through a tunnel (PUBLIC_URL). \`next dev\` refuses its own scripts to any
+const ALLOW_TUNNEL = `  // ui-calling: screens open on phones through a tunnel (PUBLIC_URL). \`next dev\` refuses its own scripts to any
   // host but localhost unless it's listed here, and the screen stays blank.
   allowedDevOrigins: process.env.PUBLIC_URL ? [new URL(process.env.PUBLIC_URL).hostname] : [],
 `;
@@ -260,7 +260,7 @@ function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg }) {
   const config = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"].find((f) => existsSync(f));
   const c = config && readFileSync(config, "utf8");
   if (c && !c.includes("/api") && !/\bserver\s*:/.test(c) && /defineConfig\(\{\n/.test(c)) {
-    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // UI_calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { proxy: { "/api": "http://localhost:${API_PORT}" } },\n`));
+    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // ui-calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { proxy: { "/api": "http://localhost:${API_PORT}" } },\n`));
     console.log(`  update ${config}`);
     done.push(`/api proxied to the API in ${config}`);
   } else if (!c?.includes("/api")) {
@@ -292,7 +292,7 @@ function setUpReactRouter({ runtime, screen, done, todo }) {
   const page = "app/routes/s.$token.tsx";
   write(api, fill("rr-api-route.ts", { __UI_IMPORT__: importPath(api, runtime) }));
   write(page, fill("rr-surface-page.tsx", { __SCREEN_IMPORT__: importPath(page, screen) }));
-  const entries = `  // UI_calling: its API (uiCallingHandler) and the screen a link opens.\n  route("api/ui/*", "routes/api.ui.ts"),\n  route("s/:token", "routes/s.$token.tsx"),\n`;
+  const entries = `  // ui-calling: its API (uiCallingHandler) and the screen a link opens.\n  route("api/ui/*", "routes/api.ui.ts"),\n  route("s/:token", "routes/s.$token.tsx"),\n`;
   const file = ["app/routes.ts", "app/routes.tsx"].find((f) => existsSync(f));
   const r = file && readFileSync(file, "utf8");
   // create-react-router's shape: `export default [index("routes/home.tsx")] satisfies RouteConfig;` (on one line or
@@ -362,7 +362,7 @@ function init() {
   const screen = join(lib, "surface-screen.tsx");
   const detected = !flag("--framework") && (ownServer ? `${OWN_SERVER[ownServer]} (its own server: the API is yours to mount)` : nodeServer ? `${NODE_SERVER[nodeServer]} (the API and the screens' page are yours to mount)` : null);
   const label = { next: "Next.js", vite: "Vite", "react-router": "React Router" }[framework] ?? (detected || "your project");
-  console.log(`Setting up UI_calling for ${label}\n`);
+  console.log(`Setting up ui-calling for ${label}\n`);
   if (framework === "other" && !flag("--framework") && !ownServer && !nodeServer) {
     console.log("No Next.js, Vite, React Router or Node server (Express, Fastify, Koa) found: using the generic setup. --framework next|vite|react-router picks one.\n");
   }
@@ -416,7 +416,7 @@ function init() {
   console.log(`  write  ${CONFIG_FILE}`);
 
   // Point coding agents at the guide, in the instructions files they already read.
-  const note = `\n<!-- ui-calling -->\n## UI_calling\n\nScreens the AI agent can open live in \`${lib}\`. To add one, run \`npx ui-calling new <name>\` and follow \`npx ui-calling guide\`.\n`;
+  const note = `\n<!-- ui-calling -->\n## ui-calling\n\nScreens the AI agent can open live in \`${lib}\`. To add one, run \`npx ui-calling new <name>\` and follow \`npx ui-calling guide\`.\n`;
   for (const f of ["AGENTS.md", "CLAUDE.md"]) {
     if (existsSync(f) && !readFileSync(f, "utf8").includes("<!-- ui-calling -->")) {
       appendFileSync(f, note);
@@ -427,10 +427,10 @@ function init() {
   // The database lives in .ui-calling/ (on Next.js, the development one is under node_modules/.cache). Tailwind v4
   // scans what git doesn't ignore: without this, every database write rebuilds the CSS.
   if (!existsSync(".gitignore")) {
-    writeFileSync(".gitignore", "node_modules/\n\n# UI_calling's SQLite database\n.ui-calling/\n");
+    writeFileSync(".gitignore", "node_modules/\n\n# ui-calling's SQLite database\n.ui-calling/\n");
     console.log("  write  .gitignore");
   } else if (!/^\/?\.ui-calling\/?$/m.test(readFileSync(".gitignore", "utf8"))) {
-    appendFileSync(".gitignore", "\n# UI_calling's SQLite database\n.ui-calling/\n");
+    appendFileSync(".gitignore", "\n# ui-calling's SQLite database\n.ui-calling/\n");
     console.log("  update .gitignore");
   }
 
@@ -450,9 +450,9 @@ function init() {
       console.log(`  update ${css}`);
     }
     tokensStep = null;
-    // Rules after the import win: a starter's own --background/--foreground replace UI_calling's.
+    // Rules after the import win: a starter's own --background/--foreground replace ui-calling's.
     if (/:root\s*{[^}]*--(background|foreground)\s*:/.test(s)) {
-      done.push(`tokens imported in ${css}, but its own --background/--foreground override them; delete those to use UI_calling's`);
+      done.push(`tokens imported in ${css}, but its own --background/--foreground override them; delete those to use ui-calling's`);
     } else done.push(`tokens imported in ${css}`);
     // create-vite's starter page styles bare elements (#root, h1, p…) outside Tailwind's layers, so they win on the
     // screens too: a centered, oversized title.
@@ -477,7 +477,7 @@ function init() {
     steps.push(
       `${pm} ${missing.join(" ")}` +
         // Until the first release, an install from the registry would fail, or find someone else's package.
-        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the tarballs built in the UI_calling repo (README, "Building and publishing").` : ""),
+        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the tarballs built in the ui-calling repo (README, "Building and publishing").` : ""),
     );
   }
   if (tokensStep) steps.push(tokensStep);
@@ -726,7 +726,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
   default: {
     const help = `ui-calling <command>
 
-  init              set up UI_calling in this project (detects Next.js, Vite, React Router,
+  init              set up ui-calling in this project (detects Next.js, Vite, React Router,
                     and Express, Fastify or Koa for the API step)
                     --dir (default src/ui-calling, app/ui-calling or ui-calling), --server-dir
                     (default: the same for Next.js, server/ otherwise), --deliver button|message,

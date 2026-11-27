@@ -3,7 +3,7 @@ import { store } from "./store";
 // ui-calling:imports
 
 /**
- * Your UI_calling runtime: the surfaces your agent can open, and where their events go.
+ * Your ui-calling runtime: the surfaces your agent can open, and where their events go.
  * `npx ui-calling new <name>` scaffolds a surface and registers it here.
  * Guide: `npx ui-calling guide`.
  */
@@ -23,7 +23,7 @@ export const ui = createUiCalling({
   // Wake the agent if a user opens a screen and does nothing for 10 minutes.
   abandonAfterMs: 10 * 60_000,
   onEvent: async (event) => {
-    console.log(`[ui_calling] ${event.surface} ${event.type}: ${event.description}`);
+    console.log(`[ui-calling] ${event.surface} ${event.type}: ${event.description}`);
   },
 });
 

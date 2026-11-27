@@ -88,11 +88,11 @@ function layout(page, { title, body, toc }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${title === "UI_calling" ? title : `${escape(title)} · UI_calling`}</title>
+<title>${title === "ui-calling" ? title : `${escape(title)} · ui-calling`}</title>
 <link rel="stylesheet" href="${rel("style.css")}">
 </head>
 <body>
-<header class="top"><div class="bar"><a class="brand" href="${rel("index.html")}">UI_calling</a><nav aria-label="Site">${nav}</nav></div></header>
+<header class="top"><div class="bar"><a class="brand" href="${rel("index.html")}">ui-calling</a><nav aria-label="Site">${nav}</nav></div></header>
 <div class="shell">
   <aside class="side">${recipeLinks}${contents}</aside>
   <main>${body}<p class="source">Source: <a href="${REPO + page.src}" target="_blank" rel="noopener">${page.src}</a></p></main>

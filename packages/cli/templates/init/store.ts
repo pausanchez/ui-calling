@@ -1,7 +1,7 @@
 import { sqliteStore } from "@ui-calling/sqlite";
 
 /**
- * UI_calling's sessions, events and files, in Node's built-in SQLite: links and the agent's context survive
+ * ui-calling's sessions, events and files, in Node's built-in SQLite: links and the agent's context survive
  * restarts. The file is .ui-calling/ui-calling.db, or node_modules/.cache/ui-calling/ in development, where the
  * dev server doesn't watch it. Set UI_CALLING_DB to use another file: a test sets it (or ":memory:") before importing
  * this, so it never touches your dev data. On serverless hosts without a lasting disk, implement UiStore for your database.

@@ -1,10 +1,10 @@
-# Releasing UI_calling
+# Releasing ui-calling
 
 Everything is prepared; nothing is published. Going public happens in the order below, and each step that publishes something is done by a person, on purpose.
 
 ## 0. The gate
 
-UI_calling goes public only after it runs in a real project (decided 2026-11-24). Two fresh coding agents have built a full return flow from the package alone (see PR #14), but a real product with real users comes first.
+ui-calling goes public only after it runs in a real project (decided 2026-11-24). Two fresh coding agents have built a full return flow from the package alone (see PR #14), but a real product with real users comes first.
 
 ## 1. Decisions
 

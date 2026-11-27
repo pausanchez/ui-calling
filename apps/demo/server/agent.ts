@@ -55,7 +55,7 @@ export type InboundTrace = {
 
 type Conversation = {
   id: string;
-  /** `wa:<portfolio>:<bsuid>`: who this chat is with, as UI_calling sessions see it. */
+  /** `wa:<portfolio>:<bsuid>`: who this chat is with, as ui-calling sessions see it. */
   subject: string;
   /** Where replies go: the BSUID always, the phone only when Meta shared it. */
   whatsapp?: { bsuid: string; phone?: string; username?: string; phoneNumberId?: string; businessPhone?: string };

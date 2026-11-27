@@ -169,7 +169,7 @@ try {
       "export namespace Route {\n  type Data = { returnUrl?: string; title?: string };\n  export type HeadersFunction = () => Record<string, string>;\n  export type MetaFunction = (args: { loaderData: Data | undefined }) => unknown[];\n  export type ComponentProps = { params: { token: string }; loaderData: Data };\n}\n",
   });
   const rrOut = run(rr, "init", "--time-zone", "Europe/Madrid");
-  assert.match(rrOut, /Setting up UI_calling for React Router/);
+  assert.match(rrOut, /Setting up ui-calling for React Router/);
   assert.doesNotMatch(rrOut, /dev:api/);
   assert.ok(!existsSync(join(rr, "server/index.ts")), "no Hono server: React Router has its own");
   assert.match(read("init-react-router", "app/routes.ts"), /import \{ type RouteConfig, index, route \}[\s\S]*route\("api\/ui\/\*", "routes\/api\.ui\.ts"\),\n  route\("s\/:token", "routes\/s\.\$token\.tsx"\),\n  index\("routes\/home\.tsx"\)\] satisfies/);
@@ -194,7 +194,7 @@ try {
   // A plain Express app: the Node handler, the screens' page, and a .gitignore when there's none.
   const ex = project("init-express", { scripts: { dev: "tsx watch server.ts" }, dependencies: { express: "5" } });
   const exOut = run(ex, "init", "--time-zone", "Europe/Madrid");
-  assert.match(exOut, /Setting up UI_calling for Express/);
+  assert.match(exOut, /Setting up ui-calling for Express/);
   assert.match(exOut, /uiCallingNodeHandler\(ui, \{ dev:/);
   assert.match(exOut, /before any body parser/);
   assert.match(exOut, /react react-dom vite @vitejs\/plugin-react tailwindcss @tailwindcss\/vite/, "the screens' page needs React and a bundler");

@@ -45,7 +45,7 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
   if (opts.dev && process.env.NODE_ENV !== "production") {
     // They open any user's screens with no login: localhost only, so a dev server reachable through a tunnel or
     // a misconfigured deploy (`next dev` in production, NODE_ENV=development) doesn't expose them.
-    console.warn("[ui_calling] dev routes are on (/dev/links, /dev/events): localhost only, never in production");
+    console.warn("[ui-calling] dev routes are on (/dev/links, /dev/events): localhost only, never in production");
     app.use("/dev/*", async (c, next) => {
       const host = new URL(c.req.url).hostname;
       if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(host)) return c.json({ error: "not_found" }, 404);

@@ -42,7 +42,7 @@ In the demo the reply is specific because the event names the step: "I saw you s
 - **Timers live in the process.** They're re-armed after a restart, but on serverless nothing runs between requests. There, check open sessions from a scheduled job instead.
 - **The link stays valid** until it expires, so "the link still works" is true. Check `ttlSeconds` before promising it.
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 

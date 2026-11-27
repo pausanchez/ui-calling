@@ -83,7 +83,7 @@ By hand: `upload("photos", file)` returns `{ id, name, type, size }` or throws `
 - **Next.js serves GET, POST and DELETE** on the API route; `init` writes all three. Without DELETE, removing a photo fails.
 - **Big files:** `sqliteStore()` keeps files as blobs in the same database, fine for photos on one machine. For more, implement `putFile`, `getFile`, `listFiles` and `deleteFile` on object storage.
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 

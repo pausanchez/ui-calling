@@ -1,7 +1,7 @@
 {
   "name": "@ui-calling/ai-sdk",
   "version": "0.0.1",
-  "description": "Use UI_calling surfaces as tools with the Vercel AI SDK.",
+  "description": "Use ui-calling surfaces as tools with the Vercel AI SDK.",
   "license": "MIT",
   "repository": {
     "type": "git",

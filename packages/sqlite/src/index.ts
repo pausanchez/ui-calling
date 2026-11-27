@@ -12,7 +12,7 @@ import { UnknownEventError, matchesForget, type EventQuery, type ForgetFilter, t
  * Needs a writable disk that outlives the process. On serverless platforms (e.g. Vercel functions)
  * use a hosted database instead: implement `UiStore` for it.
  *
- * `store.db` is the open `DatabaseSync`: keep your own tables (drafts, mock data) next to UI_calling's.
+ * `store.db` is the open `DatabaseSync`: keep your own tables (drafts, mock data) next to ui-calling's.
  */
 export function sqliteStore(path = DEFAULT_PATH()): SqliteStore {
   // Opened on first use, not on import: `next build` imports route modules to collect page data, and would

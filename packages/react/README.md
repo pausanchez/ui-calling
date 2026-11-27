@@ -1,6 +1,6 @@
 # @ui-calling/react
 
-React bindings for UI_calling screens: typed data and events from the contract, and lifecycle tracking (opened, left, completed) for free.
+React bindings for ui-calling screens: typed data and events from the contract, and lifecycle tracking (opened, left, completed) for free.
 
 ```tsx
 import { SurfaceProvider, useSurface } from "@ui-calling/react";

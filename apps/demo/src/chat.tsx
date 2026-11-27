@@ -335,7 +335,7 @@ function Inbound({ inbound, identity }: { inbound: InboundTrace | null; identity
     ["BSUID", p.bsuid, "messages[].from_user_id: always present, unique within your business portfolio"],
     ["Phone", p.phone ?? "not shared", "messages[].from: only after a recent conversation or if they're in your contact book"],
     ["Username", p.username ? `@${p.username}` : undefined, "contacts[].profile.username"],
-    ["Session subject", inbound.subject, "whatsappSubject(portfolio, bsuid): what UI_calling ties links to"],
+    ["Session subject", inbound.subject, "whatsappSubject(portfolio, bsuid): what ui-calling ties links to"],
     ["Customer", identity.customer ? `${identity.customer.name} (${identity.customer.id})` : "not linked", "your BSUID → customer links"],
   ];
   return (

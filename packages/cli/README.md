@@ -1,6 +1,6 @@
 # ui-calling
 
-The CLI for UI_calling: sets it up in your app, scaffolds screens, and prints the guide.
+The CLI for ui-calling: sets it up in your app, scaffolds screens, and prints the guide.
 
 ```bash
 npx ui-calling init                     # Next.js, Vite or React Router: runtime, store, API routes, screen route

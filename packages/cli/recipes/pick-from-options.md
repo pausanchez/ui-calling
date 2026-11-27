@@ -72,7 +72,7 @@ try {
 - **Show what's left** ("2 of 5 spots left") and put it in `summarize` too, so the agent can suggest another option when one fills up.
 - **No `retryable` on "full".** Only mark errors retryable when trying again can work (a timeout, a 503).
 
-## In the UI_calling repo
+## In the ui-calling repo
 
 Not in the package; for reading if you have the repo.
 
