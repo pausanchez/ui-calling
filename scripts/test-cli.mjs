@@ -224,7 +224,7 @@ try {
     const text = run(tmp, "guide", name);
     for (const [, link] of text.matchAll(/\]\(([^)#]+\.(?:md|ts|tsx))\)/g)) {
       // From the CLI, repo files are GitHub links (the repo has no other address for someone with only the package).
-      const repoPath = link.replace("https://github.com/pausanchez/ui_calling/blob/main/", "");
+      const repoPath = link.replace("https://github.com/pausanchez/ui-calling/blob/main/", "");
       const onDisk = repoPath === link ? join(recipesDir, link) : join(root, repoPath);
       assert.ok(existsSync(onDisk), `${f} links to ${link}, which doesn't exist`);
     }

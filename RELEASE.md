@@ -52,7 +52,7 @@ Then tag it: `git tag v0.1.0 && git push origin v0.1.0`, and write a GitHub rele
 
 1. Settings → Pages → Source: **GitHub Actions**.
 2. Actions → **Docs** → Run workflow. It runs `npm run docs` and deploys `docs-site/`. It never runs on its own.
-3. The site is `https://pausanchez.github.io/ui_calling/`. Link it from the README and each package's `homepage`.
+3. The site is `https://pausanchez.github.io/ui-calling/`. Link it from the README and each package's `homepage`.
 
 `npm run docs` builds the same site locally (open `docs-site/index.html`). It's made from README.md, GUIDE.md and the recipes, so it always matches what `npx ui-calling guide` prints.
 

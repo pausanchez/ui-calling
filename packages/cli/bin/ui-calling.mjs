@@ -594,7 +594,7 @@ async function devCommand(which) {
  * CLI: print them as GitHub links instead. Links to other recipes (x.md) stay as they are.
  */
 function repoLinks(md) {
-  return md.replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui_calling/blob/main/${posix.normalize(posix.join("packages/cli/recipes", rel))})`);
+  return md.replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui-calling/blob/main/${posix.normalize(posix.join("packages/cli/recipes", rel))})`);
 }
 
 // `<command> --help` shows that command's usage instead of running it.

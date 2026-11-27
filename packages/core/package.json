@@ -5,12 +5,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pausanchez/ui_calling.git",
+    "url": "git+https://github.com/pausanchez/ui-calling.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/pausanchez/ui_calling#readme",
+  "homepage": "https://github.com/pausanchez/ui-calling#readme",
   "bugs": {
-    "url": "https://github.com/pausanchez/ui_calling/issues"
+    "url": "https://github.com/pausanchez/ui-calling/issues"
   },
   "keywords": [
     "ui-calling",

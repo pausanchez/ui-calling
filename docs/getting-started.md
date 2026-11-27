@@ -4,10 +4,10 @@ ui-calling is a preview: not on npm yet, and the API may still change. What it i
 
 ## Install and set up
 
-> **Not on npm yet.** Install the preview tarballs from the [v0.0.1-preview release](https://github.com/pausanchez/ui_calling/releases/tag/v0.0.1-preview); `npx ui-calling` then runs the installed CLI. Add the adapter for your agent SDK the same way (`ui-calling-anthropic-0.0.1.tgz`, `-ai-sdk-`, `-openai-` or `-mcp-`).
+> **Not on npm yet.** Install the preview tarballs from the [v0.0.1-preview release](https://github.com/pausanchez/ui-calling/releases/tag/v0.0.1-preview); `npx ui-calling` then runs the installed CLI. Add the adapter for your agent SDK the same way (`ui-calling-anthropic-0.0.1.tgz`, `-ai-sdk-`, `-openai-` or `-mcp-`).
 
 ```bash
-R=https://github.com/pausanchez/ui_calling/releases/download/v0.0.1-preview
+R=https://github.com/pausanchez/ui-calling/releases/download/v0.0.1-preview
 npm install $R/ui-calling-core-0.0.1.tgz $R/ui-calling-server-0.0.1.tgz $R/ui-calling-react-0.0.1.tgz $R/ui-calling-sqlite-0.0.1.tgz $R/ui-calling-0.0.1.tgz zod
 ```
 

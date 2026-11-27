@@ -6,7 +6,7 @@ import { marked } from "marked";
 
 const root = resolve(import.meta.dirname, "..");
 const out = join(root, "docs-site");
-const REPO = "https://github.com/pausanchez/ui_calling/blob/main/";
+const REPO = "https://github.com/pausanchez/ui-calling/blob/main/";
 const recipesDir = join(root, "packages/cli/recipes");
 
 // Every page: its source in the repo, where it's served, and its name in the nav.
