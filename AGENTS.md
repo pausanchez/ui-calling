@@ -38,6 +38,12 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 
 - Each package's `exports` lists `ui-calling-source` (→ `src/`) before `types`/`default` (→ `dist/`). The repo turns that condition on in `tsconfig.json` (`customConditions`), in every `tsx` call (`-C ui-calling-source`) and in the demo's Vite config. Never import from `dist/` inside the repo.
 - `npm run build` runs tsup in every package. tsup settings live in each `package.json` (`"tsup"`), including `removeNodeProtocol: false`: without it, `node:sqlite` is emitted as `sqlite` and breaks for users.
+- To try a change in a real app, create the app first (`create-next-app` refuses a non-empty folder), then pack the packages and install the tarballs into it:
+
+  ```bash
+  npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp --pack-destination /tmp/ui-calling
+  cd my-app && npm install /tmp/ui-calling/*.tgz
+  ```
 - After changing the `init` templates, verify them in a real app, not only with the typecheck. Vite too: `npm create vite@latest -- --template react-ts`, add Tailwind, then `init` patches its `vite.config`, `src/main.tsx` and `tsconfig.json`, which only works while they keep create-vite's shape. React Router too: `npx create-react-router@latest`, then `init` writes two routes and patches `app/routes.ts`; check `react-router build`, which refuses server modules that reach the browser bundle. TypeScript accepted a page that Next.js 16 refused to prerender. Use `create-next-app`, install the packed tarballs, run `init`, `new` (both templates) and `next build`, then open a screen in `next dev` with `npx ui-calling link`: a build can pass while the dev server never renders the page.
 
 ## Conventions

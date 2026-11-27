@@ -122,6 +122,9 @@ for (const page of pages) {
   writeFileSync(file, layout(page, render(page)));
 }
 writeFileSync(join(out, "style.css"), readFileSync(join(root, "scripts/docs-style.css")));
+// Images the README shows (docs/*.png), at the same relative path.
+mkdirSync(join(out, "docs"), { recursive: true });
+for (const f of readdirSync(join(root, "docs"))) writeFileSync(join(out, "docs", f), readFileSync(join(root, "docs", f)));
 // GitHub Pages runs Jekyll unless told not to; it would skip nothing here, but it's slower and surprising.
 writeFileSync(join(out, ".nojekyll"), "");
 console.log(`docs-site/: ${pages.length} pages`);

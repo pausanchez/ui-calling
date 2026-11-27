@@ -2,16 +2,21 @@
 
 **Send a screen from any chat. Your agent hears what happens on it.**
 
-Your agent is talking to a customer on WhatsApp. To process a return it needs the items, a reason for each, photos and a pickup slot, and chat is bad at all four. So it calls `show_order_return({ order_id })` like any other tool. The customer gets a link and opens a real screen. They pick the items, give a reason, and stop before the photos. Ninety seconds later the agent reads:
+Your agent is talking to a customer on WhatsApp. To process a return it needs the items, a reason for each, photos and a pickup slot, and chat is bad at all four. So it calls `show_order_return({ order_id })` like any other tool. The customer gets a link and opens a real screen. They pick the items, give a reason, and stop before the photos. Fifteen minutes later (you choose how long: `abandonAfterMs`) the agent reads:
 
 ```
-- 26 Nov 08:20:11 UTC [order_return] opened: User opened the screen
-- 26 Nov 08:20:40 UTC [order_return] items_chosen: Step 1 of 5: chose items to return: 1× BL-200 {…}
-- 26 Nov 08:21:02 UTC [order_return] reasons_given: Step 2 of 5: gave reasons: BL-200 damaged ("jar cracked") {…}
-- 26 Nov 08:22:32 UTC [order_return] abandoned: User stopped partway without finishing. Last step: Step 2 of 5: gave reasons: BL-200 damaged ("jar cracked")
+08:20:11 [order_return] opened: User opened the screen
+08:20:40 [order_return] items_chosen: Step 1 of 5:
+         chose items to return: 1× BL-200
+08:21:02 [order_return] reasons_given: Step 2 of 5:
+         gave reasons: BL-200 damaged ("jar cracked")
+08:36:02 [order_return] abandoned: User stopped partway
+         without finishing. Last step: Step 2 of 5
 ```
 
-It writes back in the chat: "No rush. Want to send the photos later? The link keeps your progress." Reopening the link starts at the photos.
+It writes back in the chat: "Want to send the photos later? The link keeps your progress." Reopening the link starts at the photos.
+
+![The demo: a WhatsApp-style chat on the left; on the right, the "Agent context" tab with the events from the return screen, ending in the abandon that woke the agent](docs/abandon.png)
 
 That's UI_calling. The screen a tool opens is a *surface*: a link that works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
 
@@ -62,7 +67,7 @@ They combine: a UI_calling event can resume a paused workflow, and a surface is 
 
 ## What people build with it
 
-The fit is a task that is hard in chat (uploads, live availability, a long list, a third-party SDK) and where stalling or failing matters to the follow-up.
+The fit is a task that is hard in chat (uploads, live availability, a long list, a third-party SDK) and where stalling or failing matters to the follow-up. These four run today, in the demo or as blocks you copy:
 
 | Use case | What the screen does | In this repo |
 |---|---|---|
@@ -70,10 +75,8 @@ The fit is a task that is hard in chat (uploads, live availability, a long list,
 | Delivery reschedule | Live slots, "that slot is gone", carrier outages | Block: `order-status` |
 | Account linking | Verify an email code, link the chat to a customer | Block: `link-account` |
 | Shift picking | Open shifts that others may take first | Demo surface (`shift_picker`) |
-| Insurance claim intake | Photos, documents, date and place, partial progress | Not yet: the return's step and photo parts fit |
-| Identity verification | ID capture and a vendor SDK, abandon at the selfie | Not yet |
-| Appointment booking and intake | A calendar across locations, a long intake form | Not yet |
-| B2B reorder | A catalog with the customer's prices and quantities | Not yet: parts exist (`quantity-stepper`, `choice-card`) |
+
+The same pieces fit insurance claim intake (the return's steps and photo upload), identity verification (abandon at the selfie), appointment booking across locations, and B2B reorders (`quantity-stepper`, `choice-card`).
 
 ## Try the demo
 
@@ -128,7 +131,12 @@ npm test
 
 ## Add it to your project
 
-> **Not on npm yet.** Until the first release, build the tarballs in this repo (see [Building and publishing](#building-and-publishing)) and install them in your app, `ui-calling` included. `npx ui-calling` then runs the installed CLI.
+> **Not on npm yet.** Install the preview tarballs from the [v0.0.1-preview release](https://github.com/pausanchez/ui_calling/releases/tag/v0.0.1-preview); `npx ui-calling` then runs the installed CLI. Add the adapter for your agent SDK the same way (`ui-calling-anthropic-0.0.1.tgz`, `-ai-sdk-`, `-openai-` or `-mcp-`).
+
+```bash
+R=https://github.com/pausanchez/ui_calling/releases/download/v0.0.1-preview
+npm install $R/ui-calling-core-0.0.1.tgz $R/ui-calling-server-0.0.1.tgz $R/ui-calling-react-0.0.1.tgz $R/ui-calling-sqlite-0.0.1.tgz $R/ui-calling-0.0.1.tgz zod
+```
 
 ```bash
 npx ui-calling init
@@ -138,7 +146,7 @@ npx ui-calling init
 npx ui-calling new shift-picker
 ```
 
-`init` detects Next.js, Vite or React Router and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page. On Vite it writes a small Hono API server in `server/`, proxies `/api` to it and renders screens on `/s/:token`. On React Router it writes the API as a resource route and the `/s/:token` route. On Express, Fastify and other servers it tells you how to mount them (`uiCallingNodeHandler` for Node servers). Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
+`init` detects Next.js, Vite or React Router and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page. On Vite it writes a small Hono API server in `server/`, proxies `/api` to it and renders screens on `/s/:token`. On React Router it writes the API as a resource route and the `/s/:token` route. On Express, Fastify and other servers it tells you how to mount them (`uiCallingNodeHandler` for Node servers). Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. Verified end to end on Next.js 16, Vite, React Router 7 and Express 5, and in four pilot apps that coding agents built from the packages alone. [GUIDE.md](packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](AGENTS.md).
 
 ## The primitives
 
@@ -227,101 +235,18 @@ throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { r
 
 The demo has switches in the side panel to simulate both outages.
 
-## Language
+## Security, in short
 
-Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:
+- The link carries only a random token; the server keeps its hash. Data is resolved when the page opens, scoped to the user the link was sent to.
+- Events reach the agent marked as user data, not instructions, and fields like codes and passwords are never shown to it.
+- Links expire, close once the user finishes, and can be bound to one device.
+- A link can wake the agent only a few times a minute.
 
-- The link's `label` (from `runTool` or `onLink`) is picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
-- `useSurface()` returns `locale` for dates and currency (`Intl`), and the provider sets `<html lang>`.
-- Blocks keep their strings in a dictionary at the top of the component file (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
-- `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
+The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](packages/cli/GUIDE.md#security-model).
 
-## WhatsApp identity (BSUIDs)
+## Roadmap
 
-WhatsApp identifies users by a **business-scoped user ID** (BSUID), unique within your business portfolio. The phone number only comes along under Meta's conditions, and users with a WhatsApp username may never share it. `@ui-calling/core/whatsapp` covers the plumbing:
-
-| Helper | What it does |
-|---|---|
-| `verifyWhatsAppSignature(raw, header, secret)` | Checks `X-Hub-Signature-256`, so you only trust signed webhooks |
-| `parseWhatsAppWebhook(body)` | Flattens Meta's payload: `bsuid`, `parentBsuid?`, `phone?`, `username?`, and `identityChange?` for BSUID changes |
-| `whatsappSubject(portfolioId, bsuid)` | The session `subject`: `wa:<portfolio>:<bsuid>` |
-| `whatsappCtaMessage({ recipient \| to, … })` | The link button, addressed to a BSUID or a phone number |
-
-Your product keeps the BSUID → customer link. The demo shows the whole flow:
-- **Number shared:** match it in the CRM.
-- **No number:** the agent only gets a `link_account` screen, where the user verifies with an email code (redacted from the agent's context). Then it carries on with the question.
-- **The user changes number:** the link moves to the new BSUID.
-
-See [GUIDE.md](packages/cli/GUIDE.md#whatsapp-who-is-the-subject).
-
-## Persistence
-
-Sessions and events are what keep links working and the agent's context intact, so keep them across restarts:
-
-```ts
-createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui-calling/ui-calling.db, node_modules/.cache/ui-calling/ in development
-```
-
-- **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
-- **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own; on Vite, `init` passes `.ui-calling/dev.db`, which survives a clean install.
-- **Tests** set `UI_CALLING_DB` (a temp file, or `:memory:`) before importing your runtime, so they never touch the dev database.
-- **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
-- **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
-- **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
-- **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](scripts/test-store.ts) run against any store; copy them into your tests.
-
-The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
-
-## Security model
-
-- The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
-- **A link is a bearer token.** Anyone holding it can open it until it expires or is completed, as with a password-reset link. `subject` decides *whose* data the screen shows, not *who* may open it. So send links only to the user, and keep sensitive screens short-lived.
-- **Keep tokens out of logs.** The token is in the page's path (`/s/<token>`) and the API's, so access logs, APM and analytics that record full URLs store live tokens. Strip or hash the path there, or keep links short-lived.
-- **One subject per person.** Files and drafts follow the subject: a newer link can show the same user's earlier uploads (never delete them). Never use a shared subject (a household account, "anonymous") for screens with personal data.
-- **Only offered tools run.** Pass the `filter` you gave the tool list to the manual-loop helpers (`anthropicToolResult`, `runResponsesFunctionCall`, `runChatToolCall`) or to `ui.runTool(name, input, who, filter)`; a tool the model wasn't offered is refused even if it calls it by name.
-- **A link can wake the agent a few times a minute at most** (`maxWakesPerMinute`, default 6); after that its events are recorded quietly.
-- **Dev routes answer on localhost only,** and never when `NODE_ENV` is `"production"`.
-- Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
-- Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks).
-- API responses are `no-store` and send `Referrer-Policy: no-referrer`. `SurfaceScreen` from `init` adds `<meta name="referrer" content="no-referrer">` to the page, and the Next.js page also sets it in its HTML, so the token doesn't leak to sites the screen links to. With a screen of your own, set it on `/s/*` yourself.
-- Once the user finishes (`complete()`), the link is closed: reads and actions are refused, so a tab left open or a forwarded link can't act again.
-- Link-preview crawlers don't run JavaScript, so they never fetch data or trigger `opened`.
-- Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
-- On WhatsApp, sessions are tied to the BSUID from a signed webhook, and surfaces check that it's linked to the customer whose data they show.
-- **Make the link look like you.** People decide whether to tap a link in a chat by who it seems to come from. Serve screens from your own domain, set your brand in the tokens, and have the agent say what the screen is for before sending it.
-
-## Building and publishing
-
-```bash
-npm run build
-```
-
-This builds every package with tsup into `dist/` (ESM, `.d.ts` and source maps). Published packages ship only `dist/` and a short README. Inside this repo, a custom export condition, `ui-calling-source`, makes TypeScript, tsx and Vite read `src/` directly, so development and tests never need a build.
-
-To try a release before publishing, create the app first, then pack the packages and install the tarballs into it (installing them before `create-next-app` makes it refuse a non-empty folder):
-
-```bash
-npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp --pack-destination /tmp/ui-calling
-```
-
-```bash
-cd my-app && npm install /tmp/ui-calling/*.tgz
-```
-
-This was verified end to end, installed from tarballs:
-- **Next.js 16** (`create-next-app` defaults): `init`, `new` with both templates, `next build` and `next start`, and a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
-- **Vite** (`npm create vite@latest -- --template react-ts`, plus Tailwind): `init`, `new` with both templates, `add link-account`, `tsc -b` and `vite build`, then screens opened at 375px with `npm run dev` and `npm run dev:api` running.
-- **React Router 7** (`create-react-router`): `init`, `new` with both templates, `add link-account`, `npm run typecheck` and `react-router build`, then screens opened at 375px in `react-router dev`.
-- **Express 5**: `init`, `new` with both templates, `uiCallingNodeHandler` mounted before `express.json()`, then `link` and `events` against it.
-- **Four pilot apps** built from the packages alone, against the real model: Next.js with the Anthropic tool runner, Vite and Hono with the AI SDK, React Router 7 with the Anthropic manual loop, and Express with the OpenAI Responses API.
-
-Before the first publish, decide:
-- **The npm `@ui-calling` scope.** Create the npm organization, and check that the unscoped `ui-calling` name for the CLI is free.
-- **The first version number.** Every package is `0.0.1`, and internal dependencies use `^0.0.1`.
-
-## Not done yet
-
-- A short recording of the abandon wake for this README, the demo's chat next to its "Agent context" tab
+- A hosted demo with the scripted agent, so you can try it without cloning
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)

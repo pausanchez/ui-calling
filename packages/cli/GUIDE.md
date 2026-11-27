@@ -8,7 +8,7 @@ This guide is for people and coding agents adding surfaces to a product. Print i
 
 **Starting from a task?** The recipes give the whole answer for one job: a form with several steps, a photo upload, picking a slot that can fill up, linking a WhatsApp user, and more. List them with `npx ui-calling guide recipes` and print one with `npx ui-calling guide <recipe>`. This guide holds the rules and the reference they build on.
 
-> **Not on npm yet.** Until the first release, install the packages from tarballs (`npm install ./vendor/*.tgz`, built with `npm pack` in the UI_calling repo), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
+> **Not on npm yet.** Until the first release, install the packages from the tarballs in the [v0.0.1-preview release](https://github.com/pausanchez/ui_calling/releases/tag/v0.0.1-preview) (the README's "Add it to your project" has the command), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
 
 ## Mental model: three files per surface
 
@@ -542,6 +542,51 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 - **Delivery failures.** A send can fail after Meta accepted it. `parseWhatsAppStatuses(body)` reads `sent`, `delivered`, `read` and `failed` (with its error code) from the same webhook.
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
 - **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`. On Next.js, `init`'s page reads it from `UI_CALLING_RETURN_URL`. On a phone, a link to it opens the WhatsApp app. On a computer (WhatsApp Web), the chat is still open in the tab the screen came from, so when the screen opened in a tab of its own, `SurfaceProvider` closes it instead of opening WhatsApp's "open the app" page; if the browser won't close it, it shows "All done. Close this tab to go back to the chat." A screen opened in the chat's own tab (a web chat that navigates to it) follows the link back.
+
+## Language
+
+Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:
+
+- The link's `label` (from `runTool` or `onLink`) is picked from the contract's `cta: { en: "View order", es: "Ver pedido" }`.
+- `useSurface()` returns `locale` for dates and currency (`Intl`), and the provider sets `<html lang>`.
+- Blocks keep their strings in a dictionary at the top of the component file (`ORDER_STATUS_MESSAGES`). Add a language by adding a key, or override single strings with the `messages` prop.
+- `describe()` lines for the agent stay in English; the agent translates when it talks to the user.
+
+## Persistence
+
+Sessions and events are what keep links working and the agent's context intact, so keep them across restarts:
+
+```ts
+createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui-calling/ui-calling.db, node_modules/.cache/ui-calling/ in development
+```
+
+- **`sqliteStore()`** uses Node's built-in `node:sqlite` (Node 22.13+), so there's nothing to install or run. `init` sets it up.
+- **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own; on Vite, `init` passes `.ui-calling/dev.db`, which survives a clean install.
+- **Tests** set `UI_CALLING_DB` (a temp file, or `:memory:`) before importing your runtime, so they never touch the dev database.
+- **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
+- **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
+- **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
+- **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](../../scripts/test-store.ts) run against any store; copy them into your tests.
+
+The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
+
+## Security model
+
+- The URL carries only a random 192-bit token; the server stores its SHA-256 hash, never the token itself.
+- **A link is a bearer token.** Anyone holding it can open it until it expires or is completed, as with a password-reset link. `subject` decides *whose* data the screen shows, not *who* may open it. So send links only to the user, and keep sensitive screens short-lived.
+- **Keep tokens out of logs.** The token is in the page's path (`/s/<token>`) and the API's, so access logs, APM and analytics that record full URLs store live tokens. Strip or hash the path there, or keep links short-lived.
+- **One subject per person.** Files and drafts follow the subject: a newer link can show the same user's earlier uploads (never delete them). Never use a shared subject (a household account, "anonymous") for screens with personal data.
+- **Only offered tools run.** Pass the `filter` you gave the tool list to the manual-loop helpers (`anthropicToolResult`, `runResponsesFunctionCall`, `runChatToolCall`) or to `ui.runTool(name, input, who, filter)`; a tool the model wasn't offered is refused even if it calls it by name.
+- **A link can wake the agent a few times a minute at most** (`maxWakesPerMinute`, default 6); after that its events are recorded quietly.
+- **Dev routes answer on localhost only,** and never when `NODE_ENV` is `"production"`.
+- Data is resolved when the page opens, scoped to the session's `subject`. Nothing sensitive lives in the URL.
+- Links expire (`ttlSeconds`, default 1h; a surface can set its own, e.g. 10 minutes for identity checks).
+- API responses are `no-store` and send `Referrer-Policy: no-referrer`. `SurfaceScreen` from `init` adds `<meta name="referrer" content="no-referrer">` to the page, and the Next.js page also sets it in its HTML, so the token doesn't leak to sites the screen links to. With a screen of your own, set it on `/s/*` yourself.
+- Once the user finishes (`complete()`), the link is closed: reads and actions are refused, so a tab left open or a forwarded link can't act again.
+- Link-preview crawlers don't run JavaScript, so they never fetch data or trigger `opened`.
+- Event payloads are validated with Zod and reach the agent inside a `<ui_events>` block marked as user data, not instructions. Fields listed in an event's `redact` (codes, passwords) are never stored or shown to the agent.
+- On WhatsApp, sessions are tied to the BSUID from a signed webhook, and surfaces check that it's linked to the customer whose data they show.
+- **Make the link look like you.** People decide whether to tap a link in a chat by who it seems to come from. Serve screens from your own domain, set your brand in the tokens, and have the agent say what the screen is for before sending it.
 
 ## Testing without servers
 
