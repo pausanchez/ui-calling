@@ -319,8 +319,6 @@ Before the first publish, decide:
 
 ## Not done yet
 
-- MCP Apps output: render the same surface inline in clients that support it (Claude, ChatGPT), and send the link everywhere else
-- Resume adapters for LangGraph interrupts and AG-UI, so a `completed` or `abandoned` event resumes a paused run
 - A short recording of the abandon wake for this README, the demo's chat next to its "Agent context" tab
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
