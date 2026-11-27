@@ -428,6 +428,10 @@ function CallCard({ t, endpoint }: { t: ToolTrace; endpoint?: string }) {
           <Step n={2} title="ui.runTool() failed">
             <p className="rounded-md bg-destructive/10 p-3 text-xs text-destructive">{t.error}</p>
           </Step>
+        ) : t.silent !== undefined ? (
+          <Step n={2} title="ui.runTool() counts a silent wake: nothing is sent to the customer">
+            <p className="text-xs text-muted-foreground">Reason: {t.silent || "none given"}</p>
+          </Step>
         ) : (
           <Step n={2} title="ui.runTool() validates them, creates a session and returns a link">
             <Json value={t.result ?? "running…"} />
@@ -444,7 +448,7 @@ function CallCard({ t, endpoint }: { t: ToolTrace; endpoint?: string }) {
             </Step>
           )
         )}
-        {!t.error && (
+        {!t.error && t.silent === undefined && (
           <Step n={4} title="WhatsApp Cloud API request: the agent's reply with the link as a button">
             {t.whatsapp ? (
               <>

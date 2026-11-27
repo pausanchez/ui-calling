@@ -1,20 +1,20 @@
 import type { ToolRun, UiCalling, Who } from "@ui-calling/core";
 
 type Filter = (toolName: string) => boolean;
+/** `woken`: a screen event started this turn, not a user message, so `stay_silent` is offered too. The run then has `run.silent`. */
+type Turn = { woken?: boolean };
 
 /** Function tools for the Responses API: `client.responses.create({ tools })`. */
-export function openaiResponsesTools(ui: UiCalling, filter?: Filter) {
+export function openaiResponsesTools(ui: UiCalling, filter?: Filter, turn: Turn = {}) {
   return ui
-    .tools()
-    .filter((t) => !filter || filter(t.name))
+    .tools({ ...turn, filter })
     .map((t) => ({ type: "function" as const, name: t.name, description: t.description, parameters: t.input_schema, strict: false }));
 }
 
 /** Function tools for Chat Completions: `client.chat.completions.create({ tools })`. */
-export function openaiChatTools(ui: UiCalling, filter?: Filter) {
+export function openaiChatTools(ui: UiCalling, filter?: Filter, turn: Turn = {}) {
   return ui
-    .tools()
-    .filter((t) => !filter || filter(t.name))
+    .tools({ ...turn, filter })
     .map((t) => ({
       type: "function" as const,
       function: { name: t.name, description: t.description, parameters: t.input_schema },
@@ -23,7 +23,7 @@ export function openaiChatTools(ui: UiCalling, filter?: Filter) {
 
 /**
  * Run a Responses API `function_call` output item. Returns the `function_call_output` item to add to
- * the next request's input, and the run (with `run.link` to deliver when `run.ok`).
+ * the next request's input, and the run: deliver `run.link` when `run.ok`, send nothing this turn when `run.silent`.
  */
 export async function runResponsesFunctionCall(
   ui: UiCalling,

@@ -189,7 +189,7 @@ await check("restart: a link sent before a restart still opens, and the agent's 
   const before = sqliteStore(file);
   const first = boot(before).ui;
   const run = await first.runTool("show_ticket", { ticket_id: "T-7", locale: "es" }, { conversationId: "conv", subject: "u" });
-  assert.ok(run.ok);
+  assert.ok(run.ok && !run.silent);
   const token = run.link.url.split("/s/")[1];
   await first.emit(token, "opened");
   before.close();
@@ -213,7 +213,7 @@ await check("restart: an abandon timer that was running is re-armed with the tim
   const before = sqliteStore(file);
   const first = boot(before).ui; // no abandonAfterMs here, so the only timer will be the restored one
   const run = await first.runTool("show_ticket", { ticket_id: "T-8" }, { conversationId: "conv2", subject: "u" });
-  assert.ok(run.ok);
+  assert.ok(run.ok && !run.silent);
   await first.emit(run.link.url.split("/s/")[1], "opened");
   before.close();
 

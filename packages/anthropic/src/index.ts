@@ -7,19 +7,26 @@ export type AnthropicAdapterOptions = {
   onLink?: (link: SurfaceLink) => void;
   /** Offer only some surfaces, e.g. hide everything but an account-linking screen until the user is known. */
   filter?: (toolName: string) => boolean;
+  /** A screen event started this turn, not a user message: also offer `stay_silent`. */
+  woken?: boolean;
+  /** Called when the model calls `stay_silent`: send nothing this turn, whatever text it writes after. */
+  onSilent?: (reason: string) => void;
 };
 
-/** Tool definitions for a manual loop with `client.messages.create({ tools })`. */
-export function anthropicTools(ui: UiCalling, filter?: (toolName: string) => boolean): Anthropic.Tool[] {
+/**
+ * Tool definitions for a manual loop with `client.messages.create({ tools })`. On a woken turn pass
+ * `{ woken: true }` to add `stay_silent`; `anthropicToolResult` then returns `run.silent` when it's called.
+ */
+export function anthropicTools(ui: UiCalling, filter?: (toolName: string) => boolean, turn: { woken?: boolean } = {}): Anthropic.Tool[] {
   return ui
-    .tools()
-    .filter((t) => !filter || filter(t.name))
+    .tools({ ...turn, filter })
     .map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema as Anthropic.Tool.InputSchema }));
 }
 
 /**
  * Run one `tool_use` block from a manual loop. Returns the `tool_result` block to send back and the
- * run (with `run.link` to deliver when `run.ok`). Failures come back as `is_error` results, never throws.
+ * run: deliver `run.link` when `run.ok`, and send nothing this turn when `run.silent`. Failures come back
+ * as `is_error` results, never throws.
  * Pass the `filter` you gave `anthropicTools`, so a tool the model wasn't offered is refused.
  */
 export async function anthropicToolResult(
@@ -47,8 +54,7 @@ export async function anthropicToolResult(
  */
 export function anthropicRunnableTools(ui: UiCalling, who: Who | (() => Who), opts: AnthropicAdapterOptions = {}) {
   return ui
-    .tools()
-    .filter((t) => !opts.filter || opts.filter(t.name))
+    .tools({ woken: opts.woken, filter: opts.filter })
     .map((t) =>
       betaTool({
         name: t.name,
@@ -56,7 +62,8 @@ export function anthropicRunnableTools(ui: UiCalling, who: Who | (() => Who), op
         inputSchema: t.input_schema as { type: "object" },
         run: async (input) => {
           const run = await ui.runTool(t.name, input, typeof who === "function" ? who() : who);
-          if (run.ok) opts.onLink?.(run.link);
+          if (run.ok && run.silent) opts.onSilent?.(run.reason);
+          else if (run.ok) opts.onLink?.(run.link);
           return run.content;
         },
       }),
