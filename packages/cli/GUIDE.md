@@ -33,7 +33,7 @@ This writes `shift-picker.surface.ts`, `shift-picker.tsx` and `shift-picker.serv
 3. **Screen.** Render `data`, call `emit(event, payload)`, call `complete()` when the user is done, and keep every string in the messages object.
 4. **Register** the implementation in `createUiCalling({ surfaces: [...] })` and render the component on your surface route.
 5. **Typecheck.**
-6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back (without tab switches; `--all` shows them). Add `--conversation <id>` to put the screen in your agent's conversation, so its events reach your agent end to end; `--url http://localhost:3100` if your app isn't on the default port. `events --time-zone Europe/Madrid` uses the clock you give `formatEventsForAgent`. `link` takes the file name (`shift-picker`), the surface name (`shift_picker`) or the tool name (`show_shift_picker`), and finds your app at `devUrl` in `ui-calling.json` (`init` writes it; `--url` overrides it). Values that read as JSON keep their type: `faulty='["door_seal"]'` is an array, `qty=2` a number. The test user's `subject` is `dev-user` (change it with `--subject`): in development, give it a test account, the way a WhatsApp subject maps to a real one. With the `link-account` block, link it once at startup: `if (process.env.NODE_ENV !== "production") identity.link("dev-user", "C-1001")`.
+6. **Click through it** without an agent: with your dev server running, `npx ui-calling link shift-picker worker_id=W-207` prints a link for a test user, and `npx ui-calling events` prints what the agent would read back (without tab switches; `--all` shows them). Add `--conversation <id>` to put the screen in your agent's conversation, so its events reach your agent end to end; `--url http://localhost:3100` if your app isn't on the default port. `events` writes times in your runtime's `timeZone`, like the agent reads them (`--time-zone` for another). `link` also prints what the agent is told the screen will show (your `summarize`). It takes the file name (`shift-picker`), the surface name (`shift_picker`) or the tool name (`show_shift_picker`), and finds your app at `devUrl` in `ui-calling.json` (`init` writes it; `--url` overrides it). Values that read as JSON keep their type: `faulty='["door_seal"]'` is an array, `qty=2` a number. The test user's `subject` is `dev-user` (change it with `--subject`): in development, give it a test account, the way a WhatsApp subject maps to a real one. With the `link-account` block, link it once at startup: `if (process.env.NODE_ENV !== "production") identity.link("dev-user", "C-1001")`.
 
 **A screen with several steps** (a return, a claim, an application): `npx ui-calling new <name> --template steps`. It writes a working three-step screen with a saved draft, resume, and the phone's back button, built on `useSurfaceSteps` and the parts below. Change the steps to yours.
 
@@ -64,7 +64,7 @@ Run it in your project's root. It detects Next.js, Vite or React Router and writ
 - **Next.js:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
 - **Vite:** see "Vite" below: an API server, the `/api` proxy and the `/s/:token` route.
 - **React Router:** see "React Router" below: two routes.
-- **`.gitignore`:** adds `.ui-calling/`, where the database goes. On Next.js the development database is in `node_modules/.cache/ui-calling/` instead, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading. A clean install (`rm -rf node_modules`, `npm ci`) wipes it, with linked test accounts and drafts. Elsewhere it's `.ui-calling/dev.db`. Either way, `UI_CALLING_DB` points it at another file.
+- **`.gitignore`:** adds `.ui-calling/`, where the database goes, and creates the file if there isn't one. Tailwind v4 scans every file git doesn't ignore, so without it the database's writes rebuild your CSS on each screen event. On Next.js the development database is in `node_modules/.cache/ui-calling/` instead, because Next's dev server watches the project: a database inside it reloads the page on every event, and the screen never finishes loading. A clean install (`rm -rf node_modules`, `npm ci`) wipes it, with linked test accounts and drafts. Elsewhere it's `.ui-calling/dev.db`. Either way, `UI_CALLING_DB` points it at another file.
 - `ui-calling.json`: where things live. With it, `ui-calling new` and `ui-calling add` register each surface in `ui.ts` and `surface-screen.tsx` by themselves, from any folder of the app. In a monorepo, run `init` in the app that serves the screens, not at the root.
 - **A note in `AGENTS.md` / `CLAUDE.md`,** if you have them, so coding agents find this guide.
 
@@ -95,9 +95,20 @@ If `app/routes.ts` isn't in create-react-router's shape, `init` lists the two `r
 ### Other servers
 
 Mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} />`:
+- **Express, Fastify, Koa or `http.createServer`:** `uiCallingNodeHandler(ui, { basePath, dev })` from `@ui-calling/server/node` is a Node `(req, res)` handler. Mount it **before any body parser** (`express.json()`), because it reads the raw body for events and uploads, and keep `basePath` equal to the mount path. On Fastify, call it with `request.raw` and `reply.raw`.
+
+  ```ts
+  import { uiCallingNodeHandler } from "@ui-calling/server/node";
+  app.use("/api/ui", uiCallingNodeHandler(ui, { dev: process.env.NODE_ENV !== "production" }));
+  app.use(express.json()); // your own routes after it
+  ```
 - **`uiCallingHandler(ui, { basePath, dev })`** is a plain `(Request) => Response`, for Bun, Deno, Workers, Remix and the like. `basePath` (default `"/api/ui"`) is the path it's mounted at; keep it equal to `SurfaceProvider`'s `endpoint`. Pass `dev: process.env.NODE_ENV === "development"` to get the routes behind `ui-calling link` and `events`. Serve GET, POST and DELETE.
 - **`uiCallingRoutes(ui, { dev })`** is a Hono app; mount it with `app.route("/api/ui", …)`. It has no `basePath`.
 - **Keep `ui.ts` out of the browser bundle.** It opens the database and reads `process.env`: import it only from server code.
+- **The screens are a React page.** Install `react react-dom @ui-calling/react` and Tailwind v4, and bundle one entry that renders `<SurfaceScreen token={token} returnUrl={…} />` when the path is `/s/<token>`. With a plain Node server, Vite works well:
+  - In development, run it inside your server with `createServer({ server: { middlewareMode: true } })` and `app.use(vite.middlewares)`, after your API routes.
+  - In production, `vite build`, then serve `dist/` statically, with any other path falling back to `index.html`.
+  - Either way, send `Referrer-Policy: no-referrer` on `/s/*`.
 - **Load your agent where the API runs.** If the agent subscribes with `ui.onEvent` in its own module, that module must be loaded wherever the API is mounted. Frameworks that load routes lazily (React Router, serverless functions) otherwise start without a listener after a restart, and a screen event's wake is lost until the next chat message. Import something from the agent module in the API route.
 
 ### Options and blocks
@@ -198,8 +209,32 @@ convo.messages.push(...result.responseMessages);   // `result.response.messages`
 `who` can also be a function, `() => ({ conversationId, subject })`, read when a tool runs. A full agent with the AI SDK is in "Running the agent on events" below.
 
 **OpenAI** (`@ui-calling/openai`, no SDK dependency):
-- Responses API: `openaiResponsesTools(ui)` and `runResponsesFunctionCall(ui, item, who)`.
-- Chat Completions: `openaiChatTools(ui)` and `runChatToolCall(ui, toolCall, who)`.
+- Responses API: `openaiResponsesTools(ui, filter?)` and `runResponsesFunctionCall(ui, item, who, filter?)`.
+- Chat Completions: `openaiChatTools(ui, filter?)` and `runChatToolCall(ui, toolCall, who, filter?)`.
+
+The run helpers never throw. They return `{ item, run }` (Responses: `item` is the `function_call_output`) or `{ message, run }` (Chat Completions: a `tool` message). Send that back, and deliver `run.link` when `run.ok`. A Responses API loop with the `openai` SDK:
+
+```ts
+const links: SurfaceLink[] = [];
+for (let round = 0; round < 6; round++) {
+  const response = await openai.responses.create({
+    model: "gpt-5.5", instructions: SYSTEM_PROMPT,
+    input: convo.items, tools: openaiResponsesTools(ui, filter),
+  });
+  // The model needs its own output back (reasoning, function_call) before the results.
+  convo.items.push(...response.output);
+  const calls = response.output.filter((i) => i.type === "function_call");
+  if (!calls.length) break;
+  for (const call of calls) {
+    const { item, run } = await runResponsesFunctionCall(ui, call, { conversationId, subject }, filter);
+    if (run.ok) links.push(run.link);
+    convo.items.push(item);
+  }
+}
+// send response.output_text from the last round, with each link as a button
+```
+
+`convo.items` starts as `[{ role: "user", content: text }]`, and woken turns push `formatEventsForAgent(events)` the same way. With `store: false`, ask for `include: ["reasoning.encrypted_content"]` so reasoning items can go back in; or keep `previous_response_id` instead of the items. The prompt in "Prompting the agent" works unchanged.
 
 **Any MCP client** (`@ui-calling/mcp`): `createUiCallingMcpServer(ui, { who: (extra) => … })`, connected to any transport. MCP knows nothing of your end user, so `who` derives the user from the request (e.g. `extra.authInfo`).
 
@@ -518,6 +553,11 @@ const link = await ui.call("show_shift_picker", { worker_id: "W-207", locale: "e
 const token = link.url.split("/s/")[1];
 
 const open = await routes.request(`/sessions/${token}`);                  // what the screen loads
+await routes.request(`/sessions/${token}/events`, {                       // what SurfaceProvider sends next; loading
+  method: "POST",                                                         // isn't opening, and only this starts the
+  headers: { "Content-Type": "application/json" },                        // abandonAfterMs timer
+  body: JSON.stringify({ type: "opened" }),
+});
 await routes.request(`/sessions/${token}/events`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -627,7 +667,8 @@ type UiEvent = {
   kind: "lifecycle" | "domain" | "error";
   payload: unknown;                // validated; redacted fields show "[redacted]"
   description: string;             // the line the agent reads
-  state?: string;                  // summarize() after the event: what the screen showed
+  state?: string;                  // summarize() after the event: what the screen showed. Never on errors: a refused
+                                   // action changed nothing, and the screen's next event carries the fresh state
   wake: boolean;
   at: string;                      // ISO time
 };
@@ -641,7 +682,7 @@ type UiEvent = {
 | `left` | The tab is hidden or closed | No |
 | `returned` | The user comes back to a screen they'd left | No |
 | `completed` | `complete()` is called; the link closes | No |
-| `abandoned` | No event with `wake: true` (and no failed action that woke the agent) by `abandonAfterMs` after the last activity; names the last step saved, if any. A refused action doesn't count as finishing. Off unless set | Yes |
+| `abandoned` | No event with `wake: true` (and no failed action that woke the agent) by `abandonAfterMs` after the last activity, counted from the `opened` the screen reports (a `GET` of the session alone doesn't start it); names the last step saved, if any. A refused action doesn't count as finishing. Off unless set | Yes |
 | `error` | `resolve`, a handler, `reportError` or a render crash failed | First of each kind |
 
 ### React

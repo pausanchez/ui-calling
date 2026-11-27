@@ -66,11 +66,12 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
       return c.json({ url: run.link?.url, conversationId, toolResult: run.content });
     });
     app.get("/dev/events/:conversationId", async (c) => {
-      const timeZone = c.req.query("timeZone");
+      // The runtime's zone unless asked for another: the same clock the agent reads.
+      const timeZone = c.req.query("timeZone") ?? ui.timeZone;
       // ?hide=left,returned leaves out event types, as an agent usually does with tab switches.
       const hide = new Set((c.req.query("hide") ?? "").split(",").filter(Boolean));
       const events = (await ui.events(c.req.param("conversationId"))).filter((e) => !hide.has(e.type));
-      return c.text(formatEventsForAgent(events, timeZone ? { timeZone } : {}) || "(no events yet)");
+      return c.text(formatEventsForAgent(events, { timeZone }) || "(no events yet)");
     });
   }
 

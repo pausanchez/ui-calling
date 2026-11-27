@@ -446,6 +446,8 @@ export function createUiCalling(opts: UiCallingOptions) {
 
   const api = {
     store,
+    /** The zone times are written in for the agent (`createUiCalling`'s `timeZone`, default UTC). */
+    timeZone: opts.timeZone ?? "UTC",
     /**
      * Get every event, like the `onEvent` option, from code that imports `ui`: your agent module can subscribe
      * itself instead of `ui.ts` importing it (an import cycle). Returns a function that unsubscribes.

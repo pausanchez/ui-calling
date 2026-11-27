@@ -10,6 +10,8 @@ import { aiSdkTools } from "@ui-calling/ai-sdk";
 import { openaiChatTools, openaiResponsesTools, runChatToolCall, runResponsesFunctionCall } from "@ui-calling/openai";
 import { createUiCallingMcpServer } from "@ui-calling/mcp";
 import { uiCallingHandler } from "@ui-calling/server";
+import { uiCallingNodeHandler } from "@ui-calling/server/node";
+import { Readable, Writable } from "node:stream";
 
 const ticket = defineSurface({
   name: "ticket",
@@ -131,6 +133,45 @@ await check("server: uiCallingHandler serves the routes as a plain fetch handler
   const missing = await handler(new Request("https://app.example.com/api/ui/sessions/nope"));
   assert.equal(missing.status, 404, "UiCallingError status survives the basePath mount");
   assert.equal(((await missing.json()) as { error: string }).error, "not_found");
+});
+
+await check("server: uiCallingNodeHandler serves Node (req, res), mounted under Express's originalUrl", async () => {
+  const node = uiCallingNodeHandler(ui);
+  const run = await ui.runTool("show_ticket", input, who);
+  assert.ok(run.ok);
+  const token = run.link.url.split("/s/")[1];
+  // Express inside app.use("/api/ui", …): req.url loses the mount path, originalUrl keeps it.
+  const send = async (method: string, path: string, body?: unknown) => {
+    const req = Object.assign(Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]), {
+      method,
+      url: path.replace("/api/ui", ""),
+      originalUrl: path,
+      headers: { host: "localhost:3000", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    });
+    const chunks: Buffer[] = [];
+    const headers: Record<string, unknown> = {};
+    const res = Object.assign(
+      new Writable({
+        write(chunk, _enc, done) {
+          chunks.push(Buffer.from(chunk));
+          done();
+        },
+      }),
+      { statusCode: 0, setHeader: (k: string, v: unknown) => void (headers[k] = v) },
+    );
+    const finished = new Promise((ok) => res.on("finish", ok));
+    await node(req as never, res as never);
+    await finished;
+    return { status: res.statusCode, headers, json: JSON.parse(Buffer.concat(chunks).toString() || "null") };
+  };
+  const open = await send("GET", `/api/ui/sessions/${token}`);
+  assert.equal(open.status, 200);
+  assert.equal(open.json.surface, "ticket");
+  assert.equal(open.headers["referrer-policy"], "no-referrer");
+  const posted = await send("POST", `/api/ui/sessions/${token}/events`, { type: "closed", payload: {} });
+  assert.equal(posted.status, 200, "a streamed body reaches the handler");
+  assert.ok((await ui.events("c1")).some((e) => e.type === "closed"));
+  assert.equal((await send("GET", "/api/ui/sessions/nope")).status, 404);
 });
 
 console.log(`\n${passed} checks passed`);

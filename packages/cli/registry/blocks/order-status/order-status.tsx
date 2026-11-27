@@ -280,6 +280,7 @@ export function OrderStatus({ messages }: { messages?: Partial<OrderStatusMessag
                 key={o.date + o.window}
                 disabled={busy}
                 className={btn("outline", "justify-between")}
+                aria-label={`${day(o.date)}, ${o.window}`}
                 onClick={() => run(() => emit("reschedule_delivery", o), t.movedTo(`${day(o.date)}, ${o.window}`))}
               >
                 <span className="first-letter:uppercase">{day(o.date)}</span>

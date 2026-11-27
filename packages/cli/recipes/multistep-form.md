@@ -40,7 +40,7 @@ export const claim = defineSurface({
 
 ## Server
 
-Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and on a double tap returns `ctx.unchanged()`: no second event, so the agent hears one submission.
+Each handler validates its step, saves it, and returns fresh data. The furthest step only moves forward, so going back to edit doesn't lose progress. The last handler checks everything again, and on a double tap returns `ctx.unchanged()`: no second event, so the agent hears one submission. It saves the link it was sent from (`ctx.session.id`), so the same link reloads on "Sent" while a later link for the same record starts a new draft.
 
 ```ts
 // Your drafts table, in the store `init` wrote (store.ts): store.db is a node:sqlite DatabaseSync. The steps
@@ -55,7 +55,8 @@ function save(id: string, subject: string, patch: Partial<Draft>, reached: Step)
 }
 
 export const claimImpl = implement(claim, {
-  resolve: async ({ id, choice }, ctx) => load(id, ctx.subject, choice), // applies the prefill, see the prefill recipe
+  // Applies the prefill (see the prefill recipe). A draft sent through another link is done: this link starts a new one.
+  resolve: async ({ id, choice }, ctx) => load(id, ctx.subject, { prefill: choice, session: ctx.session.id }),
   summarize: (d) =>
     d.submitted
       ? `Submitted as ${d.submitted.reference}: details "${d.draft.details}", choice ${d.draft.choice}.`

@@ -321,6 +321,8 @@ function setUpReactRouter({ runtime, screen, done, todo }) {
 
 /** Frameworks built on Vite that bring their own server: Vite's setup (a Hono API and a proxy) would be wrong there. */
 const OWN_SERVER = { "@remix-run/dev": "Remix", "@tanstack/react-start": "TanStack Start", "@sveltejs/kit": "SvelteKit", astro: "Astro", nuxt: "Nuxt", "vike": "Vike" };
+// Node servers: the API mounts with uiCallingNodeHandler, and the screens need a bundle of their own.
+const NODE_SERVER = { express: "Express", fastify: "Fastify", koa: "Koa" };
 
 /** The port in the dev script (`--port 5320`, `-p 3001`), if it names one. */
 function devScriptPort(pkg) {
@@ -339,7 +341,8 @@ function init() {
     process.exit(1);
   }
   const ownServer = Object.keys(OWN_SERVER).find((d) => deps[d]);
-  const framework = flag("--framework", deps.next ? "next" : deps["@react-router/dev"] ? "react-router" : ownServer ? "other" : deps.vite ? "vite" : "other");
+  const nodeServer = Object.keys(NODE_SERVER).find((d) => deps[d]);
+  const framework = flag("--framework", deps.next ? "next" : deps["@react-router/dev"] ? "react-router" : ownServer || nodeServer ? "other" : deps.vite ? "vite" : "other");
   if (!["next", "vite", "react-router", "other"].includes(framework)) {
     console.error(`--framework is next, vite, react-router or other, not "${framework}".`);
     process.exit(1);
@@ -357,8 +360,12 @@ function init() {
   const serverLib = flag("--server-dir", raw?.serverDir ?? (framework === "next" ? lib : "server"));
   const runtime = join(serverLib, "ui.ts");
   const screen = join(lib, "surface-screen.tsx");
-  const label = { next: "Next.js", vite: "Vite", "react-router": "React Router" }[framework] ?? (ownServer && !flag("--framework") ? `${OWN_SERVER[ownServer]} (its own server: the API is yours to mount)` : "your project");
+  const detected = !flag("--framework") && (ownServer ? `${OWN_SERVER[ownServer]} (its own server: the API is yours to mount)` : nodeServer ? `${NODE_SERVER[nodeServer]} (the API and the screens' page are yours to mount)` : null);
+  const label = { next: "Next.js", vite: "Vite", "react-router": "React Router" }[framework] ?? (detected || "your project");
   console.log(`Setting up UI_calling for ${label}\n`);
+  if (framework === "other" && !flag("--framework") && !ownServer && !nodeServer) {
+    console.log("No Next.js, Vite, React Router or Node server (Express, Fastify, Koa) found: using the generic setup. --framework next|vite|react-router picks one.\n");
+  }
 
   // Flags become string literals in ui.ts: escape them, so a quote can't break the file.
   const literal = (v) => JSON.stringify(String(v)).slice(1, -1);
@@ -417,8 +424,12 @@ function init() {
     }
   }
 
-  // The production database lives in .ui-calling/ (in development it's under node_modules/.cache).
-  if (existsSync(".gitignore") && !/^\/?\.ui-calling\/?$/m.test(readFileSync(".gitignore", "utf8"))) {
+  // The database lives in .ui-calling/ (on Next.js, the development one is under node_modules/.cache). Tailwind v4
+  // scans what git doesn't ignore: without this, every database write rebuilds the CSS.
+  if (!existsSync(".gitignore")) {
+    writeFileSync(".gitignore", "node_modules/\n\n# UI_calling's SQLite database\n.ui-calling/\n");
+    console.log("  write  .gitignore");
+  } else if (!/^\/?\.ui-calling\/?$/m.test(readFileSync(".gitignore", "utf8"))) {
     appendFileSync(".gitignore", "\n# UI_calling's SQLite database\n.ui-calling/\n");
     console.log("  update .gitignore");
   }
@@ -456,7 +467,9 @@ function init() {
 
   const pm = existsSync("pnpm-lock.yaml") ? "pnpm add" : existsSync("yarn.lock") ? "yarn add" : existsSync("bun.lockb") || existsSync("bun.lock") ? "bun add" : "npm install";
   // Only what's missing. zod must be a direct dependency: contracts import it.
-  const wanted = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", "@ui-calling/sqlite", "zod", ...(framework === "vite" ? ["hono", "@hono/node-server", "tsx"] : [])];
+  // A Node server has no React yet: the screens' page needs it, Tailwind and a bundler (Vite, see the guide).
+  const screenDeps = nodeServer && framework === "other" ? ["react", "react-dom", "vite", "@vitejs/plugin-react", "tailwindcss", "@tailwindcss/vite"] : [];
+  const wanted = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", "@ui-calling/sqlite", "zod", ...(framework === "vite" ? ["hono", "@hono/node-server", "tsx"] : []), ...screenDeps];
   const missing = wanted.filter((d) => !deps[d]);
   const steps = [];
   if (missing.length) {
@@ -472,8 +485,12 @@ function init() {
   if (framework === "vite") steps.push(`Run the API next to Vite: npm run dev:api (and npm run dev). Vite proxies /api to it.`);
   if (framework === "other") {
     steps.push(
-      `Serve the API: mount uiCallingHandler(ui) from "@ui-calling/server" at /api/ui on your server (any framework that takes (Request) => Response; for Hono/Express-style apps, uiCallingRoutes(ui)).`,
-      `Route /s/:token in your app to <SurfaceScreen token={token} /> from ${screen}, with Referrer-Policy: no-referrer on that page.`,
+      nodeServer
+        ? `Serve the API, before any body parser: app.use("/api/ui", uiCallingNodeHandler(ui, { dev: process.env.NODE_ENV !== "production" })), with uiCallingNodeHandler from "@ui-calling/server/node".`
+        : `Serve the API at /api/ui: uiCallingHandler(ui) from "@ui-calling/server" for frameworks that take (Request) => Response, uiCallingRoutes(ui) for Hono, or uiCallingNodeHandler(ui) from "@ui-calling/server/node" for Express, Fastify and other Node servers.`,
+      nodeServer
+        ? `Serve the screens: a React entry that renders <SurfaceScreen token={token} /> from ${screen} on /s/:token, bundled with Vite (middleware mode in development, vite build for production), with Referrer-Policy: no-referrer on /s/*. Guide: npx ui-calling guide other.`
+        : `Route /s/:token in your app to <SurfaceScreen token={token} /> from ${screen}, with Referrer-Policy: no-referrer on that page.`,
     );
   }
   steps.push(
@@ -510,7 +527,7 @@ async function devCommand(which) {
     return res;
   };
   if (which === "events") {
-    // Same clock as your agent: pass the zone you give formatEventsForAgent (e.g. --time-zone Europe/Madrid).
+    // Same clock as your agent: the runtime's timeZone, unless --time-zone asks for another.
     // Tab switches (left, returned) are noise to an agent, which usually filters them: --all shows them too.
     const tz = flag("--time-zone");
     const query = new URLSearchParams({ ...(tz ? { timeZone: tz } : {}), ...(rest.includes("--all") ? {} : { hide: "left,returned" }) });
@@ -557,6 +574,13 @@ async function devCommand(which) {
     process.exit(1);
   }
   console.log(json.url);
+  // What the agent is told the screen will show: your summarize() for the data it opens with.
+  const seen = (() => {
+    try {
+      return JSON.parse(json.toolResult ?? "{}").what_they_will_see;
+    } catch {}
+  })();
+  if (seen) console.log(`\nThe agent reads: ${seen}`);
   // The link's address comes from the app's baseUrl (PUBLIC_URL): say so when it isn't the server we just talked to.
   if (new URL(json.url).origin !== new URL(base).origin) {
     console.log(`\nNote: this link points at ${new URL(json.url).origin}, but your dev server answered at ${new URL(base).origin}. Set PUBLIC_URL=${new URL(base).origin} for the app, or open it at ${new URL(base).origin}${new URL(json.url).pathname}.`);
@@ -600,7 +624,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
     let wroteServer = false;
     for (const name of names) {
       if (registry.parts[name]) {
-        console.log(name);
+        console.log(`Adding part ${name}`);
         addPart(name).dependencies.forEach((d) => deps.add(d));
         continue;
       }
@@ -609,7 +633,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
         console.error(`Unknown block or part "${name}". Run "ui-calling list".`);
         process.exit(1);
       }
-      console.log(name);
+      console.log(`Adding block ${name}`);
       block.files.forEach(copy);
       block.dependencies.forEach((d) => deps.add(d));
       if (!block.server) continue;
