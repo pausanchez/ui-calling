@@ -13,6 +13,7 @@ const recipesDir = join(root, "packages/cli/recipes");
 const recipes = readdirSync(recipesDir).filter((f) => f.endsWith(".md") && f !== "README.md").sort();
 const pages = [
   { src: "README.md", href: "index.html", nav: "Overview" },
+  { src: "docs/getting-started.md", href: "getting-started.html", nav: "Getting started" },
   { src: "packages/cli/GUIDE.md", href: "guide.html", nav: "Guide" },
   { src: "packages/cli/recipes/README.md", href: "recipes/index.html", nav: "Recipes" },
   ...recipes.map((f) => ({ src: `packages/cli/recipes/${f}`, href: `recipes/${f.replace(/\.md$/, ".html")}` })),
@@ -124,7 +125,7 @@ for (const page of pages) {
 writeFileSync(join(out, "style.css"), readFileSync(join(root, "scripts/docs-style.css")));
 // Images the README shows (docs/*.png), at the same relative path.
 mkdirSync(join(out, "docs"), { recursive: true });
-for (const f of readdirSync(join(root, "docs"))) writeFileSync(join(out, "docs", f), readFileSync(join(root, "docs", f)));
+for (const f of readdirSync(join(root, "docs")).filter((f) => !f.endsWith(".md"))) writeFileSync(join(out, "docs", f), readFileSync(join(root, "docs", f)));
 // GitHub Pages runs Jekyll unless told not to; it would skip nothing here, but it's slower and surprising.
 writeFileSync(join(out, ".nojekyll"), "");
 console.log(`docs-site/: ${pages.length} pages`);
