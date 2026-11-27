@@ -311,7 +311,7 @@ cd my-app && npm install /tmp/ui-calling/*.tgz
 This was verified end to end, installed from tarballs:
 - **Next.js 16** (`create-next-app` defaults): `init`, `new` with both templates, `next build` and `next start`, and a link minted through `ui.runTool`, opened in the browser, with its event recorded in SQLite.
 - **Vite** (`npm create vite@latest -- --template react-ts`, plus Tailwind): `init`, `new` with both templates, `add link-account`, `tsc -b` and `vite build`, then screens opened at 375px with `npm run dev` and `npm run dev:api` running.
-- **Three pilot apps** built from the packages alone, against the real model: Next.js with the Anthropic tool runner, Vite and Hono with the AI SDK, and React Router 7 with the Anthropic manual loop.
+- **Four pilot apps** built from the packages alone, against the real model: Next.js with the Anthropic tool runner, Vite and Hono with the AI SDK, React Router 7 with the Anthropic manual loop, and Express with the OpenAI Responses API.
 
 Before the first publish, decide:
 - **The npm `@ui-calling` scope.** Create the npm organization, and check that the unscoped `ui-calling` name for the CLI is free.
@@ -323,7 +323,7 @@ Before the first publish, decide:
 - Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
-- Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK one ran in a pilot)
+- Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK and OpenAI ones ran in pilots)
 - More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
 - A PIN step before a sensitive screen shows its data (`bindToDevice` already stops a forwarded link from working on another device)
 - More languages in the blocks (en and es today)
