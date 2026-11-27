@@ -6,6 +6,8 @@ Automation tools count the conversations they handled. ui-calling is for the one
 
 > **Preview.** Not on npm yet and not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
 
+![The whole loop in the demo: a customer asks to return a cracked blender, the agent sends a link, they get two steps into the return screen and leave; the abandon wakes the agent, which writes first in the chat](docs/demo.gif)
+
 Your agent is talking to a customer on WhatsApp. To process a return it needs the items, a reason for each, photos and a pickup slot, and chat is bad at all four. So it calls `show_order_return({ order_id })` like any other tool. The customer gets a link and opens a real screen. They pick the items, give a reason, and stop before the photos. Fifteen minutes later the agent reads:
 
 ```
@@ -19,8 +21,6 @@ Your agent is talking to a customer on WhatsApp. To process a return it needs th
 ```
 
 It writes back in the chat: "Want to send the photos later? The link keeps your progress." Reopening the link starts at the photos.
-
-![The demo: a WhatsApp-style chat on the left; on the right, the "Agent context" tab with the events from the return screen, ending in the abandon that woke the agent](docs/abandon.png)
 
 That's ui-calling. The screen a tool opens is a *surface*: a link that works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
 
