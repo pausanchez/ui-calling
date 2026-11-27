@@ -2,7 +2,7 @@
 
 **Send a screen from any chat. Your agent hears what happens on it.**
 
-Automation tools count the conversations they handled. ui-calling is for the ones that would otherwise be lost: the user who stopped halfway, the payment that failed, the slot that disappeared.
+Built for the conversations that would otherwise be lost: the user who stops halfway, the payment that fails, the slot that disappears.
 
 > **Preview.** Not on npm yet and not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
 
@@ -20,9 +20,9 @@ Your agent is talking to a customer on WhatsApp. To process a return it needs th
          without finishing. Last step: Step 2 of 5
 ```
 
-It writes back in the chat: "Want to send the photos later? The link keeps your progress." Reopening the link starts at the photos.
+It writes back in the chat: "Want to send the photos later? The link keeps your progress." Reopening the link starts at the photos. (Abandon is opt-in: nothing wakes the agent until you set `abandonAfterMs`.)
 
-That's ui-calling. The screen a tool opens is a *surface*: a link that works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
+That's ui-calling: tool calling lets an agent call your functions, ui-calling lets it call a screen. Three words you'll see: a *screen* is what the user opens; a *surface* is how you define one in code (a contract, a server part and the screen), and the agent gets it as a tool; a *block* is a ready-made surface you copy into your project. A surface's link works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
 
 Most events are just recorded for the agent's next turn. The ones that matter (a finished task, an abandon, a failure) **wake** the agent: they start a turn on their own, so it can write first, as in the return above.
 
@@ -105,7 +105,7 @@ No API key? A scripted agent runs the same loop. Options, resets and running it 
 
 ## Get started
 
-Install the preview, set it up in your app and generate your first screen:
+First install the preview: it's not on npm yet, so the [install command in Getting started](docs/getting-started.md#install-and-set-up) installs the packages and the CLI from the release. Then set it up in your app and generate your first screen:
 
 ```bash
 npx ui-calling init
@@ -116,24 +116,11 @@ npx ui-calling new shift-picker
 
 ## Errors reach the agent too
 
-When something behind the screen fails, the agent hears about it as an `error` event. It never claims an action happened, and it can pick up the conversation from there.
+- When something behind the screen fails (an API down when the page loads, a timeout on an action, a crash in the browser), the agent gets an `error` event that says what the user tried. It never claims an action happened.
+- The first error of each kind wakes the agent, so it can say so in the chat; retries are recorded quietly.
+- The user sees a generic message in their language, and raw error messages, which can carry secrets, stay in your server's log.
 
-| Source | How it's caught | Example |
-|---|---|---|
-| `load` | `resolve` throws when the page opens | Orders API returns 503 |
-| `action` | An event handler throws; includes what the user tried | Carrier API times out while rescheduling |
-| `client` | `reportError(err, context)` from `useSurface()` | A maps or payments SDK fails in the browser |
-| `render` | Built-in error boundary in `<SurfaceProvider>` | A component crashes |
-
-```ts
-throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { retryable: true });
-```
-
-- Throw `SurfaceError` for failures you expect. Its code and message go to the agent as written, so keep them free of secrets. Other errors go through `describeError`. By default the agent gets a generic `unexpected` error and the real one is only logged on your server, since raw messages can carry secrets.
-- The first error of each kind in a session wakes the agent. Retries are still recorded, but they don't trigger a new message (`wakeOnError: false` turns waking off).
-- The screen shows the user a generic message in their language, never the upstream error.
-
-The demo has switches in the side panel to simulate both outages.
+Where errors come from and how to throw your own: [GUIDE.md](packages/cli/GUIDE.md#errors).
 
 ## Security, in short
 
@@ -143,6 +130,13 @@ The demo has switches in the side panel to simulate both outages.
 - A link can wake the agent only a few times a minute.
 
 The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](packages/cli/GUIDE.md#security-model).
+
+## Questions people ask
+
+- **WhatsApp's 24-hour window.** Using the screen doesn't reopen it. If the agent wakes more than 24 hours after the user's last message, Meta rejects a free-form reply: check `insideServiceWindow()` and send an approved template instead (ui-calling doesn't build templates). [GUIDE.md](packages/cli/GUIDE.md#sending-on-whatsapp)
+- **Will people trust a link in a chat?** Only if it looks like you. Screens are served from your own domain, with your brand in the design tokens, and the agent says what the screen is for before sending it. Link previews never load data or count as opening the screen.
+- **Serverless hosts.** The built-in store is SQLite, which needs a lasting disk. On hosts without one, implement `UiStore` for your database; a Postgres store is on the roadmap.
+- **Why the name?** Tool calling lets an agent call your functions. ui-calling lets it call a screen, and hear back from it.
 
 ## Roadmap
 
