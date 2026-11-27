@@ -63,7 +63,7 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
         const bad = run.error.code === "invalid_payload" || run.error.code === "unknown_surface";
         return c.json({ error: run.error.code, message: run.error.message }, bad ? 400 : 422);
       }
-      return c.json({ url: run.link?.url, conversationId, toolResult: run.content });
+      return c.json({ url: run.silent ? undefined : run.link.url, conversationId, toolResult: run.content });
     });
     app.get("/dev/events/:conversationId", async (c) => {
       // The runtime's zone unless asked for another: the same clock the agent reads.

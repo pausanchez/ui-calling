@@ -113,8 +113,16 @@ export type SurfaceLink = {
 
 /** The outcome of `runTool`: what to send back to the model, and the link if one was made. */
 export type ToolRun =
-  | { ok: true; content: string; link: SurfaceLink; summary?: string }
+  | { ok: true; silent?: false; content: string; link: SurfaceLink; summary?: string }
+  /** The model called `stay_silent` on a woken turn: send nothing to the user this turn, whatever text follows. */
+  | { ok: true; silent: true; content: string; reason: string }
   | { ok: false; content: string; error: { code: string; message: string } };
+
+/** The built-in tool a woken turn can call instead of writing to the user. Not prefixed: it isn't a surface. */
+export const STAY_SILENT = "stay_silent";
+
+/** A woken turn the agent chose to end without a message: count these to see how often screens wake it for nothing. */
+export type SilentWake = Who & { reason: string; at: string };
 
 export type UiCallingOptions = {
   surfaces: SurfaceImpl<any>[];
@@ -133,6 +141,8 @@ export type UiCallingOptions = {
    * hand the work to a queue (or `waitUntil`) so it isn't cut off when the request ends.
    */
   onEvent?: (event: UiEvent) => void | Promise<void>;
+  /** Called each time a woken turn calls `stay_silent`, e.g. to count wakes that cost tokens and said nothing. */
+  onSilentWake?: (silent: SilentWake) => void | Promise<void>;
   toolPrefix?: string;
   /** Used when a caller doesn't pass `locale`. */
   defaultLocale?: string;
@@ -250,7 +260,9 @@ export function createUiCalling(opts: UiCallingOptions) {
   const claims = new Map<string, { secret: string; until: number }>();
   // Handlers added after creation (ui.onEvent), e.g. from the agent's module, which imports `ui`.
   const listeners = new Set<(event: UiEvent) => void | Promise<void>>();
+  const silentListeners = new Set<(silent: SilentWake) => void | Promise<void>>();
   const byTool = new Map(opts.surfaces.map((i) => [prefix + i.surface.name, i]));
+  if (byTool.has(STAY_SILENT)) throw new Error(`A surface's tool is named ${STAY_SILENT}, which ui-calling reserves: rename the surface or change toolPrefix`);
   const slots: FileSlot[] = opts.surfaces.flatMap((i) => Object.values(i.surface.files ?? {}));
   if (slots.length && !(store.putFile && store.getFile && store.listFiles && store.deleteFile)) {
     throw new Error("A surface declares `files`, but the store can't keep files: use sqliteStore(), MemoryStore, or add putFile/getFile/listFiles/deleteFile to yours");
@@ -444,6 +456,33 @@ export function createUiCalling(opts: UiCallingOptions) {
         }, (err) => console.error("[ui-calling] couldn't restore abandon timers", err))
       : Promise.resolve());
 
+  function surfaceTools(): ToolSpec[] {
+    return opts.surfaces.map(({ surface }) => {
+      const { $schema, ...schema } = z.toJSONSchema(surface.input.extend({ locale: LOCALE })) as Record<string, unknown>;
+      return {
+        name: prefix + surface.name,
+        description: `Opens a screen for the user. ${surface.description} Returns a secure link for the user plus a summary of what they will see.`,
+        input_schema: schema,
+      };
+    });
+  }
+
+  function staySilent(input: unknown, who: Who): ToolRun {
+    // Lenient: a missing reason still keeps the turn quiet, which is what the model asked for.
+    const raw = (input as { reason?: unknown } | null)?.reason;
+    const reason = typeof raw === "string" ? raw.trim().slice(0, 200) : "";
+    const silent: SilentWake = { conversationId: who.conversationId, subject: who.subject, reason, at: new Date().toISOString() };
+    for (const handler of [opts.onSilentWake, ...silentListeners]) {
+      try {
+        void Promise.resolve(handler?.(silent)).catch((err) => console.error("[ui-calling] onSilentWake failed", err));
+      } catch (err) {
+        console.error("[ui-calling] onSilentWake failed", err);
+      }
+    }
+    const content = { status: "silent", note: "Nothing is sent to the user this turn. End the turn without writing a reply." };
+    return { ok: true, silent: true, content: JSON.stringify(content), reason };
+  }
+
   const api = {
     store,
     /** The zone times are written in for the agent (`createUiCalling`'s `timeZone`, default UTC). */
@@ -456,6 +495,11 @@ export function createUiCalling(opts: UiCallingOptions) {
       listeners.add(handler);
       return () => void listeners.delete(handler);
     },
+    /** Like the `onSilentWake` option, from code that imports `ui`. Returns a function that unsubscribes. */
+    onSilentWake(handler: (silent: SilentWake) => void | Promise<void>) {
+      silentListeners.add(handler);
+      return () => void silentListeners.delete(handler);
+    },
     /** Resolves once state from a previous run (abandon timers) has been restored. The first request also starts it. */
     get ready() {
       return restore();
@@ -463,19 +507,15 @@ export function createUiCalling(opts: UiCallingOptions) {
     /** The largest upload any surface accepts, so the HTTP layer can refuse bigger bodies before reading them. */
     maxUploadBytes: Math.max(0, ...slots.map((s) => s.maxBytes)),
 
-    /** Tool definitions for any function-calling LLM: one tool per surface. */
-    tools(): ToolSpec[] {
-      return opts.surfaces.map(({ surface }) => {
-        const { $schema, ...schema } = z.toJSONSchema(surface.input.extend({ locale: LOCALE })) as Record<
-          string,
-          unknown
-        >;
-        return {
-          name: prefix + surface.name,
-          description: `Opens a screen for the user. ${surface.description} Returns a secure link for the user plus a summary of what they will see.`,
-          input_schema: schema,
-        };
-      });
+    /**
+     * Tool definitions for any function-calling LLM: one tool per surface. On a woken turn (a screen event
+     * started it, not a user message) pass `{ woken: true }` to add `stay_silent`, so the agent can end the
+     * turn without writing and you can count it. `filter` picks surfaces (pass the one you give `runTool`);
+     * it never removes `stay_silent`.
+     */
+    tools(turn: { woken?: boolean; filter?: (toolName: string) => boolean } = {}): ToolSpec[] {
+      const surfaces = surfaceTools().filter((t) => !turn.filter || turn.filter(t.name));
+      return turn.woken ? [...surfaces, STAY_SILENT_SPEC] : surfaces;
     },
 
     isUiTool(name: string) {
@@ -723,6 +763,8 @@ export function createUiCalling(opts: UiCallingOptions) {
      * a tool the model wasn't offered is refused even if it calls it by name.
      */
     async runTool(toolName: string, input: unknown, who: Who, allow?: (toolName: string) => boolean): Promise<ToolRun> {
+      // Not a surface, so `allow` (which picks surfaces) doesn't apply. Offer it only on woken turns: `tools({ woken: true })`.
+      if (toolName === STAY_SILENT) return staySilent(input, who);
       try {
         if (allow && !allow(toolName)) throw new UiCallingError("unknown_surface", `Tool ${toolName} isn't available here`);
         const r = await api.call(toolName, input, who);
@@ -759,6 +801,17 @@ export function createUiCalling(opts: UiCallingOptions) {
 }
 
 export type UiCalling = ReturnType<typeof createUiCalling>;
+
+const STAY_SILENT_SPEC: ToolSpec = {
+  name: STAY_SILENT,
+  description:
+    "Ends this turn without sending the user anything. Only for turns a screen started (the user hasn't written): call it when a message wouldn't help them, e.g. the screen already shows the outcome, they're still working on it, or you'd only repeat yourself. Don't write a reply as well.",
+  input_schema: {
+    type: "object",
+    properties: { reason: { type: "string", description: "Why no message helps, in a few words. For the team's metrics, never shown to the user." } },
+    required: ["reason"],
+  },
+};
 
 /** Render events as a block for the agent's context. Marked as runtime data, not user instructions. */
 /**
