@@ -543,6 +543,27 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
 - **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`. On Next.js, `init`'s page reads it from `UI_CALLING_RETURN_URL`. On a phone, a link to it opens the WhatsApp app. On a computer (WhatsApp Web), the chat is still open in the tab the screen came from, so when the screen opened in a tab of its own, `SurfaceProvider` closes it instead of opening WhatsApp's "open the app" page; if the browser won't close it, it shows "All done. Close this tab to go back to the chat." A screen opened in the chat's own tab (a web chat that navigates to it) follows the link back.
 
+## Errors
+
+When something behind the screen fails, the agent hears about it as an `error` event. It never claims an action happened, and it can pick up the conversation from there.
+
+| Source | How it's caught | Example |
+|---|---|---|
+| `load` | `resolve` throws when the page opens | Orders API returns 503 |
+| `action` | An event handler throws; includes what the user tried | Carrier API times out while rescheduling |
+| `client` | `reportError(err, context)` from `useSurface()` | A maps or payments SDK fails in the browser |
+| `render` | Built-in error boundary in `<SurfaceProvider>` | A component crashes |
+
+```ts
+throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { retryable: true });
+```
+
+- Throw `SurfaceError` for failures you expect. Its code and message go to the agent as written, so keep them free of secrets. Other errors go through `describeError`. By default the agent gets a generic `unexpected` error and the real one is only logged on your server, since raw messages can carry secrets.
+- The first error of each kind in a session wakes the agent. Retries are still recorded, but they don't trigger a new message (`wakeOnError: false` turns waking off).
+- The screen shows the user a generic message in their language, never the upstream error.
+
+The demo has switches in its side panel to simulate outages.
+
 ## Language
 
 Every surface tool gets a required `locale` (BCP 47, e.g. `es`, `pt-BR`), so the agent opens the screen in the language of the conversation. The locale is stored on the session, not the URL:
