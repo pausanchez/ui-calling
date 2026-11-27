@@ -2,9 +2,11 @@
 
 **Send a screen from any chat. Your agent hears what happens on it.**
 
+Automation tools count the conversations they handled. ui-calling is for the ones that would otherwise be lost: the user who stopped halfway, the payment that failed, the slot that disappeared.
+
 > **Preview.** Not on npm yet and not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
 
-Your agent is talking to a customer on WhatsApp. To process a return it needs the items, a reason for each, photos and a pickup slot, and chat is bad at all four. So it calls `show_order_return({ order_id })` like any other tool. The customer gets a link and opens a real screen. They pick the items, give a reason, and stop before the photos. Fifteen minutes later the agent reads (how long to wait is yours to set with `abandonAfterMs`; it's off until you set it, and the demo uses 90 seconds):
+Your agent is talking to a customer on WhatsApp. To process a return it needs the items, a reason for each, photos and a pickup slot, and chat is bad at all four. So it calls `show_order_return({ order_id })` like any other tool. The customer gets a link and opens a real screen. They pick the items, give a reason, and stop before the photos. Fifteen minutes later the agent reads:
 
 ```
 08:20:11 [order_return] opened: User opened the screen
@@ -25,16 +27,19 @@ That's ui-calling. The screen a tool opens is a *surface*: a link that works in 
 Most events are just recorded for the agent's next turn. The ones that matter (a finished task, an abandon, a failure) **wake** the agent: they start a turn on their own, so it can write first, as in the return above.
 
 ```
-agent ──tool call──▶ show_order_status({ order_id })
-                        │  session: opaque token, bound to conversation + subject, expires
+agent ──tool call──▶ show_order_return({ order_id })
+                        │  link: opaque token, bound to this conversation
+                        │  and this user, expires
                         ▼
-chat  ◀── "Here's your order 👇" + [View order] button
+chat  ◀── "Let's start your return 👇" + [Start return] button
                         │
-user opens link ──▶ data resolved server-side, scoped to the subject
+user opens link ──▶ data loaded on the server, only what this user may see
                         │
-user acts ──▶ "User rescheduled the delivery to 2026-11-27, 16:00–20:00"  (wake)
+user picks items, gives a reason ──▶ recorded quietly, step by step
+                        │
+15 minutes idle ──▶ "User stopped partway… Step 2 of 5"  (wake)
                         ▼
-agent follows up in the chat: "Done ✅ …"
+agent writes first: "Want to send the photos later?"
 ```
 
 ## Why ui-calling
@@ -48,8 +53,6 @@ Other tools let a bot open screens. ui-calling lets your agent know what happens
 - **The agent never answers blind.** `summarize` tells it what the user is looking at.
 - **Typed end to end.** One `defineSurface` is the tool schema, the server's validation and the screen's types.
 - **No new platform.** It plugs into the agent you have, and the screens are yours, copied into your project as source you own and can edit (the way shadcn/ui works), not installed as a dependency.
-
-Automation tools count the conversations they handled. ui-calling is for the ones that would otherwise be lost: the user who stopped halfway, the payment that failed, the slot that disappeared.
 
 ## How it compares
 
@@ -98,14 +101,7 @@ Open http://localhost:5173 and ask "¿Dónde está mi pedido?", "The blender arr
 - **Tool calls** (agent → screen): the tool definitions the model gets, then for each call the params the model passed, what `ui.runTool()` returned, the `tool_result` sent back, and the WhatsApp Cloud API request that would deliver the link.
 - **Agent context** (screen → agent): the events coming back from the screen, with what it showed after each one.
 
-- With `ANTHROPIC_API_KEY` set, the agent is Claude (`claude-opus-5-5`) using the generated tool schemas.
-- Without it, a scripted agent runs the same loop, so the demo works offline. Force either with `AGENT=claude|scripted`.
-- `ABANDON_AFTER_MS` (default 90000) controls when an opened-but-untouched screen wakes the agent.
-- `npm install` may warn about unapproved install scripts (esbuild, fsevents); it still works.
-
-**Reset data** puts orders, returns and shifts back to the start and keeps chats and account links. **Reset all** clears everything, real WhatsApp chats included.
-
-It can also answer a real WhatsApp number: see [Getting started](docs/getting-started.md#run-the-demo-on-your-own-whatsapp).
+No API key? A scripted agent runs the same loop. Options, resets and running it on a real WhatsApp number: [Getting started](docs/getting-started.md#running-the-demo).
 
 ## Get started
 

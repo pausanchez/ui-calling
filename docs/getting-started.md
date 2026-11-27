@@ -19,7 +19,21 @@ npx ui-calling init
 npx ui-calling new shift-picker
 ```
 
-`init` detects Next.js, Vite or React Router and writes the runtime, the screen router and the tokens. On Next.js it also writes the API route and the `/s/[token]` page. On Vite it writes a small Hono API server in `server/`, proxies `/api` to it and renders screens on `/s/:token`. On React Router it writes the API as a resource route and the `/s/:token` route. On Express, Fastify and other servers it tells you how to mount them (`uiCallingNodeHandler` for Node servers). Screens use Tailwind v4. It also leaves a `ui-calling.json` so that `new` and `add` register each surface by themselves. `new` generates three files that compile as-is, with TODOs where your product comes in. Verified end to end on Next.js 16, Vite, React Router 7 and Express 5, and in four pilot apps that coding agents built from the packages alone. [GUIDE.md](../packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](../AGENTS.md).
+`init` detects your framework and writes the runtime (`ui.ts`), the store (`store.ts`), the screen router (`surface-screen.tsx`) and the design tokens. Then, per framework:
+
+| Framework | API (what the screen talks to) | Screen route |
+|---|---|---|
+| Next.js | `app/api/ui/[...path]/route.ts` | `app/s/[token]/page.tsx` |
+| Vite | A small Hono server in `server/index.ts` (port 8787, `npm run dev:api`), with `/api` proxied to it | `/s/:token`, rendered from `src/main.tsx` |
+| React Router 7 | `app/routes/api.ui.ts`, a resource route | `app/routes/s.$token.tsx` |
+| Express, Fastify, Koa | You mount `uiCallingNodeHandler` before your body parser; `init` prints the lines | You route `/s/:token` to `<SurfaceScreen>` |
+
+- Screens use Tailwind v4.
+- `ui-calling.json` records where things live, so `new` and `add` register each surface by themselves.
+- `new` generates three files (contract, server, screen) that compile as-is, with TODOs where your product comes in.
+- **When a stalled screen wakes the agent:** `abandonAfterMs`, on `createUiCalling` or on one contract. It's off until you set it; the demo uses 90 seconds.
+
+Verified end to end on Next.js 16, Vite, React Router 7 and Express 5, and in four pilot apps that coding agents built from the packages alone. [GUIDE.md](../packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](../AGENTS.md).
 
 ## The primitives
 
@@ -101,7 +115,18 @@ Write `summarize` as "everything the screen shows, in one line": it's the agent'
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
 | `ui-calling` (CLI) | `init` sets ui-calling up in your project (detects Next.js, Vite, React Router, and Express, Fastify or Koa); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
 
-## Run the demo on your own WhatsApp
+## Running the demo
+
+From a clone of the repo, `npm install` and `npm run dev`, then open http://localhost:5173.
+
+- With `ANTHROPIC_API_KEY` set, the agent is Claude (`claude-opus-5-5`) using the generated tool schemas.
+- Without it, a scripted agent runs the same loop, so the demo works offline. Force either with `AGENT=claude|scripted`.
+- `ABANDON_AFTER_MS` (default 90000) controls when an opened-but-untouched screen wakes the agent.
+- `npm install` may warn about unapproved install scripts (esbuild, fsevents); it still works.
+
+**Reset data** puts orders, returns and shifts back to the start and keeps chats and account links. **Reset all** clears everything, real WhatsApp chats included.
+
+### On your own WhatsApp
 
 The demo also answers a real WhatsApp number, using a Meta test number on the WhatsApp Cloud API. Put the four keys from [the GUIDE](../packages/cli/GUIDE.md#developing-against-a-real-whatsapp-number) in `.env`, install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) (`brew install cloudflared`), then run:
 
