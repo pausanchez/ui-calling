@@ -136,7 +136,7 @@ The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](p
 - **WhatsApp's 24-hour window.** Using the screen doesn't reopen it. If the agent wakes more than 24 hours after the user's last message, Meta rejects a free-form reply: check `insideServiceWindow()` and send an approved template instead (ui-calling doesn't build templates). [GUIDE.md](packages/cli/GUIDE.md#sending-on-whatsapp)
 - **Will people trust a link in a chat?** Only if it looks like you. Screens are served from your own domain, with your brand in the design tokens, and the agent says what the screen is for before sending it. Link previews never load data or count as opening the screen.
 - **Serverless hosts.** The built-in store is SQLite, which needs a lasting disk. On hosts without one, implement `UiStore` for your database; a Postgres store is on the roadmap.
-- **Several instances.** Run one agent turn per conversation at a time, or a screen event and a user message can make the agent answer twice. The examples queue turns in memory, which holds on one process; with several instances or serverless, use a shared lock or a job per conversation. [GUIDE.md](packages/cli/GUIDE.md#running-the-agent-on-events)
+- **Several instances.** A screen event and a user message must never run the agent at once, or it answers twice. Run every turn through `ui.turn(conversationId, fn)`: it queues turns per conversation and takes a lease in the store, so it holds across instances that share one (`sqliteStore()` does; your own store needs two small methods). [GUIDE.md](packages/cli/GUIDE.md#running-the-agent-on-events)
 - **Why the name?** Tool calling lets an agent call your functions. ui-calling lets it call a screen, and hear back from it.
 
 ## Roadmap
