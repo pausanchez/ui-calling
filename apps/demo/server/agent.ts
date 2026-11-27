@@ -152,13 +152,18 @@ export async function settled(id: string) {
   }
 }
 
-/** Serialize turns per conversation so user messages and UI wake-ups never interleave. */
+/**
+ * Serialize turns per conversation so user messages and UI wake-ups never interleave. `ui.turn` does that across
+ * instances too (a lease in the store); `c.queue` only tracks what's pending, for `settled` and the typing flag.
+ */
 function enqueue(c: Conversation, fn: () => Promise<void>) {
   c.queue = c.queue
-    .then(async () => {
-      c.typing = true;
-      await fn();
-    })
+    .then(() =>
+      ui.turn(c.id, async () => {
+        c.typing = true;
+        await fn();
+      }),
+    )
     .catch((err) => {
       console.error(err);
       post(c, "Sorry, something went wrong on my side. Please try again.");

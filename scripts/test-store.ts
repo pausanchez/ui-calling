@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { MemoryStore, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
+import { MemoryStore, TurnBusyError, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
 import { sqliteIdentity, sqliteStore } from "@ui-calling/sqlite";
 
 const dir = mkdtempSync(join(tmpdir(), "ui-calling-store-"));
@@ -98,6 +98,19 @@ async function contract(name: string, store: UiStore) {
     assert.equal(await store.getSession("fg-3"), undefined);
     assert.equal((await store.forget!({ subject: "user-9" })).sessions, 1);
     assert.equal(await store.getSession("fg-2"), undefined);
+  });
+  await check(`${name}: one turn lease per conversation, renewed by its holder, free once released or expired`, async () => {
+    assert.equal(await store.acquireTurn!("turn-c1", "a", 60_000), true);
+    assert.equal(await store.acquireTurn!("turn-c1", "b", 60_000), false, "another holder waits");
+    assert.equal(await store.acquireTurn!("turn-c2", "b", 60_000), true, "other conversations don't");
+    assert.equal(await store.acquireTurn!("turn-c1", "a", 60_000), true, "the holder renews it");
+    await store.releaseTurn!("turn-c1", "b");
+    assert.equal(await store.acquireTurn!("turn-c1", "b", 60_000), false, "only the holder releases it");
+    await store.releaseTurn!("turn-c1", "a");
+    assert.equal(await store.acquireTurn!("turn-c1", "b", 1), true);
+    await new Promise((r) => setTimeout(r, 5));
+    // A process that died mid-turn doesn't block the conversation for good.
+    assert.equal(await store.acquireTurn!("turn-c1", "c", 60_000), true, "an expired lease can be taken");
   });
 }
 
@@ -211,6 +224,35 @@ await check("restart: an abandon timer that was running is re-armed with the tim
   assert.deepEqual(second.woke.map((e) => e.type), ["abandoned"], "the agent is woken once, after the restart");
   assert.equal((await after.listSessions!({ status: "abandoned" })).length, 1);
   after.close();
+});
+
+await check("turns: two instances on one database never run a conversation's turns at once, and run them all", async () => {
+  // Two store objects on one file are two connections, as two processes would have.
+  const file = join(dir, "turns.db");
+  const [a, b] = [sqliteStore(file), sqliteStore(file)];
+  const instances = [boot(a).ui, boot(b).ui];
+  let running = 0;
+  let most = 0;
+  const done: number[] = [];
+  const turn = (n: number) => async () => {
+    most = Math.max(most, ++running);
+    await new Promise((r) => setTimeout(r, 20));
+    running--;
+    done.push(n);
+    return n;
+  };
+  const results = await Promise.all([0, 1, 2, 3, 4, 5].map((n) => instances[n % 2].turn("conv-turns", turn(n))));
+  assert.deepEqual(results, [0, 1, 2, 3, 4, 5]);
+  assert.equal(most, 1, "never two at once");
+  assert.equal(done.length, 6);
+  // A failed turn frees the conversation for the next one.
+  await assert.rejects(instances[0].turn("conv-turns", () => Promise.reject(new Error("model down"))), /model down/);
+  assert.equal(await instances[1].turn("conv-turns", () => "next"), "next");
+  // Waiting has a limit: a turn held elsewhere for too long throws instead of hanging the request.
+  await a.acquireTurn!("conv-stuck", "crashed-elsewhere", 60_000);
+  await assert.rejects(instances[1].turn("conv-stuck", () => "never", { waitMs: 100 }), TurnBusyError);
+  a.close();
+  b.close();
 });
 
 rmSync(dir, { recursive: true, force: true });
