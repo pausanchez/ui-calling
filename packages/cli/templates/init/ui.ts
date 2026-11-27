@@ -33,6 +33,7 @@ export const ui = createUiCalling({
 //   ui.onEvent((event) => {
 //     // If `event.wake`, run a turn for `event.conversationId` and `event.subject` (the user, for the tools), with
 //     // the events since your last turn (ui.events(id, { after })) as formatEventsForAgent(...) in a user message.
+//     // Wrap it, and turns for the user's messages, in ui.turn(event.conversationId, ...) so they never overlap.
 //   });
 //
 // A whole agent module: npx ui-calling guide running.

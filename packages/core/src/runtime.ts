@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { acceptsType, type AnySurface, type FileSlot, type SurfaceData, type SurfaceEventName, type SurfaceEventPayload, type SurfaceInput } from "./surface";
-import { MemoryStore, type ForgetFilter, type ForgetResult, type UiStore } from "./store";
+import { MemoryStore, TurnBusyError, type ForgetFilter, type ForgetResult, type UiStore } from "./store";
 import {
   LIFECYCLE_EVENTS,
   SurfaceError,
@@ -163,6 +163,13 @@ export type UiCallingOptions = {
    * `moment.time()` in `summarize`) are written in it, with the zone's name. Default "UTC".
    */
   timeZone?: string;
+};
+
+export type TurnOptions = {
+  /** How long the lease lasts if this process dies mid-turn; it's renewed while the turn runs. Default 60 s. */
+  ttlMs?: number;
+  /** How long to wait for another instance's turn before throwing `TurnBusyError`. Default 5 min. */
+  waitMs?: number;
 };
 
 const LIFECYCLE_TEXT: Record<LifecycleEvent, string> = {
@@ -444,6 +451,40 @@ export function createUiCalling(opts: UiCallingOptions) {
         }, (err) => console.error("[ui-calling] couldn't restore abandon timers", err))
       : Promise.resolve());
 
+  // ui.turn: one queue per conversation in this process, and the store's lease across processes.
+  const localTurns = new Map<string, Promise<unknown>>();
+  let warnedNoLease = false;
+  async function leased<T>(conversationId: string, fn: () => T | Promise<T>, o: TurnOptions): Promise<T> {
+    if (!store.acquireTurn || !store.releaseTurn) {
+      if (!warnedNoLease) {
+        warnedNoLease = true;
+        console.warn("[ui-calling] The store has no acquireTurn/releaseTurn, so ui.turn() serializes turns only within this process");
+      }
+      return fn();
+    }
+    const ttlMs = o.ttlMs ?? 60_000;
+    const holder = randomId(12);
+    const giveUp = Date.now() + (o.waitMs ?? 5 * 60_000);
+    for (let delay = 50; !(await store.acquireTurn(conversationId, holder, ttlMs)); delay = Math.min(delay * 2, 1000)) {
+      if (Date.now() >= giveUp) throw new TurnBusyError(conversationId);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    // A slow model keeps the lease while it works; a process that dies loses it after ttlMs.
+    const renew = setInterval(() => {
+      store.acquireTurn!(conversationId, holder, ttlMs).then(
+        (ok) => ok || console.warn(`[ui-calling] Lost the turn lease for ${conversationId}: the turn ran past ttlMs without renewing`),
+        (err) => console.error("[ui-calling] couldn't renew the turn lease", err),
+      );
+    }, ttlMs / 3);
+    (renew as { unref?: () => void }).unref?.();
+    try {
+      return await fn();
+    } finally {
+      clearInterval(renew);
+      await store.releaseTurn(conversationId, holder).catch((err) => console.error("[ui-calling] couldn't release the turn lease", err));
+    }
+  }
+
   const api = {
     store,
     /** The zone times are written in for the agent (`createUiCalling`'s `timeZone`, default UTC). */
@@ -455,6 +496,17 @@ export function createUiCalling(opts: UiCallingOptions) {
     onEvent(handler: (event: UiEvent) => void | Promise<void>) {
       listeners.add(handler);
       return () => void listeners.delete(handler);
+    },
+    /**
+     * Run `fn` as the conversation's only agent turn: a user message and a screen's wake event never run the agent
+     * at once, on this instance or another one sharing the store. Turns wait their turn; returns what `fn` returns.
+     */
+    turn<T>(conversationId: string, fn: () => T | Promise<T>, options: TurnOptions = {}): Promise<T> {
+      const next = (localTurns.get(conversationId) ?? Promise.resolve()).then(() => leased(conversationId, fn, options));
+      const tail = next.catch(() => {});
+      localTurns.set(conversationId, tail);
+      void tail.then(() => localTurns.get(conversationId) === tail && localTurns.delete(conversationId));
+      return next;
     },
     /** Resolves once state from a previous run (abandon timers) has been restored. The first request also starts it. */
     get ready() {

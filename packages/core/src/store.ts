@@ -15,6 +15,13 @@ export class UnknownEventError extends Error {
   }
 }
 
+/** Thrown by `ui.turn()` when another turn held the conversation for longer than `waitMs`. */
+export class TurnBusyError extends Error {
+  constructor(public conversationId: string) {
+    super(`Another agent turn is still running for conversation "${conversationId}"`);
+  }
+}
+
 /**
  * Persistence for sessions and events. The in-memory default loses everything on restart;
  * use `sqliteStore()` from @ui-calling/sqlite, or implement this for your database.
@@ -43,6 +50,14 @@ export interface UiStore {
    * policy. `ui.forget(...)` needs it. Returns how many of each it deleted.
    */
   forget?(filter: ForgetFilter): Promise<ForgetResult>;
+  /**
+   * Optional, both together: a lease so only one agent turn runs per conversation, across instances. `ui.turn()`
+   * uses it. `acquireTurn` must be atomic: it takes the lease (and returns true) when no one holds it, when it
+   * expired, or when `holder` already holds it (which renews it for another `ttlMs`); otherwise it returns false.
+   * `releaseTurn` frees it only if `holder` still holds it.
+   */
+  acquireTurn?(conversationId: string, holder: string, ttlMs: number): Promise<boolean>;
+  releaseTurn?(conversationId: string, holder: string): Promise<void>;
 }
 
 /** Which sessions to forget. Give exactly one. */
@@ -66,6 +81,7 @@ export class MemoryStore implements UiStore {
   private byToken = new Map<string, string>();
   private events: UiEvent[] = [];
   private files = new Map<string, { file: UiFile; bytes: Uint8Array }>();
+  private turns = new Map<string, { holder: string; until: number }>();
 
   async createSession(session: UiSession, tokenHash: string) {
     this.sessions.set(session.id, session);
@@ -114,6 +130,17 @@ export class MemoryStore implements UiStore {
     this.events = this.events.filter((e) => !ids.has(e.sessionId));
     for (const [id, f] of this.files) if (ids.has(f.file.sessionId)) this.files.delete(id);
     return { sessions: ids.size, events: before.events - this.events.length, files: before.files - this.files.size };
+  }
+
+  async acquireTurn(conversationId: string, holder: string, ttlMs: number) {
+    const lease = this.turns.get(conversationId);
+    if (lease && lease.holder !== holder && lease.until > Date.now()) return false;
+    this.turns.set(conversationId, { holder, until: Date.now() + ttlMs });
+    return true;
+  }
+
+  async releaseTurn(conversationId: string, holder: string) {
+    if (this.turns.get(conversationId)?.holder === holder) this.turns.delete(conversationId);
   }
 
   async listSessions({ status }: { status?: SessionStatus }) {
