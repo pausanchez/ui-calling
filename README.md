@@ -87,7 +87,7 @@ The same pieces fit insurance claim intake (the return's steps and photo upload)
 A hosted demo is on the roadmap; for now it runs from a clone, with no API key needed:
 
 ```bash
-git clone https://github.com/pausanchez/ui_calling && cd ui_calling && npm install
+git clone https://github.com/pausanchez/ui-calling && cd ui-calling && npm install
 ```
 
 ```bash
