@@ -546,6 +546,29 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
 - **Back to the chat.** Pass `returnUrl="https://wa.me/<business number>"` to `SurfaceProvider`. On Next.js, `init`'s page reads it from `UI_CALLING_RETURN_URL`. On a phone, a link to it opens the WhatsApp app. On a computer (WhatsApp Web), the chat is still open in the tab the screen came from, so when the screen opened in a tab of its own, `SurfaceProvider` closes it instead of opening WhatsApp's "open the app" page; if the browser won't close it, it shows "All done. Close this tab to go back to the chat." A screen opened in the chat's own tab (a web chat that navigates to it) follows the link back.
 
+**Following up outside the window.** The abandon is the case that needs it most: the user may come back to the chat days later. Create a *utility* template in WhatsApp Manager with a URL button whose address ends in a variable (`https://screens.acme.com/s/{{1}}`), wait for Meta to approve it, and send it with a fresh link's token:
+
+```ts
+async function sendTemplate(convo: Conversation) {
+  // A new link: the old one may have expired, and the user's progress lives on the server, not in the link.
+  const link = await ui.call("show_order_return", { order_id: convo.orderId, locale: convo.locale }, { conversationId: convo.id, subject: convo.subject });
+  const token = link.url.split("/s/")[1];
+  const payload = {
+    messaging_product: "whatsapp",
+    to: convo.phone,                       // templates need a number: without one, wait for the user to write
+    type: "template",
+    template: {
+      name: "return_follow_up",            // "Your return is saved. Pick up where you left off:" + [Continue] button
+      language: { code: convo.locale },
+      components: [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] }],
+    },
+  };
+  // POST it to /messages exactly like sendReply above.
+}
+```
+
+Keep follow-ups rare: one per abandoned screen at most, and only when it helps the user, since templates are paid and users can block a business that nags.
+
 ## Errors
 
 When something behind the screen fails, the agent hears about it as an `error` event. It never claims an action happened, and it can pick up the conversation from there.

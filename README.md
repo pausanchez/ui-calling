@@ -20,9 +20,9 @@ Your agent is talking to a customer on WhatsApp. To process a return it needs th
          without finishing. Last step: Step 2 of 5
 ```
 
-It writes back in the chat: "Want to send the photos later? The link keeps your progress." Reopening the link starts at the photos. (Abandon is opt-in: nothing wakes the agent until you set `abandonAfterMs`.)
+It writes back in the chat: "Want to send the photos later? Your progress is saved." The link, or a new one once it expires, opens at the photos. (Abandon is opt-in: nothing wakes the agent until you set `abandonAfterMs`.)
 
-That's ui-calling: tool calling lets an agent call your functions, ui-calling lets it call a screen. Three words you'll see: a *screen* is what the user opens; a *surface* is how you define one in code (a contract, a server part and the screen), and the agent gets it as a tool; a *block* is a ready-made surface you copy into your project. A surface's link works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
+That's ui-calling: tool calling lets an agent call your functions, ui-calling lets it call a screen. A screen's link works in any channel (WhatsApp, SMS, email, a web chat), and its whole life comes back into the agent's context (opened, left, came back, each action and its outcome, errors, completed, abandoned). It works with Anthropic, OpenAI, the AI SDK and MCP. Screens are React, copied into your repo, and it's self-hosted.
 
 Most events are just recorded for the agent's next turn. The ones that matter (a finished task, an abandon, a failure) **wake** the agent: they start a turn on their own, so it can write first, as in the return above. When a follow-up wouldn't help, the agent calls the built-in `stay_silent` tool instead of writing, and `ui.onSilentWake` counts those turns, so you can see which screens wake it for nothing.
 
@@ -63,7 +63,7 @@ Other tools let a bot open screens. ui-calling lets your agent know what happens
 | LangGraph interrupts, or a durable workflow engine | You need to pause and resume an agent, with no screen of your own |
 | **ui-calling** | The user is in a channel that can only carry a link, the screen is your own, and what happens on it (a stall, a failure, partial progress) should change what the agent says next |
 
-They combine: a ui-calling event can resume a paused workflow, and a surface is just a page, so it can also open from a web chat.
+They combine: a ui-calling event can resume a paused workflow, and a screen is just a page, so it can also open from a web chat.
 
 ## When not to use it
 
@@ -74,14 +74,14 @@ They combine: a ui-calling event can resume a paused workflow, and a surface is 
 
 ## What you can build
 
-The fit is a task that is hard in chat (uploads, live availability, a long list, a third-party SDK) and where stalling or failing matters to the follow-up. These four run today, in the demo or as blocks you copy:
+The fit is a task that is hard in chat (uploads, live availability, a long list, a third-party SDK) and where stalling or failing matters to the follow-up. These four run today, in the demo or as ready-made screens you copy into your project:
 
 | Use case | What the screen does | In this repo |
 |---|---|---|
-| Returns and exchanges | Items, a reason each, photos, refund and pickup | Demo surface (`order_return`) |
-| Delivery reschedule | Live slots, "that slot is gone", carrier outages | Block: `order-status` |
-| Account linking | Verify an email code, link the chat to a customer | Block: `link-account` |
-| Shift picking | Open shifts that others may take first | Demo surface (`shift_picker`) |
+| Returns and exchanges | Items, a reason each, photos, refund and pickup | Demo (`order_return`) |
+| Delivery reschedule | Live slots, "that slot is gone", carrier outages | Ready-made: `order-status` |
+| Account linking | Verify an email code, link the chat to a customer | Ready-made: `link-account` |
+| Shift picking | Open shifts that others may take first | Demo (`shift_picker`) |
 
 The same pieces fit insurance claim intake (the return's steps and photo upload), identity verification (abandon at the selfie), appointment booking across locations, and B2B reorders (`quantity-stepper`, `choice-card`).
 
@@ -112,7 +112,7 @@ npx ui-calling init
 npx ui-calling new shift-picker
 ```
 
-[Getting started](docs/getting-started.md) has the install command, what `init` writes for Next.js, Vite, React Router and Express, the packages, and the three primitives (contract, implementation, screen). [GUIDE.md](packages/cli/GUIDE.md) has the patterns and rules, written so coding agents can follow them too.
+[Getting started](docs/getting-started.md) has the install command, the words the API uses, what `init` writes for Next.js, Vite, React Router and Express, the packages, and the three primitives (contract, implementation, screen). [GUIDE.md](packages/cli/GUIDE.md) has the patterns and rules, written so coding agents can follow them too.
 
 ## Errors reach the agent too
 
@@ -136,18 +136,12 @@ The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](p
 - **WhatsApp's 24-hour window.** Using the screen doesn't reopen it. If the agent wakes more than 24 hours after the user's last message, Meta rejects a free-form reply: check `insideServiceWindow()` and send an approved template instead (ui-calling doesn't build templates). [GUIDE.md](packages/cli/GUIDE.md#sending-on-whatsapp)
 - **Will people trust a link in a chat?** Only if it looks like you. Screens are served from your own domain, with your brand in the design tokens, and the agent says what the screen is for before sending it. Link previews never load data or count as opening the screen.
 - **Serverless hosts.** The built-in store is SQLite, which needs a lasting disk. On hosts without one, implement `UiStore` for your database; a Postgres store is on the roadmap.
+- **Several instances.** A screen event and a user message must never run the agent at once, or it answers twice. Run every turn through `ui.turn(conversationId, fn)`: it queues turns per conversation and takes a lease in the store, so it holds across instances that share one (`sqliteStore()` does; your own store needs two small methods). [GUIDE.md](packages/cli/GUIDE.md#running-the-agent-on-events)
 - **Why the name?** Tool calling lets an agent call your functions. ui-calling lets it call a screen, and hear back from it.
 
 ## Roadmap
 
-- A hosted demo with the scripted agent, so you can try it without cloning
-- Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, the anonymous user ID WhatsApp gives a business, so it needs another channel)
-- A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
-- A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
-- Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK and OpenAI ones ran in pilots)
-- More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
-- A PIN step before a sensitive screen shows its data (`bindToDevice` already stops a forwarded link from working on another device)
-- More languages in the blocks (en and es today)
+Next up: a hosted demo you can try without cloning. The rest of the list is in [Getting started](docs/getting-started.md#roadmap).
 
 ## License
 
