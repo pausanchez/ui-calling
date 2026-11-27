@@ -27,7 +27,7 @@ npm install
 npm test                   # typecheck + generator test + in-process demo smoke test (no ports, no API key)
 npm run typecheck          # the whole monorepo, including registry blocks and templates
 npm run dev                # demo at http://localhost:5173 (API on 8787); reads ANTHROPIC_API_KEY from .env
-npm run dev:whatsapp       # the same, reachable from a real WhatsApp number: tunnel + Meta webhook (README, "Try it on your own WhatsApp")
+npm run dev:whatsapp       # the same, reachable from a real WhatsApp number: tunnel + Meta webhook (docs/getting-started.md, "On your own WhatsApp")
 ```
 
 Without an API key the demo runs a scripted agent, which is enough to test the screen-to-agent loop.

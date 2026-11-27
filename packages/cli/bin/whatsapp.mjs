@@ -75,7 +75,7 @@ export async function whatsapp(sub, { flag, devCommand, defaultPort }) {
   for (const f of [".env.local", ".env"]) if (existsSync(f)) process.loadEnvFile(f); // never overrides what's already set
   const missing = KEYS.filter((k) => !env[k]);
   if (missing.length) {
-    console.error(`Missing ${missing.join(", ")} (in the environment, .env.local or .env). Where each comes from: the ui-calling README, "Try it on your own WhatsApp".`);
+    console.error(`Missing ${missing.join(", ")} (in the environment, .env.local or .env). Where each comes from: "Developing against a real WhatsApp number" in the guide (npx ui-calling guide developing).`);
     process.exit(1);
   }
   const path = flag("--webhook-path", "/api/whatsapp/webhook");
