@@ -54,13 +54,20 @@ Real people, without a client: the [event concierge](https://github.com/pausanch
 Order matters: core first, the CLI last.
 
 ```bash
-npm publish -w packages/core
-npm publish -w packages/sqlite -w packages/postgres -w packages/server -w packages/react
-npm publish -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp
-npm publish -w packages/cli
+npm run build
+npm publish -w packages/core --tag next
+npm publish -w packages/sqlite -w packages/postgres -w packages/server -w packages/react --tag next
+npm publish -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp --tag next
+npm publish -w packages/cli --tag next
 ```
 
-Scoped packages publish as public (`publishConfig.access`). npm asks for your two-factor code. The first publish of a package also becomes its `latest` tag, so `npm install @ui-calling/core` installs the preview; the `-preview` in the version is what warns people.
+- **`--tag next`:** npm 11 refuses to publish a prerelease (`0.1.0-preview.N`) without a tag. The first version of a package also becomes its `latest`, so `npm install @ui-calling/core` installs it; the stable release publishes without `--tag`.
+- **2FA:** npm needs two-factor authentication on the account to publish, and asks for it in the browser on each `npm publish`.
+- **Review:** a package's first publish can sit in npm's review for a while, showing only a placeholder (`0.0.0-stage`, "awaiting a staged release"). `npm view <name>` shows the real version once it's through.
+- **A version can't be published twice.** If one goes out wrong, fix it and bump that package (`0.1.0-preview.1`).
+- **`bin` paths without `./`:** npm 11 rewrites `./bin/ui-calling.mjs` on publish with a warning that reads as if the command were removed (it isn't). `test-cli` checks the plain form, so the warning doesn't come back.
+
+Scoped packages publish as public (`publishConfig.access`).
 
 Then tag it: `git tag v0.1.0-preview.0 && git push origin v0.1.0-preview.0`, and write a GitHub release marked as a pre-release.
 
