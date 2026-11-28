@@ -24,7 +24,7 @@ Real people, without a client: the [event concierge](https://github.com/pausanch
 ## 1. Decisions
 
 - [ ] **Version.** Every package is `0.0.1` today. The preview is `0.1.0-preview.0` for all packages, released together; later previews bump the last number, and the stable release is `0.1.0`.
-- [ ] **Copyright holder** in `LICENSE` (MIT; copied into every package): currently "pausanchez". Change it to a full name or a company if you prefer, in the root `LICENSE` and `packages/*/LICENSE`.
+- [x] **Copyright holder** in `LICENSE` (MIT; copied into every package): "San Pau" (decided 2026-11-28), in the root `LICENSE` and `packages/*/LICENSE`.
 - [ ] **npm organization.** The `@ui-calling` scope needs an npm org named `ui-calling` (free for public packages). The names `ui-calling` and `@ui-calling/*` were free on 2026-11-25; check again with `npm view <name>` right before publishing.
 - [ ] **Public repo.** The docs site on GitHub Pages is public either way. From a private repo, Pages needs a paid plan; otherwise make the repo public first.
 
