@@ -17,6 +17,7 @@ ui-calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/react` | `SurfaceProvider`, `useSurface`, error boundary, lifecycle tracking |
 | `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
 | `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |
+| `packages/postgres` | `postgresStore(client)`: the `UiStore` on Postgres, for several instances; no dependencies. Tested in `scripts/test-store.ts` on PGlite (Postgres in WebAssembly, a dev dependency), so `npm test` needs no server |
 | `packages/cli` | `ui-calling` CLI, `registry/` (blocks, parts and tokens), `templates/` (`ui-calling new`, `--template steps`), `GUIDE.md`, `recipes/` (`ui-calling guide <recipe>`) |
 | `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
 
@@ -41,7 +42,7 @@ Without an API key the demo runs a scripted agent, which is enough to test the s
 - To try a change in a real app, create the app first (`create-next-app` refuses a non-empty folder), then pack the packages and install the tarballs into it:
 
   ```bash
-  npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/cli -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp --pack-destination /tmp/ui-calling
+  npm pack -w packages/core -w packages/server -w packages/react -w packages/sqlite -w packages/postgres -w packages/cli -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp --pack-destination /tmp/ui-calling
   cd my-app && npm install /tmp/ui-calling/*.tgz
   ```
 - After changing the `init` templates, verify them in a real app, not only with the typecheck. Vite too: `npm create vite@latest -- --template react-ts`, add Tailwind, then `init` patches its `vite.config`, `src/main.tsx` and `tsconfig.json`, which only works while they keep create-vite's shape. React Router too: `npx create-react-router@latest`, then `init` writes two routes and patches `app/routes.ts`; check `react-router build`, which refuses server modules that reach the browser bundle. TypeScript accepted a page that Next.js 16 refused to prerender. Use `create-next-app`, install the packed tarballs, run `init`, `new` (both templates) and `next build`, then open a screen in `next dev` with `npx ui-calling link`: a build can pass while the dev server never renders the page.

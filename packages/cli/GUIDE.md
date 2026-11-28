@@ -614,7 +614,8 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 - **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left. Where no process stays alive (serverless), set `abandonTimers: false` and call `ui.sweep()` from a cron instead.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
-- **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](../../scripts/test-store.ts) run against any store; copy them into your tests.
+- **Several instances or serverless: `postgresStore(pool)`** from `@ui-calling/postgres`. It takes any client with `query(text, params)` (a `pg` Pool, PGlite, a serverless driver), creates its tables on first use (or pass `{ createTables: false }` and run `POSTGRES_SCHEMA` in your migrations), and makes the turn lease, status moves and `forget` single statements, safe on a shared pool. `sqliteIdentity` needs SQLite: with Postgres, keep account links and PINs in your own tables and pass your own `verifier`.
+- **On another database,** implement `UiStore` for it. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](../../scripts/test-store.ts) run against any store; copy them into your tests.
 - **Turn leases on several instances:** implement `acquireTurn(conversationId, holder, ttlMs)` and `releaseTurn(conversationId, holder)` too, or `ui.turn` keeps turns apart only within one process. `acquireTurn` must be one atomic write that succeeds when the lease is free, expired or already `holder`'s (that renews it). In Postgres:
 
   ```sql
@@ -629,7 +630,7 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 
   `sqliteStore()` does the same in its `ui_turns` table, so processes sharing one file (a cluster on one machine) keep turns apart too.
 - **Status moves on several instances:** implement `updateSessionIf(id, status, patch)` as one conditional write that returns whether it changed a row (`UPDATE ui_sessions SET … WHERE id = $1 AND status = $2`). Without it, two tabs or instances can both record the first `opened`, or both mark a screen `abandoned` and wake the agent twice. Add `countEvents` so each event doesn't read the session's whole history to check its limits.
-- **SQLite is one machine.** Instances on different machines don't share its file, so `ui.turn`, the first open and abandon are only kept apart by a store they all reach, such as your database.
+- **SQLite is one machine.** Instances on different machines don't share its file, so `ui.turn`, the first open and abandon are only kept apart by a store they all reach: `postgresStore()`, or your own.
 
 The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
 
@@ -723,7 +724,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `surfaces` | required | The `implement(…)` results to expose as tools |
 | `baseUrl` | required | Public origin of your screens; links are `baseUrl + pathPrefix + token` |
 | `pathPrefix` | `"/s/"` | Path in front of the token |
-| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after`; add `acquireTurn`/`releaseTurn` so `ui.turn` works across instances, and `updateSessionIf` so opens and abandons are recorded once |
+| `store` | in memory | Where sessions and events live: `sqliteStore()`, `postgresStore(pool)` (several instances, serverless) or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after`; add `acquireTurn`/`releaseTurn` so `ui.turn` works across instances, and `updateSessionIf` so opens and abandons are recorded once |
 | `ttlSeconds` | `3600` | Link lifetime; a surface's own `ttlSeconds` wins |
 | `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen goes this long without activity and hasn't finished (no event whose contract says `wake: true`) |
 | `abandonTimers` | `true` | Check for abandon with in-process timers. `false` on serverless, where they never fire: call `ui.sweep()` from a cron instead |

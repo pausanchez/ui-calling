@@ -23,7 +23,7 @@ ui-calling goes public only after it runs in a real project (decided 2026-11-24)
   - The `v0.0.1-preview` GitHub release: delete it, or mark it superseded.
   - `packages/cli/GUIDE.md`: the "Not on npm yet" note at the top.
   - The docs page artifact, if it's still shared: its "Pre-release" badge and note.
-- [ ] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite` and the adapters (`^0.1.0`).
+- [ ] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite`, `postgres` and the adapters (`^0.1.0`).
 - [ ] `npm run build`.
 - [ ] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running), on create-react-router (`npm run typecheck`, `react-router build`), and on a plain Express app (`init`, `uiCallingNodeHandler`, `link`, `events`).
 
@@ -39,7 +39,7 @@ Order matters: core first, the CLI last.
 
 ```bash
 npm publish -w packages/core
-npm publish -w packages/sqlite -w packages/server -w packages/react
+npm publish -w packages/sqlite -w packages/postgres -w packages/server -w packages/react
 npm publish -w packages/anthropic -w packages/ai-sdk -w packages/openai -w packages/mcp
 npm publish -w packages/cli
 ```
