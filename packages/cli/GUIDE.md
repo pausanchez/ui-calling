@@ -396,10 +396,25 @@ Events of type "error" mean something failed on the screen, usually a system beh
 - **Filter events you don't use** before formatting them (for example `left` and `returned`). In long conversations, summarize old events like any other old messages.
 - **Times carry their zone.** `formatEventsForAgent(events, { timeZone: "Europe/Madrid" })` writes `25 Nov 17:04:35 CET`; without it, UTC. Use the zone the rest of your prompt uses.
 
+## What a link's states mean
+
+A link tracks the user's time on one screen, not your business process. Each state means one thing:
+
+| State | What it means | What it does *not* mean |
+|---|---|---|
+| `sent` | The agent opened the link; the user hasn't loaded it yet | That the user saw it |
+| `opened` | The screen loaded (an `opened` event, with `state`: what the user saw). A `returned` or `left` comes after when they switch away and back | That they did anything |
+| In progress | `opened`, with domain events since: each step the user saved | That they'll finish |
+| `abandoned` | An opened screen sat idle for `abandonAfterMs` without a `wake: true` event. Recorded once; the link still works if they come back | That the business process failed, or that the link closed |
+| `completed` | The user is done *with this screen* (`complete()`). The link closes: everything after is 410 | That the order shipped, the booking stands or the payment cleared |
+| Expired | Not a status: `expiresAt` passed. Every request is 410 `expired`, retries included | Anything about the outcome |
+
+**The business outcome is your domain event, not a status.** "Booked", "submitted", "paid" are events in your contract, usually with `wake: true`, and their `state` (from `summarize`) says what the user now sees: the reference, the new date. An outcome that settles later (a payment that clears, a refund approved) is your back office's to report; the agent can open a new link to show it. So `completed` without a booking event means the user left without booking, and a booking event without `completed` means they booked and didn't tap "back to chat".
+
 ## Rules that keep context right
 
 - **Every action returns fresh data.** The outcome (a ticket number, a new date) reaches the agent through `summarize`, so an action that changes something must return the new data. Once `resolve` reads what the handler saved, end the handler with `return ctx.resolve()`: one place builds `data`, and nothing the screen shows (this link's uploads, say) is left out.
-- **A repeat changes nothing, so it says nothing.** A double tap on "Send" reaches the handler twice. When the step is already done, `return ctx.unchanged()`: the event isn't recorded and doesn't wake the agent, so it hears one submission, and the screen still gets current data.
+- **A repeat changes nothing, so it says nothing.** A *retry* of one tap is handled for you: the screen sends the same event key, and the runtime answers with what the first try did (see [Retries and failures](#retries-and-failures)). A double tap on "Send" is two taps, so it reaches the handler twice. When the step is already done, `return ctx.unchanged()`: the event isn't recorded and doesn't wake the agent, so it hears one submission, and the screen still gets current data.
 - **Write times in the business's zone.** Models misread bare UTC ISO times ("…T20:00:00Z" next to a local "now"). Set `createUiCalling({ timeZone: "Europe/Madrid" })`, and in `summarize` write every time with `moment.time(date)`: "held until 26 Nov 21:00 CET". The tool result's `expires_at` uses the same zone; pass it to `formatEventsForAgent` too.
 - **`describe` says what the user asked for, not the outcome.** Write "User asked to move the delivery to…" or "Worker picked shift S-12", never "Delivery was moved". The outcome comes from `summarize`. If the handler fails, the agent reads your line as "did NOT go through. Attempted: …", so it must read right in both cases. Set `wake: true` only when the agent should react right away.
 - **Secrets never reach the agent.** Add `redact: ["code"]` to an event that carries a one-time code, password or similar. The handler still gets the value, but the event log, `describe` and the agent see `"[redacted]"`. For secrets in the screen's **data** (an access code, alarm instructions), list the fields in the contract, `secret: ["access"]`, or a path into one, `secret: ["access.secret"]`, so the rest of `access` (its status, when it opens) still reaches the agent. The screen still gets them, and every value inside them is replaced with `[secret]` wherever it appears as a whole word in what `summarize` returns, before it reaches the tool result or an event. Paths are checked against the data's schema, so a typo doesn't compile; a path that still matches no field at runtime logs a warning. Only `summarize` is scrubbed: keep secrets out of `describe` and `SurfaceError` messages too. Keep them out of `summarize` anyway, and keep such screens short-lived (`ttlSeconds`).
@@ -583,8 +598,6 @@ The same rules hold on Twilio's WhatsApp API; the shapes differ. [The event conc
 
 ## Errors
 
-## Errors
-
 When something behind the screen fails, the agent hears about it as an `error` event. It never claims an action happened, and it can pick up the conversation from there.
 
 | Source | How it's caught | Example |
@@ -603,6 +616,43 @@ throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { r
 - The screen shows the user a generic message in their language, never the upstream error.
 
 The demo has switches in its side panel to simulate outages.
+
+### Which kind of failure is it
+
+Each one has its own status, so the screen, your monitoring and the agent can tell them apart:
+
+| Kind | Status and `error` | Recorded for the agent | What the screen does |
+|---|---|---|---|
+| Validation: the body doesn't match the contract | 400 `invalid_payload`, `unknown_event` | Nothing: the handler never ran | A bug in the screen; nothing to retry |
+| Business refusal: `SurfaceError(…, { refused: true })` | 422 `refused`, `reason` = your code | An `error` event, without waking it | Explain `reason` in the user's language |
+| Dependency: `SurfaceError` without `refused`, or any other throw | 502 `upstream_error`, `reason`, `retryable` | An `error` event that wakes it (first of each kind) | "Try again" only when `retryable` |
+| Infrastructure: your store or server failed | 500 `internal` | Nothing it can rely on: see below | Retry with the same key |
+| Still running: a retry while the first try runs | 409 `in_progress`, retryable | Nothing new | Wait and retry with the same key |
+| The link: expired, completed, another device, not verified | 410, 403 | Nothing new | Show the matching screen |
+| In the browser: `reportError`, render crashes | (the screen reports it) | An `error` event, waking once per session | Its own fallback |
+
+## Retries and failures
+
+Screens retry. Connections drop on the way back from the server, phones go to sleep mid-request, users tap again. What ui-calling guarantees:
+
+- **A retried action runs once.** `emit` sends a key with each action (`{ type, payload, key }`), and sends the same one when it retries: on its own, up to twice when the connection drops or the server says `in_progress`, and when the user taps again with the same choices after an outcome the screen never learned. The runtime claims the key before the handler runs. A retry of an action that finished gets `repeat: true`, the event the first try recorded and the screen's current data, and nothing runs or is recorded again. A retry while the first try still runs gets 409 `in_progress`.
+- **A failed action can be retried.** When the handler throws, the key is freed: the retry runs it again, and only a success is recorded as the action. The agent still reads that the first try failed.
+- **Invalid payloads cost nothing.** They're refused before the key is claimed or the handler runs.
+- **No false confirmations.** If the store fails after your handler ran (the booking is made, the event can't be written), the request fails with 500 and the key stays claimed: the screen never shows a success the agent can't see. After `eventKeyStaleMs` (default 2 minutes) a retry runs the handler again. The same happens when an instance dies mid-action.
+- **So handlers run at least once, never twice for the same key while it's tracked.** For side effects that must happen once (a charge, a booking with a third party), pass `ctx.eventKey` as that API's idempotency key, or check your own data first, as the steps template does with `ctx.unchanged()`:
+
+  ```ts
+  booked: async ({ slot }, ctx) => {
+    await seats.book({ slot, who: ctx.subject, idempotencyKey: ctx.eventKey });
+    return ctx.resolve();
+  },
+  ```
+
+- **Two different actions at once both run.** Keys keep retries apart, not different taps: two bookings of the last seat reach your handler together, so make the write itself atomic (`UPDATE … SET seats = seats - 1 WHERE seats > 0`) and throw `SurfaceError(…, { refused: true })` for the one that lost.
+- **Expired and completed links refuse retries too.** An expired link answers 410 `expired`, even for a key that already ran: it tells nobody anything.
+- **Drafts are data from the past.** A draft saved by an older version of the screen, or one naming an option you no longer offer, is checked before it's used: the steps template parses it against the contract and drops a choice that's gone.
+
+[scripts/test-guarantees.ts](../../scripts/test-guarantees.ts) checks each of these on the memory, SQLite and Postgres stores. Keys need a store with `claimEventKey`, `finishEventKey` and `releaseEventKey`; all three built-in ones have them. On a store without them, a retry runs twice.
 
 ## Language
 
@@ -643,6 +693,7 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 
   `sqliteStore()` does the same in its `ui_turns` table, so processes sharing one file (a cluster on one machine) keep turns apart too.
 - **Status moves on several instances:** implement `updateSessionIf(id, status, patch)` as one conditional write that returns whether it changed a row (`UPDATE ui_sessions SET … WHERE id = $1 AND status = $2`). Without it, two tabs or instances can both record the first `opened`, or both mark a screen `abandoned` and wake the agent twice. Add `countEvents` so each event doesn't read the session's whole history to check its limits.
+- **Safe retries:** implement `claimEventKey(sessionId, key, staleMs)`, `finishEventKey(sessionId, key, eventId)` and `releaseEventKey(sessionId, key)`, on a table keyed by `(session_id, key)`. The claim is one atomic upsert that succeeds when the key is new, or unfinished and older than `staleMs`; `releaseEventKey` deletes only unfinished keys, and `forget` deletes a session's keys with it. `postgresStore` has the SQL.
 - **SQLite is one machine.** Instances on different machines don't share its file, so `ui.turn`, the first open and abandon are only kept apart by a store they all reach: `postgresStore()`, or your own.
 
 The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
@@ -765,6 +816,8 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | Readable details sent from the browser and trusted | A tampered payload changes what the agent tells the user | IDs in the payload; details from `summarize` |
 | Always offering "try again" | The user retries something that can't work, like a full shift | Branch on `reason`, `reload()` |
 | `summarize` lists only IDs | The agent tells the user "W-201 has a seat" | Titles and days next to IDs |
+| Treating `completed` as "the order went through" | The agent confirms something the user never did | The outcome is your domain event (`booked`, `submitted`); `completed` only means they left the screen |
+| A handler that charges or books through an API without its idempotency key | A crash between the call and the event runs it again on retry | Pass `ctx.eventKey` |
 | Returning from a serverless handler before the agent's turn ends | The turn is frozen mid-way and the user gets no answer | `waitUntil(ui.turn(...))` |
 
 ## API reference
@@ -789,6 +842,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `describeError` | generic `unexpected` | Turns unexpected errors into `{ code, message, retryable }` for the agent; by default the real error is only logged. `SurfaceError`s pass as they are |
 | `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
 | `maxEventsPerSession` | `500` | Events one link may record; after that the screen gets 429 |
+| `eventKeyStaleMs` | `120000` | How long an action's key may stay claimed without finishing (the instance died, the store failed after the handler) before a retry runs the handler again. Longer than your slowest handler |
 | `maxWakesPerMinute` | `6` | `wake: true` events one link may send per minute before they're recorded quietly, so a script holding a link can't run up agent turns |
 | `verifier` | none | `{ kind: "pin" \| "code", send?(who, locale), check(who, typed) }`: checks who opens screens with `verify: true`. Required if one sets it. `sqliteIdentity` has `pinVerifier()` and `codeVerifier({ deliver })` |
 | `maxVerifyAttempts` | `5` | Wrong PINs or codes one link takes before it locks and the agent is woken |
@@ -821,7 +875,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `bindToDevice?` (only the first device that opens the link can use it), `verify?` (a PIN or code before any data loads), `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent), `includePayload?` (default `true`; `false` leaves the JSON out of what the agent reads when `describe` already says it) |
 | `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any; `moment.time(date)` writes a time in `timeZone`), `on?: { [event]: (payload, ctx) => Promise<data \| ctx.unchanged() \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
-| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?), resolve(), unchanged(data?) }`; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface; `resolve()` runs `resolve` again with the link's input, for a handler to return; `unchanged(data?)` says the event changed nothing (not recorded, no wake) |
+| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?), resolve(), unchanged(data?), eventKey? }`; `eventKey` (in handlers) is the key the screen sent with this action, the same on every retry: pass it to APIs that take an idempotency key; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface; `resolve()` runs `resolve` again with the link's input, for a handler to return; `unchanged(data?)` says the event changed nothing (not recorded, no wake) |
 | `new SurfaceError(code, message, { retryable?, refused? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason`. `refused: true` for a business refusal (422, doesn't wake the agent) rather than an outage (502) |
 
 ### `UiEvent`
@@ -860,7 +914,7 @@ type UiEvent = {
 | API | What it gives you |
 |---|---|
 | `<SurfaceProvider token endpoint? returnUrl?>` | Loads the session and tracks the lifecycle; `endpoint` defaults to `"/api/ui"`. On a computer, links to `returnUrl` close the tab instead when the screen opened in a tab of its own |
-| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `errorReason` (`resolve`'s `SurfaceError` code when the load failed or was refused), `locale`, `emit(type, payload)` (resolves with the fresh data the handler returned, so you can show this action's outcome, e.g. a new ticket number), `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
+| `useSurface(contract)` | `status` (`loading`, `ready`, `expired`, `completed`, `error`), `data`, `errorCode`, `errorReason` (`resolve`'s `SurfaceError` code when the load failed or was refused), `locale`, `emit(type, payload)` (resolves with the fresh data the handler returned, so you can show this action's outcome, e.g. a new ticket number; it sends an event key and retries a dropped connection with it, so the action runs once), `complete()`, `reload()`, `reportError(err, context)`, `upload(slot, file)`, `removeFile(id)`, `fileUrl(id)`, `returnUrl` |
 | `useSurfaceSession()` | `status`, `surface`, `locale`, `errorCode`, `errorReason`, `returnUrl`: to pick which screen to render for a token |
 | `useSurfaceSteps(steps, { initial, key? })` | `step`, `index`, `count`, `isFirst`, `isLast`, `go(step)`, `next()`, `back()`: the steps of a screen in the browser's history, so Back and reloads work |
 | `SurfaceActionError` | Thrown by a failed `emit`, `reload` or `upload`: `code` (`"network"` when the server couldn't be reached, always retryable), `reason`, `retryable` |
@@ -872,7 +926,7 @@ What `@ui-calling/server` serves under your mount point, whichever handler you u
 | Request | Success |
 |---|---|
 | `GET /sessions/:token` | `200 { surface, locale, data, expiresAt }` |
-| `POST /sessions/:token/events` with `{ type, payload }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it, and `event` is `null` when it returned `ctx.unchanged()`. `type` is a contract event, or a lifecycle event the screen reports: `opened`, `left`, or `completed` (what `complete()` sends; it closes the link), all without a payload |
+| `POST /sessions/:token/events` with `{ type, payload, key? }` | `200 { event: { id, type }, data }`; `data` is fresh when the handler returned it, and `event` is `null` when it returned `ctx.unchanged()`. `key` (8–64 letters, digits, `-`, `_`) makes retries safe: send the same one when you retry an action, and an action that already ran answers `repeat: true` with its first event and current data, without running again. `type` is a contract event, or a lifecycle event the screen reports: `opened`, `left`, or `completed` (what `complete()` sends; it closes the link), all without a payload |
 | `POST /sessions/:token/files/:slot`, multipart with a `file` field | `200 { file: { id, slot, name, type, size } }` |
 | `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
 | `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
@@ -889,6 +943,7 @@ Errors are `{ error, message, retryable, reason }`. Once the link is known (`exp
 | 410 | `expired`, `completed` | The link ran out, or the user already finished |
 | 403 | `other_device` | A `bindToDevice` link was already opened on another device |
 | 403 | `verification_required`, `verification_locked` | A `verify` link acted on before the PIN, or locked after too many wrong ones. A wrong one is 422 `refused` with `reason: "wrong_code"` |
+| 409 | `in_progress` | A retry with the key of an action that's still running. Retryable: try again with the same key |
 | 413 | `payload_too_large`, `invalid_file` | The event body is over 64 KB, or an upload is bigger than any slot accepts |
 | 422 | `refused` | A handler or `resolve` threw `SurfaceError(..., { refused: true })`: a business refusal, not an outage; `reason` is its code |
 | 429 | `too_many_events` | The link reached `maxEventsPerSession` |

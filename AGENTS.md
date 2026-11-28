@@ -18,6 +18,7 @@ ui-calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/anthropic`, `ai-sdk`, `openai`, `mcp` | Adapters: surfaces as tools for each SDK, all thin wrappers over `ui.runTool()`; tested in `scripts/test-adapters.ts` |
 | `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |
 | `packages/postgres` | `postgresStore(client)`: the `UiStore` on Postgres, for several instances; no dependencies. Tested in `scripts/test-store.ts` on PGlite (Postgres in WebAssembly, a dev dependency), so `npm test` needs no server |
+| `scripts/test-guarantees.ts` | What the runtime promises when things fail (retried events, crashes mid-action, storage failing after a handler, stale links and drafts), on every store. A change to `emit`, the store interface or the event route keeps these passing |
 | `packages/cli` | `ui-calling` CLI, `registry/` (blocks, parts and tokens), `templates/` (`ui-calling new`, `--template steps`), `GUIDE.md`, `recipes/` (`ui-calling guide <recipe>`) |
 | `apps/demo` | Simulated WhatsApp chat + order status, returns, shift picker (PIN) and job application surfaces + Claude or scripted agent |
 

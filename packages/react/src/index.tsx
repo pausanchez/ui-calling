@@ -69,6 +69,12 @@ export class SurfaceActionError extends Error {
   }
 }
 
+/** A fresh idempotency key for one action. `randomUUID` needs a secure context, which a phone on the LAN in dev isn't. */
+function eventKey() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const SurfaceContext = createContext<ContextValue | null>(null);
 
 /**
@@ -143,15 +149,38 @@ export function SurfaceProvider(props: {
     return json;
   }, []);
 
+  // An action whose outcome the screen never learned (the connection dropped, the server was still on it or failed
+  // midway) keeps its key: retrying it, or the user tapping again with the same choices, sends the same key, and the
+  // server answers with what the first try did instead of doing it twice.
+  const unsettled = useRef<{ sig: string; key: string } | undefined>(undefined);
   const emit = useCallback(
     async (type: string, payload: unknown = {}) => {
-      const json = await send(`${base}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, payload }),
-        // `complete()` usually runs as the user follows "Back to chat": let it finish after the page goes.
-        keepalive: true,
-      });
+      const sig = JSON.stringify([type, payload]);
+      const key = unsettled.current?.sig === sig ? unsettled.current.key : eventKey();
+      let json: { data?: unknown };
+      for (let attempt = 0; ; attempt++) {
+        try {
+          json = await send(`${base}/events`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type, payload, key }),
+            // `complete()` usually runs as the user follows "Back to chat": let it finish after the page goes.
+            keepalive: true,
+          });
+          unsettled.current = undefined;
+          break;
+        } catch (err) {
+          const code = (err as SurfaceActionError).code;
+          // Any other answer is final: the action was refused or failed, and the server already freed the key.
+          if (code !== "network" && code !== "in_progress" && code !== "internal") {
+            unsettled.current = undefined;
+            throw err;
+          }
+          unsettled.current = { sig, key };
+          if (code === "internal" || attempt === 2) throw err;
+          await new Promise((r) => setTimeout(r, attempt ? 1500 : 500));
+        }
+      }
       // The link is closed now: show the "done" screen if the user is still here.
       if (type === "completed") {
         setState((s) => ({ status: "completed", locale: s.locale }));
