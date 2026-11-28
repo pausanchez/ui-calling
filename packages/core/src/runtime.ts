@@ -52,6 +52,14 @@ export type SurfaceContext<S extends AnySurface = AnySurface> = {
    * again, and the key is what stops the API doing it twice.
    */
   eventKey?: string;
+  /**
+   * A part of the screen couldn't load, but the rest can: tell the agent without failing the load. In `resolve`,
+   * catch the third party's error, return data that says "not available" for that part, and pass the error here
+   * (a `SurfaceError` for its code and `retryable`). The user keeps the screen (and their draft); the agent gets an
+   * error event and is woken once per code for this link. Ignored while the link is being created: the agent is
+   * there, reading `summarize`.
+   */
+  reportError: (err: unknown, attempted?: string) => Promise<void>;
 };
 
 /** A screen's idempotency key: what `crypto.randomUUID()` makes, or anything of the same kind. */
@@ -400,7 +408,7 @@ export function createUiCalling(opts: UiCallingOptions) {
     return Object.assign(err, { surface: session.surface, locale: session.locale });
   }
 
-  function ctxOf(session: UiSession, eventKey?: string): SurfaceContext {
+  function ctxOf(session: UiSession, eventKey?: string, stored = true): SurfaceContext {
     const ctx: SurfaceContext = {
       ...(eventKey ? { eventKey } : {}),
       session,
@@ -417,6 +425,14 @@ export function createUiCalling(opts: UiCallingOptions) {
       },
       resolve: () => impls.get(session.surface)!.resolve(session.input as never, ctx),
       unchanged: (data) => ({ [UNCHANGED]: true, data }) as Unchanged,
+      reportError: async (err, attempted) => {
+        if (!stored) return;
+        const info = toErrorInfo(err);
+        // resolve runs on every load and after every event: one report per code, not one per run.
+        const previous = await store.listEvents({ sessionId: session.id });
+        if (previous.some((e) => e.kind === "error" && (e.payload as { code?: string }).code === info.code)) return;
+        await recordError(session, info, "partial", undefined, attempted);
+      },
     };
     return ctx;
   }
@@ -504,22 +520,24 @@ export function createUiCalling(opts: UiCallingOptions) {
 
   const ERROR_TEXT: Record<ErrorSource, string> = {
     load: "The screen couldn't load its data",
+    partial: "Part of the screen couldn't load; the user still has the rest",
     action: "The user's action did NOT go through",
     client: "The screen reported an error",
     render: "The screen crashed while rendering",
   };
 
-  /** Record a failure for the agent. Wakes it once per session for each source + code + action. */
+  /** Record a failure for the agent. Wakes it once per session for each code (the screen's own errors: once). */
   async function recordError(session: UiSession, info: ErrorInfo, source: ErrorSource, action?: string, attempted?: string) {
     const previous = await store.listEvents({ sessionId: session.id });
     // The screen picks its own error codes, so a client could wake the agent at will with new ones:
-    // client and render errors wake it once per session, server errors once per code and action.
+    // client and render errors wake it once per session. Server errors wake it once per code, whichever way they
+    // came: a carrier outage that fails an action and then the reload is one thing to tell the agent, not two.
     const fromScreen = source === "client" || source === "render";
     const repeat = previous.some((e) => {
       const p = e.payload as { source?: string; code?: string; action?: string };
       if (e.kind !== "error") return false;
       if (fromScreen) return p.source === "client" || p.source === "render";
-      return p.source === source && p.code === info.code && p.action === action;
+      return p.source !== "client" && p.source !== "render" && p.code === info.code;
     });
     console.warn(`[ui-calling] ${session.surface} ${source} error ${info.code}: ${info.message}`);
     return record(session, {
@@ -531,7 +549,7 @@ export function createUiCalling(opts: UiCallingOptions) {
           `${ERROR_TEXT[source]}. ${JSON.stringify(info.code)}${info.retryable ? ", retryable" : ""}: ${JSON.stringify(info.message)}` +
           (attempted ? ` (while ${JSON.stringify(attempted)})` : "")
         : // `attempted` is the event's describe(): what the user asked for, not something that happened.
-          `${ERROR_TEXT[source]}.${attempted ? ` Attempted: ${attempted}.` : ""} ` +
+          `${ERROR_TEXT[source]}.${attempted ? (source === "partial" ? ` While ${attempted}.` : ` Attempted: ${attempted}.`) : ""} ` +
           `${info.code}${info.retryable ? ", retryable" : ""}: ${info.message}`,
       // A refused action (wrong code, shift full) is explained by the screen, where the user still is: waking the
       // agent would post a stale reply behind their back. It's recorded, so the agent reads it on its next turn.
@@ -889,7 +907,7 @@ export function createUiCalling(opts: UiCallingOptions) {
         expiresAt: new Date(now.getTime() + (impl.surface.ttlSeconds ?? ttl) * 1000).toISOString(),
       };
       // Resolve once now so the agent knows what the user will see (and bad input fails early).
-      const data = await impl.resolve(input as never, ctxOf(session));
+      const data = await impl.resolve(input as never, ctxOf(session, undefined, false));
       const summary = safeSummary(impl, data, { time });
       await store.createSession(session, await sha256(token));
       trace(session, { step: "link.created" });

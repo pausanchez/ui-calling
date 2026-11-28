@@ -10,7 +10,7 @@ ui-calling is a preview (`0.1.0-preview` on npm), and the API may still change. 
 
 ## Install and set up
 
-Add the adapter for your agent SDK (`@ui-calling/anthropic`, `@ui-calling/ai-sdk`, `@ui-calling/openai` or `@ui-calling/mcp`), and `@ui-calling/postgres` if you run several instances or on serverless. `ui-calling` is the CLI: installing it pins the version `npx ui-calling` runs.
+Add the adapter for your agent SDK (`@ui-calling/anthropic`, `@ui-calling/ai-sdk`, `@ui-calling/openai` or `@ui-calling/mcp`), and `@ui-calling/postgres` if you run several instances or on serverless. `ui-calling` is the CLI: installing it pins the version `npx ui-calling` runs. `init` then prints anything else your framework needs: on Vite, `hono @hono/node-server tsx` for the small API server it writes.
 
 ```bash
 npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod

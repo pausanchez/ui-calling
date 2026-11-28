@@ -8,7 +8,7 @@ Start from the template. It writes a working three-step screen (details, a choic
 npx ui-calling new claim --template steps
 ```
 
-Then change the steps to yours. The demo's `order_return` (items, reasons, photos, pickup, review) is the same pattern with five steps.
+Then change the steps to yours. The demo's `order_return` (items, reasons, photos, pickup, review) is the same pattern with five steps; it's in the ui-calling repo, not the package (links at the end).
 
 ## Contract
 
@@ -99,7 +99,7 @@ function Steps({ data }: { data: Data }) {
   const [details, setDetails] = useState(data.draft.details); // answers live here until each step is saved
   const [choice, setChoice] = useState(data.draft.choice);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<null | { message: string }>(null);
+  const [problem, setProblem] = useState<null | { message: string; retry?: { label: string; onClick: () => void } }>(null);
 
   const path = [...claimSteps]; // leave out steps that don't apply to this user
   const valid = { details: details.trim().length > 0, choice: Boolean(choice), review: true };
@@ -122,7 +122,14 @@ function Steps({ data }: { data: Data }) {
       }
     } catch (err) {
       const e = err instanceof SurfaceActionError ? err : null;
-      setProblem({ message: (e?.reason && t.errors[e.reason]) || (e?.code === "network" ? t.offline : t.failed) });
+      // A reason you have a message for is the answer ("that option is gone"): retrying won't change it. Anything
+      // else gets "Try again" when it can work: a dropped connection, or an outage marked retryable.
+      const known = e?.reason ? t.errors[e.reason] : undefined;
+      const retryable = !e || e.retryable;
+      setProblem({
+        message: known ?? (!e || e.code === "network" ? t.offline : t.failed),
+        retry: !known && retryable ? { label: t.tryAgain, onClick: () => void next() } : undefined,
+      });
     } finally {
       setBusy(false);
     }
@@ -147,7 +154,7 @@ function Steps({ data }: { data: Data }) {
 
 ## Watch out
 
-- **Skip steps that don't apply** (no photos unless an item is damaged): pass only the steps the user will see, so "Step 2 of 4" is right. If a step drops out while the user is on it, `useSurfaceSteps` shows the one that took its place.
+- **Skip steps that don't apply** (no photos unless an item is damaged): pass only the steps the user will see, so "Step 2 of 4" is right. If a step drops out while the user is on it, `useSurfaceSteps` shows the one that took its place. The agent counts differently: `describe` and `summarize` name steps by their place in the full order ("Step 4 of 5: chose a pickup"), which stays true whichever steps this user skipped, so don't renumber them per user.
 - **`abandoned` treats the waking event as the finish line.** A user who saves two steps and goes quiet gets "User stopped partway without finishing. Last step: …". See [follow-up-abandoned](follow-up-abandoned.md).
 - **The furthest step isn't a free pass.** A user can go back and change an answer so a later step is needed again (a reason changed to "damaged" now needs photos). Cap how far they can jump at the first step with a missing answer, as above, and check everything again in the last handler.
 - **A skipped step can be the saved one.** If the draft's step dropped out of the path, `path.indexOf` gives -1; count it by its place in the full order, as `saved` does above.

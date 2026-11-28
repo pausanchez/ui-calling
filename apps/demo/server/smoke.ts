@@ -222,6 +222,28 @@ await check("returns: a failed pickup keeps the draft and says why; submitting r
   assert.match((await chat()).chat.at(-1)!.text, new RegExp(`${id}.*€79\\.00`));
 });
 
+await check("returns: with the carrier down, the screen opens without pickup times, and the agent hears it once", async () => {
+  const who = { conversationId: "carrier-down", subject: (await chat()).inbound!.subject };
+  await call("POST", "/api/demo/failures", { carrierApi: true });
+  try {
+    const t = token((await ui.call("show_order_return", { order_id: "A-0987" }, who)).url);
+    for (let i = 0; i < 2; i++) {
+      const opened = await call("GET", `/api/ui/sessions/${t}`);
+      assert.equal(opened.status, 200);
+      assert.equal(opened.json.data.pickupUnavailable, true);
+      assert.deepEqual(opened.json.data.pickupOptions, []);
+    }
+    await settled("carrier-down");
+    const errors = (await ui.events("carrier-down")).filter((e) => e.kind === "error");
+    assert.equal(errors.length, 1, "two loads, one report");
+    assert.equal((errors[0].payload as Json).source, "partial");
+    assert.equal(errors[0].wake, true);
+    assert.match(errors[0].description, /carrier_unavailable, retryable/);
+  } finally {
+    await call("POST", "/api/demo/failures", { carrierApi: false });
+  }
+});
+
 await check("returns: a later call can still preselect the item, until the user saves their own choice", async () => {
   await call("POST", "/api/chat/reset");
   await say("Hi"); // links the chat by phone

@@ -34,6 +34,8 @@ export const orderReturn = defineSurface({
       z.object({ sku: z.string(), name: z.string(), qty: z.number().int(), price: z.number(), returnable: z.boolean() }),
     ),
     pickupOptions: z.array(slot.extend({ spotsLeft: z.number().int() })),
+    /** The carrier didn't answer: no slots to offer for now, the rest of the screen still works. */
+    pickupUnavailable: z.boolean(),
     /** Photos uploaded through this link so far, confirmed or not: what the photos step shows after a reload. */
     uploaded: z.array(z.object({ id: z.string(), name: z.string() })),
     draft: z.object({

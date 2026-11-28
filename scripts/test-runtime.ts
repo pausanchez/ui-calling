@@ -878,4 +878,57 @@ await check("trace: every step of one action shares the session and key, with th
   }
 });
 
+await check("reportError: a part that fails tells the agent once, and the screen still loads", async () => {
+  let carrierDown = true;
+  const pickup = defineSurface({
+    name: "pickup",
+    description: "Picks a pickup slot.",
+    input: z.object({}),
+    data: z.object({ slots: z.array(z.string()).nullable() }),
+    events: { picked: event(z.object({ slot: z.string() }), { describe: (p) => `Picked ${p.slot}` }) },
+  });
+  const slots = async () => {
+    if (carrierDown) throw new SurfaceError("carrier_unavailable", "Carrier API responded 503", { retryable: true });
+    return ["9:00"];
+  };
+  const quiet = console.warn;
+  console.warn = () => {};
+  try {
+    const rt = createUiCalling({
+      baseUrl: "https://ui.example.com",
+      surfaces: [
+        implement(pickup, {
+          resolve: async (_input, ctx) => ({ slots: await slots().catch((err) => (void ctx.reportError(err, "loading pickup slots"), null)) }),
+          summarize: (d) => (d.slots ? `${d.slots.length} slots.` : "Slots unavailable."),
+          on: { picked: async () => { await slots(); } },
+        }),
+      ],
+    });
+    // Creating the link: the agent reads the summary itself, so nothing is recorded.
+    const t = token((await rt.call("show_pickup", {}, who)).url);
+    const conv = who.conversationId;
+    const errors = async () => (await rt.events(conv)).filter((e) => e.kind === "error" && e.surface === "pickup");
+    assert.equal((await errors()).length, 0);
+    // Loading with the carrier down: the screen gets data, the agent gets one woken error event.
+    assert.deepEqual((await rt.open(t)).data, { slots: null });
+    await new Promise((r) => setTimeout(r, 0));
+    const [first] = await errors();
+    assert.equal((first.payload as { source: string }).source, "partial");
+    assert.equal(first.wake, true);
+    assert.match(first.description, /Part of the screen couldn't load[\s\S]*carrier_unavailable, retryable/);
+    // Reloading, and an action failing with the same code: no second wake for the same outage.
+    await rt.open(t);
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal((await errors()).length, 1);
+    await rt.emit(t, "picked", { slot: "9:00" }).catch(() => undefined);
+    const after = await errors();
+    assert.equal(after.length, 2);
+    assert.equal(after[1].wake, false, "the action's error is recorded, but the agent already knows");
+    carrierDown = false;
+    assert.deepEqual((await rt.open(t)).data, { slots: ["9:00"] });
+  } finally {
+    console.warn = quiet;
+  }
+});
+
 console.log(`\n${passed} checks passed`);

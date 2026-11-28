@@ -41,6 +41,7 @@ const ORDER_RETURN_MESSAGES = {
     remove: (name: string) => `Remove ${name}`,
     photosNeeded: "Add at least one photo to continue.",
     pickupTitle: "Refund and pickup",
+    pickupUnavailable: "We can't load pickup times right now. Your return is saved: try again in a minute.",
     refundLabel: "Refund to",
     refunds: { original_payment: "Original payment method", store_credit: "Store credit" } as Record<Refund, string>,
     refundHelp: { original_payment: "3–5 days after pickup", store_credit: "Right after pickup" } as Record<Refund, string>,
@@ -107,6 +108,7 @@ const ORDER_RETURN_MESSAGES = {
     remove: (name: string) => `Quitar ${name}`,
     photosNeeded: "Añade al menos una foto para continuar.",
     pickupTitle: "Reembolso y recogida",
+    pickupUnavailable: "Ahora no podemos cargar las horas de recogida. Tu devolución está guardada: vuelve a probar en un minuto.",
     refundLabel: "Reembolsar en",
     refunds: { original_payment: "Método de pago original", store_credit: "Saldo en la tienda" },
     refundHelp: { original_payment: "3–5 días después de la recogida", store_credit: "Justo después de la recogida" },
@@ -426,6 +428,14 @@ function Wizard({ data, t }: { data: Return; t: OrderReturnMessages }) {
           </fieldset>
           <fieldset className="grid gap-2">
             <legend className="mb-2 text-sm text-muted-foreground">{t.pickupLabel} {data.address}</legend>
+            {data.pickupUnavailable && (
+              <div role="alert" className="grid gap-2 rounded-md border p-3 text-sm">
+                <p>{t.pickupUnavailable}</p>
+                <button type="button" className={btn("outline")} onClick={() => void reload().catch(() => {})}>
+                  {t.tryAgain}
+                </button>
+              </div>
+            )}
             {data.pickupOptions.map((o) => (
               <Choice
                 key={o.date + o.window}

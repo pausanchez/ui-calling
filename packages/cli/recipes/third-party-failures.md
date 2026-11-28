@@ -33,8 +33,23 @@ reschedule_delivery: event(slotPayload, { describe: (p) => `Asked to move delive
 
 A code the event doesn't list still works, and the server logs a warning.
 
+When only one part of the screen depends on the third party (pickup slots on step 4 of a return), don't throw in `resolve`: that takes the whole screen down, draft included. Catch it, return data that says the part isn't available, and tell the agent with `ctx.reportError`:
+
+```ts
+resolve: async ({ order_id }, ctx) => {
+  const r = await loadReturn(order_id, ctx.subject);
+  const slots = await carrier.slots(r.address).catch(async (err) => {
+    await ctx.reportError(new SurfaceError("carrier_unavailable", "Carrier API timed out listing pickup slots", { retryable: true }), "loading pickup slots");
+    return null;
+  });
+  return { ...r, pickupOptions: slots ?? [], pickupUnavailable: !slots };
+},
+```
+
+The screen shows that step's own "can't load pickup times, your return is saved" with a "Try again" (`reload()`). The agent is woken once for that code, however often `resolve` runs, and not again when a later action fails with the same code.
+
 What happens next, without more code:
-- The agent gets an `error` event with the code and message, worded as "did NOT go through. Attempted: …" from your `describe`. The first error of each kind wakes it, unless it's a refusal (`refused: true`): the screen explains those while the user is still on it, and the agent reads them on its next turn.
+- The agent gets an `error` event with the code and message, worded as "did NOT go through. Attempted: …" from your `describe`. The first error with each code wakes it (a load, a partial load and an action failing with the same code count as one), unless it's a refusal (`refused: true`): the screen explains those while the user is still on it, and the agent reads them on its next turn.
 - The screen gets `errorCode` and `errorReason` (load) or a `SurfaceActionError` with `reason` and `retryable` (action). `errorReason` and `reason` are your `SurfaceError` code.
 - A failed load returns 502 with `error: "upstream_error"`.
 
@@ -90,6 +105,6 @@ An outage (the API is down, a timeout) is `upstream_error` (502), and can be `re
 Not in the package; for reading if you have the repo.
 
 - Switches: [`failures.ts`](../../../apps/demo/server/failures.ts), toggled by `POST /api/demo/failures`
-- Server: [`order-status.server.ts`](../../../apps/demo/server/order-status.server.ts), [`order-return.server.ts`](../../../apps/demo/server/order-return.server.ts)
+- Server: [`order-status.server.ts`](../../../apps/demo/server/order-status.server.ts), [`order-return.server.ts`](../../../apps/demo/server/order-return.server.ts) (`resolve` reports the carrier listing no slots with `ctx.reportError`)
 - Screen: `next()` in [`order-return.tsx`](../../../apps/demo/src/components/ui-calling/order-return.tsx); messages typed by the contract's `reasons` in [`job-application.tsx`](../../../apps/demo/src/components/ui-calling/job-application.tsx)
-- Proof: "a failing action is an error event with a reason", "a failing data source makes the page say so" and "a failed pickup keeps the draft" in [`smoke.ts`](../../../apps/demo/server/smoke.ts)
+- Proof: "a failing action is an error event with a reason", "a failing data source makes the page say so", "a failed pickup keeps the draft" and "with the carrier down, the screen opens without pickup times" in [`smoke.ts`](../../../apps/demo/server/smoke.ts)
