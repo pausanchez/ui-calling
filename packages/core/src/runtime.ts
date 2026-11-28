@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { acceptsType, type AnySurface, type FileSlot, type SurfaceData, type SurfaceEventName, type SurfaceEventPayload, type SurfaceInput } from "./surface";
-import { MemoryStore, TurnBusyError, type ForgetFilter, type ForgetResult, type UiStore } from "./store";
+import { MemoryStore, TurnBusyError, matchesCount, type CountQuery, type ForgetFilter, type ForgetResult, type UiStore } from "./store";
 import {
   LIFECYCLE_EVENTS,
   SurfaceError,
   UiCallingError,
   type ErrorSource,
   type LifecycleEvent,
+  type SessionStatus,
   type UiEvent,
   type UiFile,
   type UiFileRef,
@@ -134,6 +135,11 @@ export type UiCallingOptions = {
   ttlSeconds?: number;
   /** Record an `abandoned` event if nothing happens this long after `opened`. */
   abandonAfterMs?: number;
+  /**
+   * Check for abandon with in-process timers. Default true. Set false on hosts that don't keep a process alive
+   * (serverless functions), where timers never fire, and call `ui.sweep()` from a cron instead.
+   */
+  abandonTimers?: boolean;
   /**
    * Called for every recorded event. This is the return path to the agent.
    * It doesn't hold up the screen: the user's request returns without waiting for a returned
@@ -329,9 +335,21 @@ export function createUiCalling(opts: UiCallingOptions) {
 
   /** Whether this link may still wake the agent this minute (see `maxWakesPerMinute`). */
   async function wakesLeft(session: UiSession) {
-    const since = Date.now() - 60_000;
-    const recent = (await store.listEvents({ sessionId: session.id })).filter((e) => e.kind === "domain" && e.wake && Date.parse(e.at) > since);
-    return recent.length < (opts.maxWakesPerMinute ?? 6);
+    const since = new Date(Date.now() - 60_000).toISOString();
+    return (await countEvents({ sessionId: session.id, kind: "domain", wake: true, since })) < (opts.maxWakesPerMinute ?? 6);
+  }
+
+  async function countEvents(q: CountQuery) {
+    if (store.countEvents) return store.countEvents(q);
+    return (await store.listEvents({ sessionId: q.sessionId })).filter((e) => matchesCount(e, q)).length;
+  }
+
+  /** Apply `patch` only if the session is still `from`, so two requests or instances can't both make the move. */
+  async function moveSession(id: string, from: SessionStatus, patch: Partial<UiSession>) {
+    if (store.updateSessionIf) return store.updateSessionIf(id, from, patch);
+    if ((await store.getSession(id))?.status !== from) return false;
+    await store.updateSession(id, patch);
+    return true;
   }
 
   async function record(session: UiSession, e: Omit<UiEvent, "id" | "sessionId" | "conversationId" | "subject" | "surface" | "at">) {
@@ -409,37 +427,57 @@ export function createUiCalling(opts: UiCallingOptions) {
     return own === false ? 0 : (own ?? opts.abandonAfterMs ?? 0);
   }
 
-  function watchAbandon(sessionId: string, surface: string, delayMs = abandonMs(surface)) {
-    const after = abandonMs(surface);
+  /**
+   * Record `abandoned` if an opened screen has sat idle long enough. Returns "abandoned" when this call recorded it,
+   * how long to wait before checking again when the user is still within the time, or undefined when there's nothing to watch.
+   */
+  async function checkAbandon(sessionId: string): Promise<number | "abandoned" | undefined> {
+    const session = await store.getSession(sessionId);
+    if (!session || session.status !== "opened") return;
+    const after = abandonMs(session.surface);
     if (!after) return;
-    // In-process timers stay dependency-free; `restored` below re-arms them after a restart.
+    const events = await store.listEvents({ sessionId });
+    const defs = impls.get(session.surface)?.surface.events ?? {};
+    // Finishing means an event the contract says wakes the agent (e.g. "submitted"), whether or not this one did:
+    // past `maxWakesPerMinute` it's recorded quietly, and the user still finished. Quiet ones are steps along the way.
+    // A user whose action failed did act too: the agent already heard about the error.
+    // A refusal doesn't count: the user may have given up on it.
+    const finished = events.some(
+      (e) =>
+        (e.kind === "domain" && Object.hasOwn(defs, e.type) && defs[e.type]!.wake) ||
+        (e.kind === "error" && e.wake && (e.payload as { source?: string }).source === "action"),
+    );
+    if (finished) return;
+    // Still moving through the steps: check again once they've been idle long enough.
+    const steps = events.filter((e) => e.kind === "domain");
+    const lastActive = Math.max(
+      Date.parse(session.openedAt ?? session.createdAt),
+      ...events.filter((e) => e.kind === "domain" || e.type === "opened" || e.type === "returned").map((e) => Date.parse(e.at)),
+    );
+    const idle = Date.now() - lastActive;
+    if (idle < after) return after - idle;
+    // Another timer, instance or sweep may get here at the same moment: only the one that makes the move records it.
+    if (!(await moveSession(sessionId, "opened", { status: "abandoned" }))) return;
+    const last = steps.at(-1);
+    await record(session, {
+      type: "abandoned",
+      kind: "lifecycle",
+      payload: { afterMs: after, ...(last ? { lastStep: last.type } : {}) },
+      description: last ? `User stopped partway without finishing. Last step: ${last.description}` : LIFECYCLE_TEXT.abandoned,
+      state: last?.state,
+      wake: true,
+    });
+    return "abandoned";
+  }
+
+  function watchAbandon(sessionId: string, surface: string, delayMs = abandonMs(surface)) {
+    if (!abandonMs(surface) || opts.abandonTimers === false) return;
+    // In-process timers stay dependency-free; `restored` below re-arms them after a restart. Hosts that don't
+    // keep a process alive turn them off and call `ui.sweep()` from a cron instead.
     const t = setTimeout(async () => {
       try {
-        const session = await store.getSession(sessionId);
-        if (!session || session.status !== "opened") return;
-        const events = await store.listEvents({ sessionId });
-        // Finishing means an event that wakes the agent (e.g. "submitted"). Quiet ones are steps along the way.
-        // A user whose action failed did act too: the agent already heard about the error.
-        // A refusal doesn't count: the user may have given up on it.
-        const finished = events.some(
-          (e) => (e.kind === "domain" && e.wake) || (e.kind === "error" && e.wake && (e.payload as { source?: string }).source === "action"),
-        );
-        if (finished) return;
-        // Still moving through the steps: check again once they've been idle long enough.
-        const steps = events.filter((e) => e.kind === "domain");
-        const lastActive = Math.max(...events.filter((e) => e.kind === "domain" || e.type === "opened" || e.type === "returned").map((e) => Date.parse(e.at)));
-        const idle = Date.now() - lastActive;
-        if (idle < after) return watchAbandon(sessionId, surface, after - idle);
-        await store.updateSession(sessionId, { status: "abandoned" });
-        const last = steps.at(-1);
-        await record(session, {
-          type: "abandoned",
-          kind: "lifecycle",
-          payload: { afterMs: after, ...(last ? { lastStep: last.type } : {}) },
-          description: last ? `User stopped partway without finishing. Last step: ${last.description}` : LIFECYCLE_TEXT.abandoned,
-          state: last?.state,
-          wake: true,
-        });
+        const again = await checkAbandon(sessionId);
+        if (typeof again === "number") watchAbandon(sessionId, surface, again);
       } catch (err) {
         // A timer has nobody to report to; an unhandled rejection here would stop the process.
         console.error("[ui-calling] abandon check failed", err);
@@ -454,7 +492,7 @@ export function createUiCalling(opts: UiCallingOptions) {
   // or `next build`, which imports routes, would create the production database.
   let restored: Promise<void> | undefined;
   const restore = (): Promise<void> => (restored ??=
-    [...impls.keys()].some((name) => abandonMs(name)) && store.listSessions
+    opts.abandonTimers !== false && [...impls.keys()].some((name) => abandonMs(name)) && store.listSessions
       ? store.listSessions({ status: "opened" }).then((sessions) => {
           for (const s of sessions) {
             if (!s.openedAt || Date.parse(s.expiresAt) < Date.now() || !abandonMs(s.surface)) continue;
@@ -552,6 +590,25 @@ export function createUiCalling(opts: UiCallingOptions) {
       silentListeners.add(handler);
       return () => void silentListeners.delete(handler);
     },
+    /**
+     * Check every opened screen for abandon now, and record `abandoned` for those idle past `abandonAfterMs`.
+     * For hosts where in-process timers don't run (serverless): set `abandonTimers: false` and call this from a
+     * cron, e.g. every minute. Safe to run on several instances at once. Needs a store with `listSessions`.
+     * Returns how many screens it marked abandoned.
+     */
+    async sweep(): Promise<{ abandoned: number }> {
+      if (!store.listSessions) throw new Error("sweep() needs a store with listSessions(): use sqliteStore(), MemoryStore, or add it to yours");
+      let abandoned = 0;
+      for (const s of await store.listSessions({ status: "opened" })) {
+        if (Date.parse(s.expiresAt) < Date.now() || !abandonMs(s.surface)) continue;
+        try {
+          if ((await checkAbandon(s.id)) === "abandoned") abandoned++;
+        } catch (err) {
+          console.error("[ui-calling] abandon check failed", err);
+        }
+      }
+      return { abandoned };
+    },
     /** Resolves once state from a previous run (abandon timers) has been restored. The first request also starts it. */
     get ready() {
       return restore();
@@ -638,7 +695,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       let session = await sessionFor(token);
       const impl = impls.get(session.surface)!;
       // Whoever holds the link can post events: cap them so a loop or a script can't flood the agent.
-      if ((await store.listEvents({ sessionId: session.id })).length >= (opts.maxEventsPerSession ?? 500)) {
+      if ((await countEvents({ sessionId: session.id })) >= (opts.maxEventsPerSession ?? 500)) {
         throw new UiCallingError("too_many_events", "This screen has sent too many events");
       }
 
@@ -654,11 +711,10 @@ export function createUiCalling(opts: UiCallingOptions) {
         if (!CLIENT_LIFECYCLE.has(type)) throw new UiCallingError("unknown_event", `${type} is server-only`);
         let t = type as LifecycleEvent;
         if (t === "opened") {
-          if (session.openedAt) t = "returned";
-          else {
-            await store.updateSession(session.id, { status: "opened", openedAt: new Date().toISOString() });
-            watchAbandon(session.id, session.surface);
-          }
+          // Two tabs (or two instances) can send the first `opened` at once: only one of them gets to make the move.
+          if (session.openedAt || !(await moveSession(session.id, "sent", { status: "opened", openedAt: new Date().toISOString() }))) {
+            t = "returned";
+          } else watchAbandon(session.id, session.surface);
         }
         if (t === "completed") await store.updateSession(session.id, { status: "completed" });
         session = (await store.getSession(session.id))!;

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { UnknownEventError, matchesForget, type EventQuery, type ForgetFilter, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
+import { UnknownEventError, matchesForget, type CountQuery, type EventQuery, type ForgetFilter, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
 
 /**
  * Sessions and events in a SQLite file, on Node's built-in `node:sqlite`: nothing to install, nothing
@@ -32,8 +32,10 @@ export function sqliteStore(path = DEFAULT_PATH()): SqliteStore {
     getSessionByTokenHash: lazy("getSessionByTokenHash"),
     getSession: lazy("getSession"),
     updateSession: lazy("updateSession"),
+    updateSessionIf: lazy("updateSessionIf"),
     appendEvent: lazy("appendEvent"),
     listEvents: lazy("listEvents"),
+    countEvents: lazy("countEvents"),
     listSessions: lazy("listSessions"),
     putFile: lazy("putFile"),
     getFile: lazy("getFile"),
@@ -102,10 +104,18 @@ function open(path: string) {
     byToken: db.prepare("SELECT json FROM ui_sessions WHERE token_hash = ?"),
     byId: db.prepare("SELECT json FROM ui_sessions WHERE id = ?"),
     updateSession: db.prepare("UPDATE ui_sessions SET status = ?, json = ? WHERE id = ?"),
+    // One statement, so two processes can't both make the same move: the status check and the write happen together.
+    // json_patch merges into the stored JSON, so a field another process wrote meanwhile isn't lost.
+    updateSessionIf: db.prepare("UPDATE ui_sessions SET status = ?, json = json_patch(json, ?) WHERE id = ? AND status = ?"),
     sessionsByStatus: db.prepare("SELECT json FROM ui_sessions WHERE status = ?"),
     allSessions: db.prepare("SELECT json FROM ui_sessions"),
     insertEvent: db.prepare("INSERT INTO ui_events (id, session_id, conversation_id, json) VALUES (?, ?, ?, ?)"),
     seqOf: db.prepare("SELECT seq FROM ui_events WHERE id = ?"),
+    countEvents: db.prepare(`
+      SELECT count(*) AS n FROM ui_events WHERE session_id = ?
+        AND (?2 IS NULL OR json_extract(json, '$.kind') = ?2)
+        AND (?3 IS NULL OR json_extract(json, '$.wake') = ?3)
+        AND (?4 IS NULL OR json_extract(json, '$.at') >= ?4)`),
     insertFile: db.prepare("INSERT INTO ui_files (id, session_id, json, bytes) VALUES (?, ?, ?, ?)"),
     fileById: db.prepare("SELECT json, bytes FROM ui_files WHERE id = ?"),
     filesBySession: db.prepare("SELECT json FROM ui_files WHERE session_id = ? ORDER BY seq"),
@@ -153,8 +163,16 @@ function open(path: string) {
       const next = { ...current, ...patch };
       q.updateSession.run(next.status, JSON.stringify(next), id);
     },
+    async updateSessionIf(id: string, status: SessionStatus, patch: Partial<UiSession>) {
+      return Number(q.updateSessionIf.run(patch.status ?? status, JSON.stringify(patch), id, status).changes) > 0;
+    },
     async appendEvent(event: UiEvent) {
       q.insertEvent.run(event.id, event.sessionId, event.conversationId, JSON.stringify(event));
+    },
+    async countEvents({ sessionId, kind, wake, since }: CountQuery) {
+      // JSON booleans come out of json_extract as 1 and 0.
+      const row = q.countEvents.get(sessionId, kind ?? null, wake === undefined ? null : Number(wake), since ?? null) as { n: number };
+      return Number(row.n);
     },
     async listEvents({ conversationId, sessionId, after, limit }: EventQuery) {
       let from = 0;

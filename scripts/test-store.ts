@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { MemoryStore, TurnBusyError, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
+import { MemoryStore, TurnBusyError, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiCallingOptions, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
 import { sqliteIdentity, sqliteStore } from "@ui-calling/sqlite";
 
 const dir = mkdtempSync(join(tmpdir(), "ui-calling-store-"));
@@ -112,6 +112,28 @@ async function contract(name: string, store: UiStore) {
     // A process that died mid-turn doesn't block the conversation for good.
     assert.equal(await store.acquireTurn!("turn-c1", "c", 60_000), true, "an expired lease can be taken");
   });
+  await check(`${name}: updateSessionIf moves a session only from the status it names, and only once`, async () => {
+    await store.createSession(session("s-c"), "hash-c");
+    assert.equal(await store.updateSessionIf!("s-c", "opened", { status: "abandoned" }), false, "not from a status it isn't in");
+    assert.equal(await store.updateSessionIf!("s-c", "sent", { status: "opened", openedAt: "2026-11-24T10:00:00.000Z" }), true);
+    assert.equal(await store.updateSessionIf!("s-c", "sent", { status: "opened" }), false, "the second one loses");
+    const now = await store.getSession("s-c");
+    assert.equal(now?.openedAt, "2026-11-24T10:00:00.000Z");
+    assert.equal(now?.locale, "es", "untouched fields survive");
+    assert.ok((await store.listSessions!({ status: "opened" })).some((s) => s.id === "s-c"), "the status query sees the move");
+    assert.equal(await store.updateSessionIf!("nope", "sent", { status: "opened" }), false);
+  });
+  await check(`${name}: countEvents counts a session's events by kind, wake and time`, async () => {
+    const c = (await store.getSession("s-c"))!;
+    await store.appendEvent({ ...ev("k1", c, "a"), wake: true, at: "2026-11-24T10:00:00.000Z" });
+    await store.appendEvent({ ...ev("k2", c, "b"), wake: true, at: "2026-11-24T10:05:00.000Z" });
+    await store.appendEvent({ ...ev("k3", c, "opened"), kind: "lifecycle", at: "2026-11-24T10:06:00.000Z" });
+    assert.equal(await store.countEvents!({ sessionId: "s-c" }), 3);
+    assert.equal(await store.countEvents!({ sessionId: "s-c", kind: "domain", wake: true }), 2);
+    assert.equal(await store.countEvents!({ sessionId: "s-c", wake: false }), 1);
+    assert.equal(await store.countEvents!({ sessionId: "s-c", kind: "domain", since: "2026-11-24T10:01:00.000Z" }), 1);
+    assert.equal(await store.countEvents!({ sessionId: "nope" }), 0);
+  });
 }
 
 await contract("memory", new MemoryStore());
@@ -125,9 +147,10 @@ const ticket = defineSurface({
   data: z.object({ id: z.string(), closed: z.boolean() }),
   events: { close: event(z.object({}), { describe: () => "User asked to close the ticket", wake: true }) },
 });
-const boot = (store: UiStore, abandonAfterMs?: number) => {
+const boot = (store: UiStore, abandonAfterMs?: number, more: Partial<UiCallingOptions> = {}) => {
   const woke: UiEvent[] = [];
   const ui = createUiCalling({
+    ...more,
     baseUrl: "https://ui.example.com",
     store,
     abandonAfterMs,
@@ -251,6 +274,28 @@ await check("turns: two instances on one database never run a conversation's tur
   // Waiting has a limit: a turn held elsewhere for too long throws instead of hanging the request.
   await a.acquireTurn!("conv-stuck", "crashed-elsewhere", 60_000);
   await assert.rejects(instances[1].turn("conv-stuck", () => "never", { waitMs: 100 }), TurnBusyError);
+  a.close();
+  b.close();
+});
+
+await check("instances: two on one database record the first open once and the abandon once, with sweep() instead of timers", async () => {
+  const file = join(dir, "sweep.db");
+  const [a, b] = [sqliteStore(file), sqliteStore(file)];
+  const [x, y] = [boot(a, 50, { abandonTimers: false }), boot(b, 50, { abandonTimers: false })];
+  const run = await x.ui.runTool("show_ticket", { ticket_id: "T-9" }, { conversationId: "conv-sweep", subject: "u" });
+  assert.ok(run.ok && !run.silent);
+  const t = run.link.url.split("/s/")[1];
+  // Two tabs opening the link at once, each served by a different instance.
+  const opens = await Promise.all([x.ui.emit(t, "opened"), y.ui.emit(t, "opened")]);
+  assert.deepEqual(opens.map((o) => o.event?.type).sort(), ["opened", "returned"], "only one of them is the first open");
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(x.woke.length + y.woke.length, 0, "no timers ran");
+  // A cron on every instance, firing together.
+  const swept = await Promise.all([x.ui.sweep(), y.ui.sweep(), x.ui.sweep()]);
+  assert.equal(swept.reduce((n, s) => n + s.abandoned, 0), 1, "one of them marks it");
+  assert.deepEqual([...x.woke, ...y.woke].map((e) => e.type), ["abandoned"], "the agent is woken once");
+  assert.equal((await x.ui.events("conv-sweep")).filter((e) => e.type === "abandoned").length, 1);
+  assert.deepEqual(await y.ui.sweep(), { abandoned: 0 }, "nothing left to sweep");
   a.close();
   b.close();
 });

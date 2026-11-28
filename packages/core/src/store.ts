@@ -8,6 +8,19 @@ import type { SessionStatus, UiEvent, UiFile, UiSession } from "./types";
  */
 export type EventQuery = { conversationId?: string; sessionId?: string; after?: string; limit?: number };
 
+/** Which of a session's events `countEvents` counts: all of them, or only those of a kind, a wake flag, at or after `since` (ISO). */
+export type CountQuery = { sessionId: string; kind?: UiEvent["kind"]; wake?: boolean; since?: string };
+
+/** Whether an event matches a count query. Stores can use it to stay consistent with each other. */
+export function matchesCount(event: UiEvent, q: CountQuery): boolean {
+  return (
+    event.sessionId === q.sessionId &&
+    (q.kind === undefined || event.kind === q.kind) &&
+    (q.wake === undefined || event.wake === q.wake) &&
+    (q.since === undefined || event.at >= q.since)
+  );
+}
+
 /** Thrown by `listEvents` when `after` isn't the ID of a stored event. */
 export class UnknownEventError extends Error {
   constructor(public eventId: string) {
@@ -31,11 +44,19 @@ export interface UiStore {
   getSessionByTokenHash(tokenHash: string): Promise<UiSession | undefined>;
   getSession(id: string): Promise<UiSession | undefined>;
   updateSession(id: string, patch: Partial<UiSession>): Promise<void>;
+  /**
+   * Optional, and needed for several instances: apply `patch` only if the session's status is still `status`,
+   * atomically, and return whether it did. The runtime uses it so two tabs or two instances can't both record
+   * the first `opened`, or both mark a screen `abandoned`. Without it, the runtime reads, then writes.
+   */
+  updateSessionIf?(id: string, status: SessionStatus, patch: Partial<UiSession>): Promise<boolean>;
   /** Events come back from `listEvents` in the order they were appended. */
   appendEvent(event: UiEvent): Promise<void>;
   /** Matching events in append order: only those after `query.after`, and at most `query.limit`. */
   listEvents(query: EventQuery): Promise<UiEvent[]>;
-  /** Optional. Lets the runtime re-arm abandon timers for screens left open across a restart. */
+  /** Optional: how many of a session's events match, without reading them. Without it, the runtime counts `listEvents`. */
+  countEvents?(query: CountQuery): Promise<number>;
+  /** Optional. Lets the runtime re-arm abandon timers for screens left open across a restart, and `ui.sweep()` find them. */
   listSessions?(query: { status?: SessionStatus }): Promise<UiSession[]>;
   /**
    * Optional, all four together: needed only by surfaces that declare `files`. Bytes can live elsewhere
@@ -102,8 +123,19 @@ export class MemoryStore implements UiStore {
     if (s) this.sessions.set(id, { ...s, ...patch });
   }
 
+  async updateSessionIf(id: string, status: SessionStatus, patch: Partial<UiSession>) {
+    const s = this.sessions.get(id);
+    if (s?.status !== status) return false;
+    this.sessions.set(id, { ...s, ...patch });
+    return true;
+  }
+
   async appendEvent(event: UiEvent) {
     this.events.push(event);
+  }
+
+  async countEvents(q: CountQuery) {
+    return this.events.filter((e) => matchesCount(e, q)).length;
   }
 
   async putFile(file: UiFile, bytes: Uint8Array) {
