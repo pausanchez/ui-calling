@@ -36,7 +36,7 @@ npx ui-calling new shift-picker
 - Screens use Tailwind v4.
 - `ui-calling.json` records where things live, so `new` and `add` register each surface by themselves.
 - `new` generates three files (contract, server, screen) that compile as-is, with TODOs where your product comes in.
-- **Postgres instead of SQLite:** install `@ui-calling/postgres` and `pg` before `init`, and `store.ts` is the Postgres store on `DATABASE_URL`. For several instances or serverless hosts.
+- **Postgres instead of SQLite:** install `@ui-calling/postgres` and `pg`, then `npx ui-calling init --store postgres`: `store.ts` is the Postgres store on `DATABASE_URL`. For several instances or serverless hosts. Running `init --store sqlite` or `--store postgres` later switches `store.ts` and keeps your surfaces.
 - **When a stalled screen wakes the agent:** `abandonAfterMs`, on `createUiCalling` or on one contract. It's off until you set it; the demo uses 90 seconds.
 
 Verified end to end on Next.js 16, Vite, React Router 7 and Express 5, and in four pilot apps that coding agents built from the packages alone. For a deployed app to read from top to bottom, see [the event concierge](https://github.com/pausanchez/ui-calling-event-concierge): Vercel, Supabase Postgres and Twilio WhatsApp, with screenshots of every step. [GUIDE.md](../packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](../AGENTS.md).
