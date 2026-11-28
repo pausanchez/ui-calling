@@ -10,7 +10,7 @@ ui-calling is a preview: not on npm yet, and the API may still change. What it i
 
 ## Install and set up
 
-> **Not on npm yet.** Install the preview tarballs from the [v0.0.1-preview release](https://github.com/pausanchez/ui-calling/releases/tag/v0.0.1-preview); `npx ui-calling` then runs the installed CLI. Add the adapter for your agent SDK the same way (`ui-calling-anthropic-0.0.1.tgz`, `-ai-sdk-`, `-openai-` or `-mcp-`).
+> **Not on npm yet.** Install the preview tarballs from the [v0.0.1-preview release](https://github.com/pausanchez/ui-calling/releases/tag/v0.0.1-preview); `npx ui-calling` then runs the installed CLI. Add the adapter for your agent SDK the same way (`ui-calling-anthropic-0.0.1.tgz`, `-ai-sdk-`, `-openai-` or `-mcp-`), and `ui-calling-postgres-0.0.1.tgz` if you run several instances or on serverless.
 
 ```bash
 R=https://github.com/pausanchez/ui-calling/releases/download/v0.0.1-preview
@@ -118,6 +118,7 @@ Write `summarize` as "everything the screen shows, in one line": it's the agent'
 | `@ui-calling/ai-sdk` | Surfaces as Vercel AI SDK tools (`aiSdkTools`) |
 | `@ui-calling/openai` | Function tools for the Responses API and Chat Completions, no SDK dependency |
 | `@ui-calling/sqlite` | Zero-config persistence on Node's built-in SQLite: links and the agent's context survive restarts. Also `sqliteIdentity`: account links and one-time codes with attempt limits |
+| `@ui-calling/postgres` | The same persistence in Postgres, for several instances and serverless hosts: pass a `pg` Pool (or any client with `query`). Tables are created on first use |
 | `@ui-calling/mcp` | An MCP server whose tools are your surfaces (`createUiCallingMcpServer`) |
 | `ui-calling` (CLI) | `init` sets ui-calling up in your project (detects Next.js, Vite, React Router, and Express, Fastify or Koa); `new <name>` scaffolds a surface and registers it (`--template steps` for several steps); `add` copies ready-made blocks and parts (`list` shows them); `link` and `events` open a screen for a test user on your dev server and show what the agent reads; `whatsapp dev` and `whatsapp check` connect a real WhatsApp number; `tokens` copies only the design tokens; `guide` prints the building guide and its recipes (`guide toc` lists its sections). Any command takes `--help` |
 
@@ -145,7 +146,6 @@ It opens a tunnel, starts the demo with `PUBLIC_URL` set to it, points the Meta 
 ## Roadmap
 
 - A hosted demo with the scripted agent, so you can try it without cloning
-- A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK and OpenAI ones ran in pilots)
 - More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)

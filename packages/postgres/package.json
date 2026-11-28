@@ -1,0 +1,56 @@
+{
+  "name": "@ui-calling/postgres",
+  "version": "0.0.1",
+  "description": "Postgres persistence for ui-calling sessions and events, for several instances and serverless hosts. Bring your own client (pg, PGlite, Neon…); no dependencies.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pausanchez/ui-calling.git",
+    "directory": "packages/postgres"
+  },
+  "homepage": "https://github.com/pausanchez/ui-calling#readme",
+  "bugs": {
+    "url": "https://github.com/pausanchez/ui-calling/issues"
+  },
+  "keywords": [
+    "ui-calling",
+    "postgres",
+    "pg"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "ui-calling-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "tsup": {
+    "entry": {
+      "index": "src/index.ts"
+    },
+    "format": [
+      "esm"
+    ],
+    "dts": true,
+    "clean": true,
+    "sourcemap": true,
+    "target": "es2022",
+    "platform": "node"
+  },
+  "dependencies": {
+    "@ui-calling/core": "^0.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

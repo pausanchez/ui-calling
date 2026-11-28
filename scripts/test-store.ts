@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { z } from "zod";
 import { MemoryStore, TurnBusyError, UnknownEventError, createUiCalling, defineSurface, event, implement, type UiCallingOptions, type UiEvent, type UiSession, type UiStore } from "@ui-calling/core";
 import { sqliteIdentity, sqliteStore } from "@ui-calling/sqlite";
+import { postgresStore } from "@ui-calling/postgres";
+import { PGlite } from "@electric-sql/pglite";
 
 const dir = mkdtempSync(join(tmpdir(), "ui-calling-store-"));
 let passed = 0;
@@ -138,6 +140,9 @@ async function contract(name: string, store: UiStore) {
 
 await contract("memory", new MemoryStore());
 await contract("sqlite", sqliteStore(join(dir, "contract.db")));
+// Postgres in-process (PGlite, Postgres compiled to WebAssembly): the same SQL a pg Pool runs, no server to start.
+const pg = new PGlite();
+await contract("postgres", postgresStore(pg));
 
 // A surface and a helper to build a runtime over a given store, as a fresh process would.
 const ticket = defineSurface({
@@ -327,5 +332,33 @@ await check("instances: two on one database record the first open once and the a
   b.close();
 });
 
+await check("postgres: two instances on one database open a link once, abandon it once and take turns", async () => {
+  const db = new PGlite();
+  const [a, b] = [postgresStore(db), postgresStore(db)];
+  const [x, y] = [boot(a, 50, { abandonTimers: false }), boot(b, 50, { abandonTimers: false })];
+  const run = await x.ui.runTool("show_ticket", { ticket_id: "T-3" }, { conversationId: "pg-conv", subject: "u" });
+  assert.ok(run.ok && !run.silent);
+  const t = run.link.url.split("/s/")[1];
+  const opens = await Promise.all([x.ui.emit(t, "opened"), y.ui.emit(t, "opened")]);
+  assert.deepEqual(opens.map((o) => o.event?.type).sort(), ["opened", "returned"]);
+  await new Promise((r) => setTimeout(r, 80));
+  const swept = await Promise.all([x.ui.sweep(), y.ui.sweep()]);
+  assert.equal(swept.reduce((n, s) => n + s.abandoned, 0), 1);
+  assert.deepEqual([...x.woke, ...y.woke].map((e) => e.type), ["abandoned"]);
+  // A new runtime on the same database, as after a deploy: the context is all there.
+  const z = boot(postgresStore(db));
+  assert.deepEqual((await z.ui.events("pg-conv")).map((e) => e.type), ["opened", "returned", "abandoned"]);
+  let running = 0;
+  let most = 0;
+  await Promise.all([0, 1, 2, 3].map((n) => [x, y][n % 2].ui.turn("pg-turns", async () => {
+    most = Math.max(most, ++running);
+    await new Promise((r) => setTimeout(r, 15));
+    running--;
+  })));
+  assert.equal(most, 1, "never two turns at once");
+  await db.close();
+});
+
+await pg.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${passed} checks passed`);
