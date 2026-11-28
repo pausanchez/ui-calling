@@ -21,6 +21,12 @@ export function matchesCount(event: UiEvent, q: CountQuery): boolean {
   );
 }
 
+/**
+ * What `claimEventKey` found for a screen's idempotency key: no one had it (`claimed`, run the action), another
+ * request is still running it (`running`), or it already ran (`done`, with the event it recorded, if any).
+ */
+export type EventKeyClaim = { status: "claimed" } | { status: "running" } | { status: "done"; eventId?: string };
+
 /** Thrown by `listEvents` when `after` isn't the ID of a stored event. */
 export class UnknownEventError extends Error {
   constructor(public eventId: string) {
@@ -56,6 +62,16 @@ export interface UiStore {
   listEvents(query: EventQuery): Promise<UiEvent[]>;
   /** Optional: how many of a session's events match, without reading them. Without it, the runtime counts `listEvents`. */
   countEvents?(query: CountQuery): Promise<number>;
+  /**
+   * Optional, all three together, and what makes a screen's retries safe. The screen sends a key with each action and
+   * sends the same one when it retries. `claimEventKey` must be atomic: it claims the key for this session when no one
+   * holds it, or when a claim that never finished is older than `staleMs` (the instance running it died); otherwise it
+   * says what it found. `finishEventKey` marks it done with the event it recorded (none for `ctx.unchanged()`), and
+   * `releaseEventKey` frees it after a failed action, so a retry runs it again. Without them, a retry runs twice.
+   */
+  claimEventKey?(sessionId: string, key: string, staleMs: number): Promise<EventKeyClaim>;
+  finishEventKey?(sessionId: string, key: string, eventId: string | undefined): Promise<void>;
+  releaseEventKey?(sessionId: string, key: string): Promise<void>;
   /** Optional. Lets the runtime re-arm abandon timers for screens left open across a restart, and `ui.sweep()` find them. */
   listSessions?(query: { status?: SessionStatus }): Promise<UiSession[]>;
   /**
@@ -103,6 +119,7 @@ export class MemoryStore implements UiStore {
   private events: UiEvent[] = [];
   private files = new Map<string, { file: UiFile; bytes: Uint8Array }>();
   private turns = new Map<string, { holder: string; until: number }>();
+  private keys = new Map<string, { done: boolean; eventId?: string; at: number }>();
 
   async createSession(session: UiSession, tokenHash: string) {
     this.sessions.set(session.id, session);
@@ -134,6 +151,24 @@ export class MemoryStore implements UiStore {
     this.events.push(event);
   }
 
+  async claimEventKey(sessionId: string, key: string, staleMs: number): Promise<EventKeyClaim> {
+    const k = `${sessionId}:${key}`;
+    const found = this.keys.get(k);
+    if (found?.done) return { status: "done", ...(found.eventId ? { eventId: found.eventId } : {}) };
+    if (found && found.at > Date.now() - staleMs) return { status: "running" };
+    this.keys.set(k, { done: false, at: Date.now() });
+    return { status: "claimed" };
+  }
+
+  async finishEventKey(sessionId: string, key: string, eventId: string | undefined) {
+    this.keys.set(`${sessionId}:${key}`, { done: true, eventId, at: Date.now() });
+  }
+
+  async releaseEventKey(sessionId: string, key: string) {
+    const k = `${sessionId}:${key}`;
+    if (!this.keys.get(k)?.done) this.keys.delete(k);
+  }
+
   async countEvents(q: CountQuery) {
     return this.events.filter((e) => matchesCount(e, q)).length;
   }
@@ -161,6 +196,7 @@ export class MemoryStore implements UiStore {
     for (const [hash, id] of this.byToken) if (ids.has(id)) this.byToken.delete(hash);
     this.events = this.events.filter((e) => !ids.has(e.sessionId));
     for (const [id, f] of this.files) if (ids.has(f.file.sessionId)) this.files.delete(id);
+    for (const k of this.keys.keys()) if (ids.has(k.slice(0, k.indexOf(":")))) this.keys.delete(k);
     return { sessions: ids.size, events: before.events - this.events.length, files: before.files - this.files.size };
   }
 

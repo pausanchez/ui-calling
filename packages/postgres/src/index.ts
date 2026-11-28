@@ -1,6 +1,7 @@
 import {
   UnknownEventError,
   type CountQuery,
+  type EventKeyClaim,
   type EventQuery,
   type ForgetFilter,
   type ForgetResult,
@@ -147,12 +148,34 @@ export function postgresStore(db: PgQueryable, opts: { createTables?: boolean } 
       const r = await q(
         `WITH s AS (DELETE FROM ui_sessions WHERE ${where} RETURNING id),
               e AS (DELETE FROM ui_events WHERE session_id IN (SELECT id FROM s) RETURNING 1),
-              f AS (DELETE FROM ui_files WHERE session_id IN (SELECT id FROM s) RETURNING 1)
+              f AS (DELETE FROM ui_files WHERE session_id IN (SELECT id FROM s) RETURNING 1),
+              k AS (DELETE FROM ui_event_keys WHERE session_id IN (SELECT id FROM s))
          SELECT (SELECT count(*) FROM s) AS sessions, (SELECT count(*) FROM e) AS events, (SELECT count(*) FROM f) AS files`,
         [value],
       );
       const row = r.rows[0];
       return { sessions: Number(row.sessions), events: Number(row.events), files: Number(row.files) };
+    },
+
+    // One statement claims the key: when it's new, or when a claim that never finished went stale. An upsert that
+    // updates nothing returns no row, so what holds the key is read after.
+    async claimEventKey(sessionId: string, key: string, staleMs: number): Promise<EventKeyClaim> {
+      const r = await q(
+        `INSERT INTO ui_event_keys (session_id, key, claimed_at) VALUES ($1, $2, now())
+         ON CONFLICT (session_id, key) DO UPDATE SET claimed_at = excluded.claimed_at
+         WHERE NOT ui_event_keys.done AND ui_event_keys.claimed_at <= now() - $3 * interval '1 millisecond'
+         RETURNING 1`,
+        [sessionId, key, staleMs],
+      );
+      if (r.rows.length) return { status: "claimed" };
+      const row = (await q("SELECT done, event_id FROM ui_event_keys WHERE session_id = $1 AND key = $2", [sessionId, key])).rows[0];
+      return row?.done ? { status: "done", ...(row.event_id ? { eventId: row.event_id } : {}) } : { status: "running" };
+    },
+    async finishEventKey(sessionId: string, key: string, eventId: string | undefined) {
+      await q("UPDATE ui_event_keys SET done = true, event_id = $3 WHERE session_id = $1 AND key = $2", [sessionId, key, eventId ?? null]);
+    },
+    async releaseEventKey(sessionId: string, key: string) {
+      await q("DELETE FROM ui_event_keys WHERE session_id = $1 AND key = $2 AND NOT done", [sessionId, key]);
     },
 
     // The database's clock, not each instance's: leases mean the same thing on every machine.
@@ -212,6 +235,14 @@ CREATE TABLE IF NOT EXISTS ui_files (
   bytes bytea NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ui_files_session ON ui_files (session_id, seq);
+CREATE TABLE IF NOT EXISTS ui_event_keys (
+  session_id text NOT NULL,
+  key text NOT NULL,
+  done boolean NOT NULL DEFAULT false,
+  event_id text,
+  claimed_at timestamptz NOT NULL,
+  PRIMARY KEY (session_id, key)
+);
 CREATE TABLE IF NOT EXISTS ui_turns (
   conversation_id text PRIMARY KEY,
   holder text NOT NULL,

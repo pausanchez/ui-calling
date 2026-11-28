@@ -24,6 +24,13 @@ async function load(id: string, subject: string, opts: { prefill?: string; sessi
   const key = draftKey(subject, id);
   const fresh: Saved = { draft: { step: "details" as Step, details: "", choice: null }, submitted: null };
   let saved = (await drafts.get<Saved>(key)) ?? fresh;
+  // A draft saved by an older version of this screen starts over, and a choice that's no longer offered is dropped
+  // (back to that step): stale data never reaches the submit.
+  if (!__const__.data.shape.draft.safeParse(saved.draft).success) saved = fresh;
+  if (!saved.submitted && saved.draft.choice !== null && !options.some((o) => o.id === saved.draft.choice)) {
+    const step = __const__Steps.indexOf(saved.draft.step) > __const__Steps.indexOf("choice") ? ("choice" as Step) : saved.draft.step;
+    saved = { ...saved, draft: { ...saved.draft, choice: null, step } };
+  }
   if (saved.submitted && opts.session && saved.sentIn !== opts.session) saved = fresh;
   const { prefill } = opts;
   if (prefill && options.some((o) => o.id === prefill) && __const__Steps.indexOf(saved.draft.step) < __const__Steps.indexOf("review")) {
@@ -69,7 +76,9 @@ export const __const__Impl = implement(__const__, {
       const d = await load(id, ctx.subject);
       if (d.submitted) return ctx.unchanged(d); // a double tap: no second event, no second wake
       if (!d.draft.details || !d.draft.choice) throw new SurfaceError("incomplete", "Details or choice is missing", { refused: true });
-      // TODO: do the real thing here. Throw SurfaceError(code, message, { retryable: true }) if a system behind it fails.
+      // TODO: do the real thing here. Pass ctx.eventKey as the idempotency key to APIs that take one (payments,
+      // bookings): it's the same on every retry of this tap. Throw SurfaceError(code, message, { retryable: true }) if a
+      // system behind it fails.
       await drafts.set(draftKey(ctx.subject, id), { draft: d.draft, submitted: { reference: `R-${Math.floor(1000 + Math.random() * 9000)}` }, sentIn: ctx.session.id });
       return load(id, ctx.subject);
     },

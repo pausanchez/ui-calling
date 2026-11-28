@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { UnknownEventError, matchesForget, type CountQuery, type EventQuery, type ForgetFilter, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
+import { UnknownEventError, matchesForget, type CountQuery, type EventKeyClaim, type EventQuery, type ForgetFilter, type SessionStatus, type UiEvent, type UiFile, type UiSession, type UiStore } from "@ui-calling/core";
 
 /**
  * Sessions and events in a SQLite file, on Node's built-in `node:sqlite`: nothing to install, nothing
@@ -42,6 +42,9 @@ export function sqliteStore(path = DEFAULT_PATH()): SqliteStore {
     listFiles: lazy("listFiles"),
     deleteFile: lazy("deleteFile"),
     forget: lazy("forget"),
+    claimEventKey: lazy("claimEventKey"),
+    finishEventKey: lazy("finishEventKey"),
+    releaseEventKey: lazy("releaseEventKey"),
     acquireTurn: lazy("acquireTurn"),
     releaseTurn: lazy("releaseTurn"),
   } as SqliteStore;
@@ -92,6 +95,14 @@ function open(path: string) {
       bytes BLOB NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ui_files_session ON ui_files (session_id, seq);
+    CREATE TABLE IF NOT EXISTS ui_event_keys (
+      session_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0,
+      event_id TEXT,
+      claimed_at INTEGER NOT NULL,
+      PRIMARY KEY (session_id, key)
+    );
     CREATE TABLE IF NOT EXISTS ui_turns (
       conversation_id TEXT PRIMARY KEY,
       holder TEXT NOT NULL,
@@ -129,6 +140,15 @@ function open(path: string) {
       ON CONFLICT (conversation_id) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
       WHERE ui_turns.expires_at <= ? OR ui_turns.holder = excluded.holder`),
     releaseTurn: db.prepare("DELETE FROM ui_turns WHERE conversation_id = ? AND holder = ?"),
+    // One statement, like the lease: a key is claimed when it's new, or when a claim that never finished went stale.
+    claimKey: db.prepare(`
+      INSERT INTO ui_event_keys (session_id, key, claimed_at) VALUES (?, ?, ?)
+      ON CONFLICT (session_id, key) DO UPDATE SET claimed_at = excluded.claimed_at
+      WHERE ui_event_keys.done = 0 AND ui_event_keys.claimed_at <= ?`),
+    keyOf: db.prepare("SELECT done, event_id FROM ui_event_keys WHERE session_id = ? AND key = ?"),
+    finishKey: db.prepare("UPDATE ui_event_keys SET done = 1, event_id = ? WHERE session_id = ? AND key = ?"),
+    releaseKey: db.prepare("DELETE FROM ui_event_keys WHERE session_id = ? AND key = ? AND done = 0"),
+    deleteKeysOf: db.prepare("DELETE FROM ui_event_keys WHERE session_id = ?"),
   };
   // One statement per combination of filters, so each query can use the (…, seq) indexes.
   const eventQueries = new Map<string, ReturnType<DatabaseSync["prepare"]>>();
@@ -212,6 +232,18 @@ function open(path: string) {
     async deleteFile(id: string) {
       q.deleteFile.run(id);
     },
+    async claimEventKey(sessionId: string, key: string, staleMs: number): Promise<EventKeyClaim> {
+      const now = Date.now();
+      if (Number(q.claimKey.run(sessionId, key, now, now - staleMs).changes) > 0) return { status: "claimed" };
+      const row = q.keyOf.get(sessionId, key) as { done: number; event_id: string | null };
+      return row.done ? { status: "done", ...(row.event_id ? { eventId: row.event_id } : {}) } : { status: "running" };
+    },
+    async finishEventKey(sessionId: string, key: string, eventId: string | undefined) {
+      q.finishKey.run(eventId ?? null, sessionId, key);
+    },
+    async releaseEventKey(sessionId: string, key: string) {
+      q.releaseKey.run(sessionId, key);
+    },
     async acquireTurn(conversationId: string, holder: string, ttlMs: number) {
       const now = Date.now();
       return Number(q.acquireTurn.run(conversationId, holder, now + ttlMs, now).changes) > 0;
@@ -228,6 +260,7 @@ function open(path: string) {
         for (const id of ids) {
           result.events += Number(q.deleteEventsOf.run(id).changes);
           result.files += Number(q.deleteFilesOf.run(id).changes);
+          q.deleteKeysOf.run(id);
           result.sessions += Number(q.deleteSession.run(id).changes);
         }
         db.exec("COMMIT");

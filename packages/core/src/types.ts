@@ -83,9 +83,10 @@ export class UiCallingError extends Error {
       | "refused"
       | "other_device"
       | "verification_required"
-      | "verification_locked",
+      | "verification_locked"
+      | "in_progress",
     message: string,
-    public status: 400 | 403 | 404 | 410 | 422 | 429 | 502 = code === "not_found"
+    public status: 400 | 403 | 404 | 409 | 410 | 422 | 429 | 502 = code === "not_found"
       ? 404
       : code === "other_device" || code === "verification_required" || code === "verification_locked"
         ? 403
@@ -97,7 +98,9 @@ export class UiCallingError extends Error {
             ? 422
             : code === "too_many_events"
               ? 429
-              : 400,
+              : code === "in_progress"
+                ? 409
+                : 400,
     public retryable = false,
     /** For `upstream_error` and `refused`: the `SurfaceError` code (e.g. "shift_full"), so the screen can explain it in the user's language. */
     public reason?: string,

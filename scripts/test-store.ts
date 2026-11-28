@@ -35,6 +35,23 @@ const ev = (id: string, s: UiSession, type: string): UiEvent => ({
 });
 
 async function contract(name: string, store: UiStore) {
+  await check(`${name}: event keys are claimed once per session, freed on failure, reclaimed when stale, and remember their event`, async () => {
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-1", 60_000), { status: "claimed" });
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-1", 60_000), { status: "running" });
+    assert.deepEqual(await store.claimEventKey!("s-other", "key-1", 60_000), { status: "claimed" }, "keys are per session");
+    await store.releaseEventKey!("s-k", "key-1");
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-1", 60_000), { status: "claimed" }, "a failed action can run again");
+    await store.finishEventKey!("s-k", "key-1", "ev-9");
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-1", 0), { status: "done", eventId: "ev-9" }, "done is never stale");
+    await store.releaseEventKey!("s-k", "key-1");
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-1", 60_000), { status: "done", eventId: "ev-9" }, "release can't undo done");
+    await store.claimEventKey!("s-k", "key-2", 60_000);
+    await store.finishEventKey!("s-k", "key-2", undefined);
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-2", 60_000), { status: "done" }, "ctx.unchanged(): done, no event");
+    await store.claimEventKey!("s-k", "key-3", 60_000);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(await store.claimEventKey!("s-k", "key-3", 5), { status: "claimed" }, "an unfinished claim goes stale");
+  });
   await check(`${name}: sessions by token hash and id, partial updates, status queries`, async () => {
     const a = session("s-a");
     await store.createSession(a, "hash-a");
@@ -92,7 +109,10 @@ async function contract(name: string, store: UiStore) {
       await store.appendEvent(ev(`e-${s.id}`, s, "opened"));
     }
     await store.putFile!({ id: "f-fg-1", sessionId: "fg-1", slot: "photos", name: "x.png", type: "image/png", size: 1, at: new Date().toISOString() }, new Uint8Array([1]));
+    await store.claimEventKey!("fg-1", "key-forget", 60_000);
+    await store.finishEventKey!("fg-1", "key-forget", "e-fg-1");
     assert.deepEqual(await store.forget!({ conversationId: "conv-forget" }), { sessions: 1, events: 1, files: 1 });
+    assert.deepEqual(await store.claimEventKey!("fg-1", "key-forget", 60_000), { status: "claimed" }, "its event keys go too");
     assert.equal(await store.getSessionByTokenHash("h-fg-1"), undefined, "its link no longer opens");
     assert.equal(await store.getFile!("f-fg-1"), undefined);
     assert.equal((await store.listEvents({ conversationId: "conv-keep" })).length, 1, "other conversations stay");

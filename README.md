@@ -125,6 +125,14 @@ npx ui-calling new shift-picker
 
 Where errors come from and how to throw your own: [GUIDE.md](packages/cli/GUIDE.md#errors).
 
+## Retries are safe
+
+- Screens retry: a connection drops, a phone sleeps, a user taps again. Each action carries a key, and a retry of one that already ran gets its result instead of running it twice. A retry while it's still running is told to wait.
+- A failed action can be retried; a store that fails after your handler ran never shows the user a false success.
+- `completed` means the user is done with the screen, not that the business process finished: that's your own event, like `booked`.
+
+What each state means and exactly what's guaranteed: [GUIDE.md](packages/cli/GUIDE.md#retries-and-failures). [scripts/test-guarantees.ts](scripts/test-guarantees.ts) checks it on every store.
+
 ## Security, in short
 
 - The link carries only a random token; the server keeps its hash. Data is resolved when the page opens, scoped to the user the link was sent to.

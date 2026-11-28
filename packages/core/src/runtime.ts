@@ -46,7 +46,16 @@ export type SurfaceContext<S extends AnySurface = AnySurface> = {
    * recorded and doesn't wake the agent; the screen gets `data` (or `resolve`'s, when you pass none).
    */
   unchanged: (data?: SurfaceData<S>) => Unchanged<S>;
+  /**
+   * In an event handler: the key the screen sent with this action, the same on every retry of it. Pass it to APIs
+   * that take an idempotency key (payments, bookings): if an instance dies mid-action, the retry runs the handler
+   * again, and the key is what stops the API doing it twice.
+   */
+  eventKey?: string;
 };
+
+/** A screen's idempotency key: what `crypto.randomUUID()` makes, or anything of the same kind. */
+const EVENT_KEY = /^[A-Za-z0-9_-]{8,64}$/;
 
 const UNCHANGED = Symbol("ui-calling.unchanged");
 /** What `ctx.unchanged()` returns: a handler's way to say the event changed nothing. */
@@ -183,6 +192,11 @@ export type UiCallingOptions = {
   deliverLinks?: "button" | "message";
   /** Events one link may record before the screen gets 429s. Default 500. */
   maxEventsPerSession?: number;
+  /**
+   * How long a claimed event key may go unfinished before a retry runs the action again: the instance running it
+   * died, or the store failed after the handler ran. Longer than your slowest handler. Default 2 minutes.
+   */
+  eventKeyStaleMs?: number;
   /**
    * Domain events with `wake: true` one link may send per minute before they stop waking the agent (they're
    * still recorded, quietly). A script holding a link can't run up agent turns. Default 6.
@@ -331,8 +345,9 @@ export function createUiCalling(opts: UiCallingOptions) {
     return Object.assign(err, { surface: session.surface, locale: session.locale });
   }
 
-  function ctxOf(session: UiSession): SurfaceContext {
+  function ctxOf(session: UiSession, eventKey?: string): SurfaceContext {
     const ctx: SurfaceContext = {
+      ...(eventKey ? { eventKey } : {}),
       session,
       input: session.input as SurfaceInput<AnySurface>,
       subject: session.subject,
@@ -731,7 +746,12 @@ export function createUiCalling(opts: UiCallingOptions) {
     },
 
     /** Record an event coming from the screen, run its handler, return fresh data if any. */
-    async emit(token: string, type: string, rawPayload: unknown = {}) {
+    /**
+     * Record an event from the screen, running its handler first. `key` makes retries safe: the screen sends the
+     * same one when it retries an action, and an action that already ran isn't run or recorded again (`repeat`).
+     */
+    async emit(token: string, type: string, rawPayload: unknown = {}, { key }: { key?: string } = {}) {
+      if (key !== undefined && !EVENT_KEY.test(key)) throw new UiCallingError("invalid_payload", "The event key must be 8–64 letters, digits, - or _");
       let session = await verifiedSession(token);
       const impl = impls.get(session.surface)!;
       // Whoever holds the link can post events: cap them so a loop or a script can't flood the agent.
@@ -785,11 +805,24 @@ export function createUiCalling(opts: UiCallingOptions) {
       const visible = def.redact?.length
         ? { ...(parsed.data as object), ...Object.fromEntries(def.redact.map((k: string) => [k, "[redacted]"])) }
         : parsed.data;
+      // Claim the key before running anything: a retry that arrives while the first try is still running, or after
+      // it finished, must not run the handler again.
+      const keyed = key !== undefined && store.claimEventKey ? key : undefined;
+      if (keyed) {
+        const claim = await store.claimEventKey!(session.id, keyed, opts.eventKeyStaleMs ?? 2 * 60_000);
+        if (claim.status === "running") throw atSession(new UiCallingError("in_progress", "This action is still being processed", 409, true), session);
+        if (claim.status === "done") {
+          const event = claim.eventId ? (await store.listEvents({ sessionId: session.id })).find((e) => e.id === claim.eventId) : undefined;
+          return { event, data: await ctxOf(session).resolve().catch(() => undefined), repeat: true as const };
+        }
+      }
       const handler = impl.on?.[type as never] as ((p: unknown, c: SurfaceContext) => Promise<unknown>) | undefined;
       let data: unknown;
       try {
-        data = handler ? await handler(parsed.data, ctxOf(session)) : undefined;
+        data = handler ? await handler(parsed.data, ctxOf(session, key)) : undefined;
       } catch (err) {
+        // Nothing happened, so a retry may run it again.
+        if (keyed) await store.releaseEventKey!(session.id, keyed).catch(() => {});
         // The intent still matters: the agent learns what the user tried and why it didn't happen.
         const info = toErrorInfo(err);
         await recordError(session, info, "action", type, safeDescribe(def, visible, type));
@@ -802,8 +835,11 @@ export function createUiCalling(opts: UiCallingOptions) {
       }
       // The handler said nothing happened (a repeat): no event, no wake, just the screen's current data.
       if (isUnchanged(data)) {
+        if (keyed) await store.finishEventKey!(session.id, keyed, undefined);
         return { event: undefined, data: data.data ?? (await ctxOf(session).resolve().catch(() => undefined)) };
       }
+      // If recording fails from here on, the request fails and the key stays claimed: the screen never shows a
+      // success the agent can't see, and a retry after `eventKeyStaleMs` runs the handler again with the same key.
       const event = await record(session, {
         type,
         kind: "domain",
@@ -814,6 +850,8 @@ export function createUiCalling(opts: UiCallingOptions) {
         wake: (def.wake ?? false) && (await wakesLeft(session)),
         ...(def.includePayload === false ? { payloadForAgent: false } : {}),
       });
+      // The event is recorded and the user gets their success: a failure here only delays a retry nobody needs.
+      if (keyed) await store.finishEventKey!(session.id, keyed, event.id).catch((err) => console.error("[ui-calling] finishEventKey failed", err));
       return { event, data: data ?? undefined };
     },
 

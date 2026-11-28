@@ -89,11 +89,15 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     // Events are small: an ID and the user's choices. Anything bigger is a mistake or abuse.
     bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: "payload_too_large", message: "Event too large" }, 413) }),
     async (c) => {
-    const body = await c.req.json<{ type?: string; payload?: unknown }>().catch(() => ({}) as { type?: string; payload?: unknown });
+    type Body = { type?: string; payload?: unknown; key?: unknown };
+    const body = await c.req.json<Body>().catch(() => ({}) as Body);
     if (!body.type) return c.json({ error: "invalid_payload", message: "Missing event type" }, 400);
-    const { event, data } = await ui.emit(c.req.param("token"), body.type, body.payload);
+    if (body.key !== undefined && typeof body.key !== "string") return c.json({ error: "invalid_payload", message: "The event key must be a string" }, 400);
+    const result = await ui.emit(c.req.param("token"), body.type, body.payload, { key: body.key });
+    const { event, data } = result;
     // No event when the handler returned ctx.unchanged(): a repeat that changed nothing.
-    return c.json({ event: event ? { id: event.id, type: event.type } : null, data });
+    // `repeat`: this key already ran, so nothing ran now; `event` is the one the first try recorded.
+    return c.json({ event: event ? { id: event.id, type: event.type } : null, data, ...("repeat" in result ? { repeat: true } : {}) });
     },
   );
 
