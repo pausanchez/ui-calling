@@ -23,7 +23,7 @@ Real people, without a client: the [event concierge](https://github.com/pausanch
 
 ## 1. Decisions
 
-- [x] **Version.** The preview is `0.1.0-preview.0` for all packages, released together; later previews bump the last number, and the stable release is `0.1.0`.
+- [x] **Version.** The preview is `0.1.0-preview.N` for all packages, released together (`0.1.0-preview.0` on 2026-11-28, `.1` with `ctx.reportError`); later previews bump the last number, and the stable release is `0.1.0`.
 - [x] **Copyright holder** in `LICENSE` (MIT; copied into every package): "San Pau" (decided 2026-11-28), in the root `LICENSE` and `packages/*/LICENSE`.
 - [x] **npm organization.** The npm org `ui-calling` exists, owned by `sanpau` (2026-11-28). The names `ui-calling` and `@ui-calling/*` were free on 2026-11-25; check again with `npm view <name>` right before publishing.
 - [x] **Public repo.** The docs site on GitHub Pages is public either way. From a private repo, Pages needs a paid plan; otherwise make the repo public first.
@@ -39,7 +39,7 @@ Real people, without a client: the [event concierge](https://github.com/pausanch
   - `packages/cli/GUIDE.md`: the "Not on npm yet" note at the top.
   - The `v0.0.1-preview` GitHub release: mark it superseded by the npm preview.
   - The docs page artifact, if it's still shared: its "Pre-release" note.
-- [x] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite`, `postgres` and the adapters (`^0.1.0-preview.0`, which also accepts later previews and `0.1.0`).
+- [x] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite`, `postgres` and the adapters (`^0.1.0-preview.N`, the current preview, which also accepts later previews and `0.1.0`).
 - [x] `npm run build`.
 - [x] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running), on create-react-router (`npm run typecheck`, `react-router build`), and on a plain Express app (`init`, `uiCallingNodeHandler`, `link`, `events`).
 
@@ -69,7 +69,14 @@ npm publish -w packages/cli --tag next
 
 Scoped packages publish as public (`publishConfig.access`).
 
-Then tag it: `git tag v0.1.0-preview.0 && git push origin v0.1.0-preview.0`, and write a GitHub release marked as a pre-release.
+Then tag it (`git tag v0.1.0-preview.N && git push origin v0.1.0-preview.N`), and write a GitHub release marked as a pre-release.
+
+**A later preview** (`0.1.0-preview.1` and on): `--tag next` only moves `next`, and `latest` stays on the first preview, which is what `npm install` gets. Move it after publishing:
+
+```bash
+V=0.1.0-preview.1
+for p in @ui-calling/core @ui-calling/sqlite @ui-calling/postgres @ui-calling/server @ui-calling/react @ui-calling/anthropic @ui-calling/ai-sdk @ui-calling/openai @ui-calling/mcp ui-calling; do npm dist-tag add $p@$V latest; done
+```
 
 ## 4. Docs site
 
