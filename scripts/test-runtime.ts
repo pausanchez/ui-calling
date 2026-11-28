@@ -2,7 +2,7 @@
 // Run: npx tsx -C ui-calling-source scripts/test-runtime.ts
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { MemoryStore, createUiCalling, defineSurface, event, formatEventsForAgent, implement, SurfaceError, type UiStore } from "@ui-calling/core";
+import { MemoryStore, createUiCalling, defineSurface, event, formatEventsForAgent, implement, SurfaceError, type SurfaceReason, type TraceStep, type UiStore } from "@ui-calling/core";
 import { uiCallingHandler } from "@ui-calling/server";
 import { whatsappTemplateMessage } from "@ui-calling/core/whatsapp";
 import { linkAccountImpl } from "../packages/cli/registry/blocks/link-account/link-account.server";
@@ -757,6 +757,125 @@ await check("pilot 2: events carry the subject, ctx.resolve rebuilds data, times
   assert.equal(refusal.wake, false, "the screen explains a refusal; the agent reads it on its next turn");
   const run = await zoned.runTool("show_hold", { item: "jeans" }, { conversationId: "z", subject: "web:dev-1" });
   assert.match(JSON.parse(run.content).expires_at, /^\d{1,2} \w{3} \d{2}:\d{2} CES?T$/); // CEST in summer
+});
+
+// Declared reasons and tracing: a booking that can be refused for two reasons.
+const seat = defineSurface({
+  name: "seat",
+  description: "Books a seat.",
+  input: z.object({}),
+  data: z.object({ left: z.number() }),
+  events: {
+    booked: event(z.object({ seats: z.number().int().min(1) }), { describe: (p) => `Asked for ${p.seats} seats`, wake: true, reasons: ["sold_out", "too_many"] }),
+    noted: event(z.object({}), { describe: () => "Left a note" }),
+  },
+});
+
+await check("reasons: the contract's codes are a typed union, and an unlisted one still works but warns", async () => {
+  const messages: Record<SurfaceReason<typeof seat>, string> = { sold_out: "No seats left", too_many: "Ask for fewer" };
+  // @ts-expect-error a reason the contract doesn't declare
+  const typo: SurfaceReason<typeof seat, "booked"> = "soldout";
+  // @ts-expect-error an event without reasons has none
+  const none: SurfaceReason<typeof seat, "noted"> = "sold_out";
+  void [messages, typo, none];
+
+  let left = 1;
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    surfaces: [
+      implement(seat, {
+        resolve: async () => ({ left }),
+        summarize: (d) => `${d.left} seats left.`,
+        on: {
+          booked: async ({ seats }, ctx) => {
+            if (seats > 2) throw new SurfaceError("party_too_big", "Groups book at the desk", { refused: true });
+            if (seats > left) throw new SurfaceError("sold_out", "Sold out", { refused: true });
+            left -= seats;
+            return ctx.resolve();
+          },
+        },
+      }),
+    ],
+  });
+  const t = token((await ui.call("show_seat", {}, who)).url);
+  const warn = console.warn;
+  const warned: string[] = [];
+  console.warn = (msg: string) => void warned.push(msg);
+  try {
+    await assert.rejects(ui.emit(t, "booked", { seats: 2 }), { code: "refused", reason: "sold_out" });
+    assert.ok(!warned.some((w) => w.includes("reasons don't list")), "a declared reason is quiet");
+    await assert.rejects(ui.emit(t, "booked", { seats: 3 }), { code: "refused", reason: "party_too_big" });
+    assert.ok(warned.some((w) => w.includes(`threw "party_too_big", which the event's reasons don't list`)));
+  } finally {
+    console.warn = warn;
+  }
+});
+
+await check("trace: every step of one action shares the session and key, with the handler's time and each failure's kind", async () => {
+  const steps: TraceStep[] = [];
+  let left = 1;
+  const store = new MemoryStore();
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    store,
+    onTrace: (s) => void steps.push(s),
+    surfaces: [
+      implement(seat, {
+        resolve: async () => ({ left }),
+        summarize: (d) => `${d.left} seats left.`,
+        on: {
+          booked: async ({ seats }, ctx) => {
+            if (seats > left) throw new SurfaceError("sold_out", "Sold out", { refused: true });
+            left -= seats;
+            return ctx.resolve();
+          },
+        },
+      }),
+    ],
+  });
+  const link = await ui.call("show_seat", {}, who);
+  const t = token(link.url);
+  await ui.emit(t, "opened");
+  await ui.emit(t, "booked", { seats: 1 }, { key: "tap-trace-01" });
+  await ui.emit(t, "booked", { seats: 1 }, { key: "tap-trace-01" });
+  await assert.rejects(ui.emit(t, "booked", { seats: 1 }, { key: "tap-trace-02" }));
+  await assert.rejects(ui.emit(t, "booked", { seats: 0 }));
+  await new Promise((r) => setTimeout(r, 0));
+
+  assert.ok(steps.every((s) => s.sessionId === link.sessionId && s.conversationId === "c1" && s.surface === "seat"), "one correlation ID");
+  const line = (s: TraceStep) => [s.step, s.type, s.key, s.outcome ?? s.kind].filter(Boolean).join(" ");
+  assert.deepEqual(steps.map(line), [
+    "link.created",
+    "event.received opened",
+    "event.recorded opened",
+    "event.received booked tap-trace-01",
+    "handler.finished booked tap-trace-01 ok",
+    "event.recorded booked",
+    "event.received booked tap-trace-01",
+    "event.repeat booked tap-trace-01",
+    "event.received booked tap-trace-02",
+    "handler.finished booked tap-trace-02 failed",
+    "event.recorded error",
+    "event.failed booked tap-trace-02 refused",
+    "event.received booked",
+    "event.failed booked validation",
+  ]);
+  const handled = steps.find((s) => s.step === "handler.finished")!;
+  assert.equal(typeof handled.ms, "number");
+  assert.equal(steps.find((s) => s.step === "event.failed")!.reason, "sold_out");
+  assert.equal(steps.find((s) => s.step === "event.repeat")!.eventId, steps.find((s) => s.step === "event.recorded" && s.type === "booked")!.eventId);
+  assert.ok(!JSON.stringify(steps).includes("seats"), "no payloads in traces");
+
+  // A failing trace hook never fails the user's action.
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const throwing = createUiCalling({ baseUrl: "https://ui.example.com", onTrace: () => { throw new Error("collector down"); }, surfaces: [implement(seat, { resolve: async () => ({ left: 5 }), summarize: () => "5 left." })] });
+    const t2 = token((await throwing.call("show_seat", {}, who)).url);
+    assert.equal((await throwing.emit(t2, "noted", {})).event?.type, "noted");
+  } finally {
+    console.error = quiet;
+  }
 });
 
 console.log(`\n${passed} checks passed`);

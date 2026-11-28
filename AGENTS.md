@@ -111,4 +111,6 @@ Restarting the dev server keeps all of it. **Reset all** in the UI (or `POST /ap
 3. For UI changes, open the link at a 375px width and check both locales.
 4. If a real WhatsApp number gets no reply, read the `WhatsApp` line the API prints at startup first: it names an expired token or a webhook pointing at an old tunnel. A webhook with a bad signature logs `webhook rejected`.
 
+`UI_CALLING_TRACE=1 npm run dev` prints every step of every interaction (`onTrace`): which tap became which event, how long the handler took, and how a request failed.
+
 `POST /api/demo/failures` with `{"ordersApi":true}`, `{"carrierApi":true}` or `{"schedulingApi":true}` simulates outages. `{"serviceWindowClosed":true}` makes the simulated chat look a day old, so woken turns go through the template path.

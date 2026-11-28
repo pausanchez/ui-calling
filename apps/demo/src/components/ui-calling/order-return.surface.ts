@@ -51,7 +51,10 @@ export const orderReturn = defineSurface({
   events: {
     items_chosen: event(
       z.object({ lines: z.array(z.object({ sku: z.string(), qty: z.number().int().min(1) })).min(1).max(20) }),
-      { describe: (p) => `Step 1 of 5: chose items to return: ${p.lines.map((l) => `${l.qty}× ${l.sku}`).join(", ")}` },
+      {
+        describe: (p) => `Step 1 of 5: chose items to return: ${p.lines.map((l) => `${l.qty}× ${l.sku}`).join(", ")}`,
+        reasons: ["item_not_returnable"],
+      },
     ),
     reasons_given: event(
       z.object({
@@ -60,18 +63,22 @@ export const orderReturn = defineSurface({
       {
         describe: (p) =>
           `Step 2 of 5: gave reasons: ${p.lines.map((l) => `${l.sku} ${l.reason}${l.details ? ` ("${l.details}")` : ""}`).join("; ")}`,
+        reasons: ["reason_missing"],
       },
     ),
     photos_added: event(z.object({ photos: z.array(z.string()).max(5) }), {
       describe: (p) => `Step 3 of 5: attached ${p.photos.length} photo${p.photos.length === 1 ? "" : "s"}`,
+      reasons: ["unknown_photo", "photos_required"],
     }),
     pickup_chosen: event(z.object({ refund, date: z.string(), window: z.string() }), {
       describe: (p) => `Step 4 of 5: chose ${p.refund.replace("_", " ")} as refund and pickup on ${p.date}, ${p.window}`,
+      reasons: ["pickup_unknown", "pickup_slot_full"],
     }),
     return_submitted: event(z.object({}), {
       // On failure this reads as "Attempted: …", so it says what the user asked for.
       describe: () => "Step 5 of 5: submitted the return",
       wake: true,
+      reasons: ["return_incomplete", "photos_required", "pickup_slot_full", "carrier_unavailable"],
     }),
   },
   files: { photos: { accept: ["image/*"], maxBytes: 8 * 1024 * 1024, maxFiles: 5 } },

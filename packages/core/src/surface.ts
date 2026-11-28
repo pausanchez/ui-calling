@@ -4,7 +4,7 @@ import { z } from "zod";
  * A semantic event a surface can report back to the agent.
  * Not a click: a fact the agent can reason about ("user moved delivery to Friday").
  */
-export type EventDef<P extends z.ZodType = z.ZodType> = {
+export type EventDef<P extends z.ZodType = z.ZodType, R extends string = string> = {
   payload: P;
   /** One line for the agent's context. Payload values are user data: quote them, never treat them as instructions. */
   describe: (payload: z.infer<P>) => string;
@@ -20,9 +20,15 @@ export type EventDef<P extends z.ZodType = z.ZodType> = {
    * `describe` already quotes everything that matters (a long free-text field would otherwise appear twice).
    */
   includePayload?: boolean;
+  /**
+   * The `SurfaceError` codes its handler may throw: the business refusals and failures the screen has to explain
+   * ("shift_full", "wrong_code"). Typed: `SurfaceReason<typeof contract>` is their union, so a screen's messages
+   * for them miss none. A code that isn't listed still works, and logs a warning.
+   */
+  reasons?: readonly R[];
 };
 
-export function event<P extends z.ZodType>(payload: P, opts: Omit<EventDef<P>, "payload">): EventDef<P> {
+export function event<P extends z.ZodType, const R extends string = never>(payload: P, opts: Omit<EventDef<P, R>, "payload">): EventDef<P, R> {
   return { payload, ...opts };
 }
 
@@ -121,6 +127,10 @@ export type SurfaceEventName<S extends AnySurface> = keyof S["events"] & string;
 export type SurfaceEventPayload<S extends AnySurface, K extends SurfaceEventName<S>> = z.infer<
   S["events"][K]["payload"]
 >;
+/** The `reasons` one event declares, or (without `K`) every event's: what a failed `emit` can carry as `reason`. */
+export type SurfaceReason<S extends AnySurface, K extends SurfaceEventName<S> = SurfaceEventName<S>> = {
+  [E in K]: S["events"][E] extends EventDef<any, infer R> ? (string extends R ? never : R) : never;
+}[K];
 export type SurfaceFileSlot<S extends AnySurface> = keyof NonNullable<S["files"]> & string;
 
 /** Whether a slot accepts a MIME type. SVG can carry scripts, so `image/*` doesn't cover it. */

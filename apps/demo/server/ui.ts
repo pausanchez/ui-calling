@@ -23,6 +23,14 @@ export const ui = createUiCalling({
   store,
   abandonAfterMs: Number(process.env.ABANDON_AFTER_MS ?? 90_000),
   onEvent: (e) => listeners.forEach((fn) => fn(e)),
+  // UI_CALLING_TRACE=1 prints each step of every interaction: how a tap became an event, and where it failed.
+  onTrace: process.env.UI_CALLING_TRACE
+    ? (t) =>
+        console.log(
+          `[trace] ${t.sessionId.slice(0, 6)} ${t.step}`,
+          [t.type, t.key && `key ${t.key.slice(0, 8)}`, t.ms !== undefined && `${t.ms}ms`, t.outcome, t.kind, t.reason, t.wake && "wake"].filter(Boolean).join(" "),
+        )
+    : undefined,
   // The shift picker asks for the worker's PIN before it shows their rota (`verify: true` on its contract).
   verifier: demoVerifier,
   surfaces: [

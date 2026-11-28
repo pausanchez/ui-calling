@@ -25,6 +25,14 @@ on: {
 },
 ```
 
+List the codes each handler can throw on its event, so the screen can't miss one:
+
+```ts
+reschedule_delivery: event(slotPayload, { describe: (p) => `Asked to move delivery to ${p.date}`, reasons: ["carrier_timeout", "slot_taken"] }),
+```
+
+A code the event doesn't list still works, and the server logs a warning.
+
 What happens next, without more code:
 - The agent gets an `error` event with the code and message, worded as "did NOT go through. Attempted: …" from your `describe`. The first error of each kind wakes it, unless it's a refusal (`refused: true`): the screen explains those while the user is still on it, and the agent reads them on its next turn.
 - The screen gets `errorCode` and `errorReason` (load) or a `SurfaceActionError` with `reason` and `retryable` (action). `errorReason` and `reason` are your `SurfaceError` code.
@@ -32,7 +40,15 @@ What happens next, without more code:
 
 ## Screen
 
+`SurfaceReason<typeof contract>` is the union of the codes the contract declares: type your messages with it, and adding a code to the contract stops the build until the screen has a message for it.
+
 ```tsx
+type Reason = SurfaceReason<typeof orderStatus>;
+const MESSAGES = {
+  en: { errors: { carrier_timeout: "The carrier didn't answer.", slot_taken: "That slot just went." } satisfies Record<Reason, string>, /* … */ },
+  es: { errors: { carrier_timeout: "El transportista no ha respondido.", slot_taken: "Esa franja se acaba de ocupar." } satisfies Record<Reason, string>, /* … */ },
+};
+
 const { status, errorCode, returnUrl } = useSurface(orderStatus);
 if (status === "error" && errorCode === "upstream_error") {
   // The agent was told: send the user back to the chat instead of a dead end.
@@ -43,7 +59,7 @@ try {
   await emit("reschedule_delivery", slot);
 } catch (err) {
   const e = err instanceof SurfaceActionError ? err : null;
-  const known = e?.reason ? t.errors[e.reason] : undefined;     // your message, in the user's language
+  const known = e?.reason ? (t.errors as Record<string, string | undefined>)[e.reason] : undefined; // in the user's language
   const offline = !e || e.code === "network";
   setProblem({
     message: known ?? (offline ? t.offline : t.actionFailed),
@@ -75,5 +91,5 @@ Not in the package; for reading if you have the repo.
 
 - Switches: [`failures.ts`](../../../apps/demo/server/failures.ts), toggled by `POST /api/demo/failures`
 - Server: [`order-status.server.ts`](../../../apps/demo/server/order-status.server.ts), [`order-return.server.ts`](../../../apps/demo/server/order-return.server.ts)
-- Screen: `next()` in [`order-return.tsx`](../../../apps/demo/src/components/ui-calling/order-return.tsx)
+- Screen: `next()` in [`order-return.tsx`](../../../apps/demo/src/components/ui-calling/order-return.tsx); messages typed by the contract's `reasons` in [`job-application.tsx`](../../../apps/demo/src/components/ui-calling/job-application.tsx)
 - Proof: "a failing action is an error event with a reason", "a failing data source makes the page say so" and "a failed pickup keeps the draft" in [`smoke.ts`](../../../apps/demo/server/smoke.ts)

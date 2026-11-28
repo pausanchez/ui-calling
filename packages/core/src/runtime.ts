@@ -153,6 +153,54 @@ export const STAY_SILENT = "stay_silent";
 /** A woken turn the agent chose to end without a message: count these to see how often screens wake it for nothing. */
 export type SilentWake = Who & { reason: string; at: string };
 
+/**
+ * Which kind of failure: `validation` (the body doesn't match the contract), `refused` (a business refusal),
+ * `upstream` (a dependency your handler or `resolve` calls), `infrastructure` (your store or server), `in_progress`
+ * (a retry while the first try still runs) or `link` (expired, completed, another device, not verified, too many events).
+ */
+export type FailureKind = "validation" | "refused" | "upstream" | "infrastructure" | "in_progress" | "link";
+
+/** One step of an interaction, for `onTrace`. */
+export type TraceStep = {
+  step: "link.created" | "event.received" | "event.repeat" | "handler.finished" | "event.recorded" | "event.failed";
+  at: string;
+  /** The link: the same on every step of one user's time on one screen. */
+  sessionId: string;
+  conversationId: string;
+  surface: string;
+  /** The event's type, from `event.received` on. */
+  type?: string;
+  /** The screen's key for this action: the same on every retry of it. */
+  key?: string;
+  /** `event.recorded`, `event.repeat`: the event. */
+  eventId?: string;
+  /** `event.recorded`: whether it woke the agent. */
+  wake?: boolean;
+  /** `handler.finished`: how long the handler took, and how it ended. */
+  ms?: number;
+  outcome?: "ok" | "unchanged" | "failed";
+  /** `event.failed`: which kind, the error's code, and the `SurfaceError` code (`reason`) when there is one. */
+  kind?: FailureKind;
+  code?: string;
+  reason?: string;
+};
+
+/** The kind, code and reason of a failed request, the way the screen and `onTrace` see it. */
+export function failureOf(err: unknown): { kind: FailureKind; code: string; reason?: string } {
+  if (!(err instanceof UiCallingError)) return { kind: "infrastructure", code: "internal" };
+  const kind: FailureKind =
+    err.code === "invalid_payload" || err.code === "unknown_event" || err.code === "invalid_file"
+      ? "validation"
+      : err.code === "refused"
+        ? "refused"
+        : err.code === "upstream_error"
+          ? "upstream"
+          : err.code === "in_progress"
+            ? "in_progress"
+            : "link";
+  return { kind, code: err.code, ...(err.reason ? { reason: err.reason } : {}) };
+}
+
 export type UiCallingOptions = {
   surfaces: SurfaceImpl<any>[];
   /** Public origin where surfaces are served, e.g. https://ui.acme.com. Links are `${baseUrl}${pathPrefix}${token}`. */
@@ -175,6 +223,13 @@ export type UiCallingOptions = {
    * hand the work to a queue (or `waitUntil`) so it isn't cut off when the request ends.
    */
   onEvent?: (event: UiEvent) => void | Promise<void>;
+  /**
+   * Called for each step of an interaction: a link created, an event received, its handler finished (with how long it
+   * took), the event recorded, a retry answered from the first try, a failure and its kind. `sessionId` ties together
+   * every step of one link and `key` every try of one action: send them to your logs or tracing to follow a user's
+   * path end to end. It sees IDs and types, never payloads.
+   */
+  onTrace?: (step: TraceStep) => void | Promise<void>;
   /** Called each time a woken turn calls `stay_silent`, e.g. to count wakes that cost tokens and said nothing. */
   onSilentWake?: (silent: SilentWake) => void | Promise<void>;
   toolPrefix?: string;
@@ -414,6 +469,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       ...e,
     };
     await store.appendEvent(ev);
+    trace(session, { step: "event.recorded", type: ev.type, eventId: ev.id, wake: ev.wake });
     // The event is stored: the agent's handler can't undo it, slow it down or fail the user's action.
     for (const handler of [opts.onEvent, ...listeners]) {
       try {
@@ -423,6 +479,17 @@ export function createUiCalling(opts: UiCallingOptions) {
       }
     }
     return ev;
+  }
+
+  /** Hand one step to `onTrace`. Tracing never fails or slows the request. */
+  function trace(session: UiSession, step: Omit<TraceStep, "at" | "sessionId" | "conversationId" | "surface">) {
+    if (!opts.onTrace) return;
+    try {
+      const out = { at: new Date().toISOString(), sessionId: session.id, conversationId: session.conversationId, surface: session.surface, ...step };
+      void Promise.resolve(opts.onTrace(out as TraceStep)).catch((err) => console.error("[ui-calling] onTrace failed", err));
+    } catch (err) {
+      console.error("[ui-calling] onTrace failed", err);
+    }
   }
 
   function toErrorInfo(err: unknown): ErrorInfo {
@@ -613,6 +680,122 @@ export function createUiCalling(opts: UiCallingOptions) {
     return { ok: true, silent: true, content: JSON.stringify(content), reason };
   }
 
+  async function emitEvent(token: string, type: string, rawPayload: unknown, key: string | undefined, seen: (s: UiSession) => void) {
+    if (key !== undefined && !EVENT_KEY.test(key)) throw new UiCallingError("invalid_payload", "The event key must be 8–64 letters, digits, - or _");
+    let session = await verifiedSession(token);
+    seen(session);
+    const impl = impls.get(session.surface)!;
+    // Whoever holds the link can post events: cap them so a loop or a script can't flood the agent.
+    if ((await countEvents({ sessionId: session.id })) >= (opts.maxEventsPerSession ?? 500)) {
+      throw new UiCallingError("too_many_events", "This screen has sent too many events");
+    }
+
+    if (type === "error") {
+      const parsed = CLIENT_ERROR.safeParse(rawPayload);
+      if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
+      const { source, context, ...info } = parsed.data;
+      const event = await recordError(session, info, source, undefined, context);
+      return { event, data: undefined };
+    }
+
+    if ((LIFECYCLE_EVENTS as readonly string[]).includes(type)) {
+      if (!CLIENT_LIFECYCLE.has(type)) throw new UiCallingError("unknown_event", `${type} is server-only`);
+      let t = type as LifecycleEvent;
+      if (t === "opened") {
+        // Two tabs (or two instances) can send the first `opened` at once: only one of them gets to make the move.
+        if (session.openedAt || !(await moveSession(session.id, "sent", { status: "opened", openedAt: new Date().toISOString() }))) {
+          t = "returned";
+        } else watchAbandon(session.id, session.surface);
+      }
+      if (t === "completed") await store.updateSession(session.id, { status: "completed" });
+      session = (await store.getSession(session.id))!;
+      // On first open, capture what the user is looking at: data may have changed since the link was sent.
+      // A load failure was already recorded by open(); here it only means no snapshot.
+      const state =
+        t === "opened"
+          ? await impl.resolve(session.input as never, ctxOf(session)).then((d) => safeSummary(impl, d, { time }), () => undefined)
+          : undefined;
+      const event = await record(session, {
+        type: t,
+        kind: "lifecycle",
+        payload: {},
+        description: LIFECYCLE_TEXT[t],
+        state,
+        wake: false,
+      });
+      return { event, data: undefined };
+    }
+
+    // Own keys only: "constructor" or "__proto__" aren't events.
+    const def = Object.hasOwn(impl.surface.events, type) ? impl.surface.events[type] : undefined;
+    if (!def) throw new UiCallingError("unknown_event", `Unknown event ${type}`);
+    const parsed = def.payload.safeParse(rawPayload);
+    if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
+
+    // Redacted fields go to the handler only: never to storage, describe() or the agent.
+    const visible = def.redact?.length
+      ? { ...(parsed.data as object), ...Object.fromEntries(def.redact.map((k: string) => [k, "[redacted]"])) }
+      : parsed.data;
+    // Claim the key before running anything: a retry that arrives while the first try is still running, or after
+    // it finished, must not run the handler again.
+    const keyed = key !== undefined && store.claimEventKey ? key : undefined;
+    if (keyed) {
+      const claim = await store.claimEventKey!(session.id, keyed, opts.eventKeyStaleMs ?? 2 * 60_000);
+      if (claim.status === "running") throw atSession(new UiCallingError("in_progress", "This action is still being processed", 409, true), session);
+      if (claim.status === "done") {
+        const event = claim.eventId ? (await store.listEvents({ sessionId: session.id })).find((e) => e.id === claim.eventId) : undefined;
+        trace(session, { step: "event.repeat", type, key: keyed, ...(event ? { eventId: event.id } : {}) });
+        return { event, data: await ctxOf(session).resolve().catch(() => undefined), repeat: true as const };
+      }
+    }
+    const handler = impl.on?.[type as never] as ((p: unknown, c: SurfaceContext) => Promise<unknown>) | undefined;
+    let data: unknown;
+    const started = Date.now();
+    const finished = (outcome: TraceStep["outcome"]) =>
+      handler && trace(session, { step: "handler.finished", type, ...(key ? { key } : {}), ms: Date.now() - started, outcome });
+    try {
+      data = handler ? await handler(parsed.data, ctxOf(session, key)) : undefined;
+    } catch (err) {
+      finished("failed");
+      // A code the contract doesn't list: the screen has no message for it.
+      if (def.reasons && err instanceof SurfaceError && !def.reasons.includes(err.code)) {
+        console.warn(`[ui-calling] ${session.surface}: the ${type} handler threw "${err.code}", which the event's reasons don't list`);
+      }
+      // Nothing happened, so a retry may run it again.
+      if (keyed) await store.releaseEventKey!(session.id, keyed).catch(() => {});
+      // The intent still matters: the agent learns what the user tried and why it didn't happen.
+      const info = toErrorInfo(err);
+      await recordError(session, info, "action", type, safeDescribe(def, visible, type));
+      throw atSession(
+        info.refused
+          ? new UiCallingError("refused", "That action was refused", 422, info.retryable, info.code)
+          : new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code),
+        session,
+      );
+    }
+    finished(isUnchanged(data) ? "unchanged" : "ok");
+    // The handler said nothing happened (a repeat): no event, no wake, just the screen's current data.
+    if (isUnchanged(data)) {
+      if (keyed) await store.finishEventKey!(session.id, keyed, undefined);
+      return { event: undefined, data: data.data ?? (await ctxOf(session).resolve().catch(() => undefined)) };
+    }
+    // If recording fails from here on, the request fails and the key stays claimed: the screen never shows a
+    // success the agent can't see, and a retry after `eventKeyStaleMs` runs the handler again with the same key.
+    const event = await record(session, {
+      type,
+      kind: "domain",
+      payload: visible,
+      description: safeDescribe(def, visible, type),
+      // The outcome of the action, so the agent knows what the user now sees (e.g. the new ticket number).
+      state: data ? safeSummary(impl, data, { after: { type, payload: visible } as never, time }) : undefined,
+      wake: (def.wake ?? false) && (await wakesLeft(session)),
+      ...(def.includePayload === false ? { payloadForAgent: false } : {}),
+    });
+    // The event is recorded and the user gets their success: a failure here only delays a retry nobody needs.
+    if (keyed) await store.finishEventKey!(session.id, keyed, event.id).catch((err) => console.error("[ui-calling] finishEventKey failed", err));
+    return { event, data: data ?? undefined };
+  }
+
   const api = {
     store,
     /** The zone times are written in for the agent (`createUiCalling`'s `timeZone`, default UTC). */
@@ -709,6 +892,7 @@ export function createUiCalling(opts: UiCallingOptions) {
       const data = await impl.resolve(input as never, ctxOf(session));
       const summary = safeSummary(impl, data, { time });
       await store.createSession(session, await sha256(token));
+      trace(session, { step: "link.created" });
       return {
         url: `${opts.baseUrl}${pathPrefix}${token}`,
         sessionId: session.id,
@@ -751,108 +935,16 @@ export function createUiCalling(opts: UiCallingOptions) {
      * same one when it retries an action, and an action that already ran isn't run or recorded again (`repeat`).
      */
     async emit(token: string, type: string, rawPayload: unknown = {}, { key }: { key?: string } = {}) {
-      if (key !== undefined && !EVENT_KEY.test(key)) throw new UiCallingError("invalid_payload", "The event key must be 8–64 letters, digits, - or _");
-      let session = await verifiedSession(token);
-      const impl = impls.get(session.surface)!;
-      // Whoever holds the link can post events: cap them so a loop or a script can't flood the agent.
-      if ((await countEvents({ sessionId: session.id })) >= (opts.maxEventsPerSession ?? 500)) {
-        throw new UiCallingError("too_many_events", "This screen has sent too many events");
-      }
-
-      if (type === "error") {
-        const parsed = CLIENT_ERROR.safeParse(rawPayload);
-        if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
-        const { source, context, ...info } = parsed.data;
-        const event = await recordError(session, info, source, undefined, context);
-        return { event, data: undefined };
-      }
-
-      if ((LIFECYCLE_EVENTS as readonly string[]).includes(type)) {
-        if (!CLIENT_LIFECYCLE.has(type)) throw new UiCallingError("unknown_event", `${type} is server-only`);
-        let t = type as LifecycleEvent;
-        if (t === "opened") {
-          // Two tabs (or two instances) can send the first `opened` at once: only one of them gets to make the move.
-          if (session.openedAt || !(await moveSession(session.id, "sent", { status: "opened", openedAt: new Date().toISOString() }))) {
-            t = "returned";
-          } else watchAbandon(session.id, session.surface);
-        }
-        if (t === "completed") await store.updateSession(session.id, { status: "completed" });
-        session = (await store.getSession(session.id))!;
-        // On first open, capture what the user is looking at: data may have changed since the link was sent.
-        // A load failure was already recorded by open(); here it only means no snapshot.
-        const state =
-          t === "opened"
-            ? await impl.resolve(session.input as never, ctxOf(session)).then((d) => safeSummary(impl, d, { time }), () => undefined)
-            : undefined;
-        const event = await record(session, {
-          type: t,
-          kind: "lifecycle",
-          payload: {},
-          description: LIFECYCLE_TEXT[t],
-          state,
-          wake: false,
-        });
-        return { event, data: undefined };
-      }
-
-      // Own keys only: "constructor" or "__proto__" aren't events.
-      const def = Object.hasOwn(impl.surface.events, type) ? impl.surface.events[type] : undefined;
-      if (!def) throw new UiCallingError("unknown_event", `Unknown event ${type}`);
-      const parsed = def.payload.safeParse(rawPayload);
-      if (!parsed.success) throw new UiCallingError("invalid_payload", z.prettifyError(parsed.error));
-
-      // Redacted fields go to the handler only: never to storage, describe() or the agent.
-      const visible = def.redact?.length
-        ? { ...(parsed.data as object), ...Object.fromEntries(def.redact.map((k: string) => [k, "[redacted]"])) }
-        : parsed.data;
-      // Claim the key before running anything: a retry that arrives while the first try is still running, or after
-      // it finished, must not run the handler again.
-      const keyed = key !== undefined && store.claimEventKey ? key : undefined;
-      if (keyed) {
-        const claim = await store.claimEventKey!(session.id, keyed, opts.eventKeyStaleMs ?? 2 * 60_000);
-        if (claim.status === "running") throw atSession(new UiCallingError("in_progress", "This action is still being processed", 409, true), session);
-        if (claim.status === "done") {
-          const event = claim.eventId ? (await store.listEvents({ sessionId: session.id })).find((e) => e.id === claim.eventId) : undefined;
-          return { event, data: await ctxOf(session).resolve().catch(() => undefined), repeat: true as const };
-        }
-      }
-      const handler = impl.on?.[type as never] as ((p: unknown, c: SurfaceContext) => Promise<unknown>) | undefined;
-      let data: unknown;
+      let session: UiSession | undefined;
       try {
-        data = handler ? await handler(parsed.data, ctxOf(session, key)) : undefined;
+        return await emitEvent(token, type, rawPayload, key, (s) => {
+          session = s;
+          trace(s, { step: "event.received", type, ...(key ? { key } : {}) });
+        });
       } catch (err) {
-        // Nothing happened, so a retry may run it again.
-        if (keyed) await store.releaseEventKey!(session.id, keyed).catch(() => {});
-        // The intent still matters: the agent learns what the user tried and why it didn't happen.
-        const info = toErrorInfo(err);
-        await recordError(session, info, "action", type, safeDescribe(def, visible, type));
-        throw atSession(
-          info.refused
-            ? new UiCallingError("refused", "That action was refused", 422, info.retryable, info.code)
-            : new UiCallingError("upstream_error", "That action couldn't be completed", 502, info.retryable, info.code),
-          session,
-        );
+        if (session) trace(session, { step: "event.failed", type, ...(key ? { key } : {}), ...failureOf(err) });
+        throw err;
       }
-      // The handler said nothing happened (a repeat): no event, no wake, just the screen's current data.
-      if (isUnchanged(data)) {
-        if (keyed) await store.finishEventKey!(session.id, keyed, undefined);
-        return { event: undefined, data: data.data ?? (await ctxOf(session).resolve().catch(() => undefined)) };
-      }
-      // If recording fails from here on, the request fails and the key stays claimed: the screen never shows a
-      // success the agent can't see, and a retry after `eventKeyStaleMs` runs the handler again with the same key.
-      const event = await record(session, {
-        type,
-        kind: "domain",
-        payload: visible,
-        description: safeDescribe(def, visible, type),
-        // The outcome of the action, so the agent knows what the user now sees (e.g. the new ticket number).
-        state: data ? safeSummary(impl, data, { after: { type, payload: visible } as never, time }) : undefined,
-        wake: (def.wake ?? false) && (await wakesLeft(session)),
-        ...(def.includePayload === false ? { payloadForAgent: false } : {}),
-      });
-      // The event is recorded and the user gets their success: a failure here only delays a retry nobody needs.
-      if (keyed) await store.finishEventKey!(session.id, keyed, event.id).catch((err) => console.error("[ui-calling] finishEventKey failed", err));
-      return { event, data: data ?? undefined };
     },
 
     /**

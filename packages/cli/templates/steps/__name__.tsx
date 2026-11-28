@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { pickLocalized, type SurfaceData } from "@ui-calling/core";
+import { pickLocalized, type SurfaceData, type SurfaceReason } from "@ui-calling/core";
 import { SurfaceActionError, useSurface, useSurfaceSteps } from "@ui-calling/react";
 import { Card, Shell, Skeleton, btn } from "../../registry/parts/screen-kit";
 import { ActionBar } from "../../registry/parts/action-bar";
@@ -27,7 +27,12 @@ const __MESSAGES__ = {
     offline: "We couldn't reach the server. Check your connection and try again.",
     failed: "That didn't go through. Your assistant already knows.",
     tryAgain: "Try again",
-    errors: { details_missing: "Write a few words first.", unknown_choice: "That option isn't available any more." } as Record<string, string>,
+    // One message per reason the contract declares: add a reason there, and this stops compiling until it has one.
+    errors: {
+      details_missing: "Write a few words first.",
+      unknown_choice: "That option isn't available any more.",
+      incomplete: "Something is missing: go back and fill it in.",
+    } satisfies Record<Reason, string>,
     unavailable: "This page isn't available right now",
     unavailableBody: "Your assistant already knows and will follow up in the chat.",
     refused: "This page can't be shown",
@@ -54,7 +59,11 @@ const __MESSAGES__ = {
     offline: "No hemos podido conectar. Comprueba tu conexión e inténtalo de nuevo.",
     failed: "No se ha podido completar. Tu asistente ya lo sabe.",
     tryAgain: "Reintentar",
-    errors: { details_missing: "Escribe unas palabras primero.", unknown_choice: "Esa opción ya no está disponible." } as Record<string, string>,
+    errors: {
+      details_missing: "Escribe unas palabras primero.",
+      unknown_choice: "Esa opción ya no está disponible.",
+      incomplete: "Falta algo: vuelve atrás y complétalo.",
+    } satisfies Record<Reason, string>,
     unavailable: "Esta página no está disponible ahora mismo",
     unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
     refused: "Esta página no se puede mostrar",
@@ -68,6 +77,7 @@ const __MESSAGES__ = {
 
 export type __Component__Messages = (typeof __MESSAGES__)["en"];
 type Data = SurfaceData<typeof __const__>;
+type Reason = SurfaceReason<typeof __const__>;
 type Step = (typeof __const__Steps)[number];
 
 /** The screen's states. The steps live in <Steps>, which only renders once the data is there. */
@@ -135,7 +145,7 @@ function Steps({ data, t }: { data: Data; t: __Component__Messages }) {
     } catch (err) {
       // The server already told the agent; here we only tell the user.
       const e = err instanceof SurfaceActionError ? err : null;
-      const known = e?.reason ? t.errors[e.reason] : undefined;
+      const known = e?.reason ? (t.errors as Record<string, string | undefined>)[e.reason] : undefined;
       const retryable = !e || e.retryable;
       setProblem({
         message: known ?? (!e || e.code === "network" ? t.offline : t.failed),
