@@ -26,8 +26,9 @@ const SUGGESTIONS = [
   "Can I change the delivery day?",
   "The blender arrived cracked, I want to return it",
   "¿Hay turnos libres esta semana?",
+  "Busco trabajo, ¿tenéis ofertas?",
 ];
-const NO_FAILURES = { ordersApi: false, carrierApi: false, schedulingApi: false };
+const NO_FAILURES = { ordersApi: false, carrierApi: false, schedulingApi: false, serviceWindowClosed: false };
 
 // `?conversation=wa:…` watches a real WhatsApp user's chat (the API logs the link); you reply from your phone.
 const WATCHING = new URLSearchParams(location.search).get("conversation");
@@ -241,6 +242,10 @@ export function Chat() {
             <label className="flex cursor-pointer items-center gap-2">
               <input type="checkbox" checked={failures.schedulingApi} onChange={() => toggleFailure("schedulingApi")} />
               Scheduling system down (shifts won't load or book)
+            </label>
+            <label className="flex cursor-pointer items-center gap-2" title="Woken turns can't write freely: an abandoned application gets an approved template with a fresh link instead.">
+              <input type="checkbox" checked={failures.serviceWindowClosed} onChange={() => toggleFailure("serviceWindowClosed")} />
+              24-hour window closed (user last wrote yesterday)
             </label>
           </div>
 
@@ -512,6 +517,11 @@ function Bubble({ m }: { m: ChatMessage }) {
             : "rounded-tl-none bg-white text-neutral-900 dark:bg-[#202c33] dark:text-neutral-100"
         }`}
       >
+        {m.template && (
+          <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400" title="Sent from an approved template: the only kind WhatsApp delivers after 24 hours">
+            Template · {m.template}
+          </p>
+        )}
         <p className="whitespace-pre-wrap px-3 pt-2">{m.text}</p>
         <p className="px-3 pb-1.5 text-right text-[10px] text-neutral-500 dark:text-neutral-400">
           {time}

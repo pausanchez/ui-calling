@@ -19,7 +19,7 @@ ui-calling lets an AI agent open a screen for a user the way it calls a function
 | `packages/sqlite` | `sqliteStore()`: the persistent `UiStore` on `node:sqlite`; contract and restart tests in `scripts/test-store.ts` |
 | `packages/postgres` | `postgresStore(client)`: the `UiStore` on Postgres, for several instances; no dependencies. Tested in `scripts/test-store.ts` on PGlite (Postgres in WebAssembly, a dev dependency), so `npm test` needs no server |
 | `packages/cli` | `ui-calling` CLI, `registry/` (blocks, parts and tokens), `templates/` (`ui-calling new`, `--template steps`), `GUIDE.md`, `recipes/` (`ui-calling guide <recipe>`) |
-| `apps/demo` | Simulated WhatsApp chat + order-status and shift-picker surfaces + Claude or scripted agent |
+| `apps/demo` | Simulated WhatsApp chat + order status, returns, shift picker (PIN) and job application surfaces + Claude or scripted agent |
 
 ## Commands
 
@@ -74,7 +74,7 @@ Each chat message becomes the webhook Meta would send (`server/whatsapp-sim.ts`)
 The demo keeps ui-calling's sessions and events, and its own state, in `apps/demo/.ui-calling/demo.db`. Its own state is:
 - chat;
 - links;
-- mock orders, returns and shifts;
+- mock orders, returns, shifts and job applications;
 - the simulated user.
 
 Restarting the dev server keeps all of it. **Reset all** in the UI (or `POST /api/chat/reset`) clears it, real WhatsApp chats included, so ask before using it on a demo someone is testing from their phone. **Reset data** (`POST /api/demo/reset-data`) only puts the mock data back to the start. Module state that should survive exposes a `{ save, load }` object, registered in `STATE` in `server/app.ts`. The smoke test runs on `:memory:`.
@@ -110,4 +110,4 @@ Restarting the dev server keeps all of it. **Reset all** in the UI (or `POST /ap
 3. For UI changes, open the link at a 375px width and check both locales.
 4. If a real WhatsApp number gets no reply, read the `WhatsApp` line the API prints at startup first: it names an expired token or a webhook pointing at an old tunnel. A webhook with a bad signature logs `webhook rejected`.
 
-`POST /api/demo/failures` with `{"ordersApi":true}`, `{"carrierApi":true}` or `{"schedulingApi":true}` simulates outages.
+`POST /api/demo/failures` with `{"ordersApi":true}`, `{"carrierApi":true}` or `{"schedulingApi":true}` simulates outages. `{"serviceWindowClosed":true}` makes the simulated chat look a day old, so woken turns go through the template path.

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { MemoryStore, createUiCalling, defineSurface, event, formatEventsForAgent, implement, SurfaceError, type UiStore } from "@ui-calling/core";
 import { uiCallingHandler } from "@ui-calling/server";
+import { whatsappTemplateMessage } from "@ui-calling/core/whatsapp";
 import { linkAccountImpl } from "../packages/cli/registry/blocks/link-account/link-account.server";
 
 const ticket = defineSurface({
@@ -277,6 +278,21 @@ await check("verify: nothing before the PIN, wrong ones are quiet, the link lock
   const v = token((await ui.call("show_payslip", {}, { conversationId: "c52", subject: "user-52" })).url);
   for (let i = 0; i < 3; i++) await ui.sendCode(v);
   await assert.rejects(ui.sendCode(v), { reason: "too_many_codes" });
+});
+
+await check("whatsapp: a template message fills the body and the URL button's variable, as Meta expects", async () => {
+  const msg = whatsappTemplateMessage({ to: "34600000000", name: "application_follow_up", language: "es", body: ["preparador de pedidos"], urlSuffix: "tok123" });
+  assert.deepEqual(msg.template, {
+    name: "application_follow_up",
+    language: { code: "es" },
+    components: [
+      { type: "body", parameters: [{ type: "text", text: "preparador de pedidos" }] },
+      { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: "tok123" }] },
+    ],
+  });
+  assert.equal(msg.to, "34600000000");
+  assert.equal(whatsappTemplateMessage({ to: "1", name: "hello", language: "en" }).template.components, undefined, "no variables, no components");
+  assert.throws(() => whatsappTemplateMessage({ name: "x", language: "en" }), /to/);
 });
 
 await check("errors: unexpected messages and redacted values never reach the agent", async () => {

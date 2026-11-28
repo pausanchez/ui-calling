@@ -74,16 +74,17 @@ They combine: a ui-calling event can resume a paused workflow, and a screen is j
 
 ## What you can build
 
-The fit is a task that is hard in chat (uploads, live availability, a long list, a third-party SDK) and where stalling or failing matters to the follow-up. These four run today, in the demo or as ready-made screens you copy into your project:
+The fit is a task that is hard in chat (uploads, live availability, a long list, a third-party SDK) and where stalling or failing matters to the follow-up. These five run today, in the demo or as ready-made screens you copy into your project:
 
 | Use case | What the screen does | In this repo |
 |---|---|---|
 | Returns and exchanges | Items, a reason each, photos, refund and pickup | Demo (`order_return`) |
 | Delivery reschedule | Live slots, "that slot is gone", carrier outages | Ready-made: `order-status` |
 | Account linking | Verify an email code, link the chat to a customer | Ready-made: `link-account` |
-| Shift picking | Open shifts that others may take first | Demo (`shift_picker`) |
+| Shift picking | Open shifts that others may take first; asks for the worker's PIN | Demo (`shift_picker`) |
+| Job applications | Four steps with an ID photo, no account needed; a candidate who stops gets a nudge, or a template the next day | Demo (`job_application`) |
 
-The same pieces fit insurance claim intake (the return's steps and photo upload), identity verification (abandon at the selfie), appointment booking across locations, and B2B reorders (`quantity-stepper`, `choice-card`).
+The same pieces fit insurance claim intake (the return's steps and photo upload), onboarding paperwork and payslips (`verify: true`), identity verification (abandon at the selfie), appointment booking across locations, and B2B reorders (`quantity-stepper`, `choice-card`).
 
 ## Try the demo
 
@@ -97,7 +98,7 @@ git clone https://github.com/pausanchez/ui-calling && cd ui-calling && npm insta
 npm run dev
 ```
 
-Open http://localhost:5173 and ask "¿Dónde está mi pedido?", "The blender arrived cracked, I want to return it" (a five-step return with photo upload) or "Are there any shifts open this week?". It's a simulated WhatsApp chat next to an "Under the hood" panel with two tabs:
+Open http://localhost:5173 and ask "¿Dónde está mi pedido?", "The blender arrived cracked, I want to return it" (a five-step return with photo upload), "Are there any shifts open this week?" (PIN `1357`) or "Busco trabajo, ¿tenéis ofertas?" (a job application; switch on "24-hour window closed" to see the next-day template). It's a simulated WhatsApp chat next to an "Under the hood" panel with two tabs:
 - **Tool calls** (agent → screen): the tool definitions the model gets, then for each call the params the model passed, what `ui.runTool()` returned, the `tool_result` sent back, and the WhatsApp Cloud API request that would deliver the link.
 - **Agent context** (screen → agent): the events coming back from the screen, with what it showed after each one.
 
@@ -133,7 +134,7 @@ The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](p
 
 ## Questions people ask
 
-- **WhatsApp's 24-hour window.** Using the screen doesn't reopen it. If the agent wakes more than 24 hours after the user's last message, Meta rejects a free-form reply: check `insideServiceWindow()` and send an approved template instead (ui-calling doesn't build templates). [GUIDE.md](packages/cli/GUIDE.md#sending-on-whatsapp)
+- **WhatsApp's 24-hour window.** Using the screen doesn't reopen it. If the agent wakes more than 24 hours after the user's last message, Meta rejects a free-form reply: check `insideServiceWindow()` and send an approved template instead: `whatsappTemplateMessage()` fills it with a fresh link, and the demo does it for a job application abandoned the day before. [GUIDE.md](packages/cli/GUIDE.md#sending-on-whatsapp)
 - **Will people trust a link in a chat?** Only if it looks like you. Screens are served from your own domain, with your brand in the design tokens, and the agent says what the screen is for before sending it. Link previews never load data or count as opening the screen.
 - **Serverless hosts.** `sqliteStore()` needs a lasting disk; on hosts without one, use `postgresStore(pool)` from `@ui-calling/postgres`, or implement `UiStore` for your database. Abandon timers don't run between requests there: set `abandonTimers: false` and call `ui.sweep()` from a cron.
 - **Several instances.** A screen event and a user message must never run the agent at once, or it answers twice. Run every turn through `ui.turn(conversationId, fn)`: it queues turns per conversation and takes a lease in the store. That holds only across instances that reach the same store: SQLite on one machine (a cluster sharing the file), `postgresStore()` across machines. [GUIDE.md](packages/cli/GUIDE.md#persistence)

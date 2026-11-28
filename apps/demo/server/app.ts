@@ -16,6 +16,7 @@ import {
 import { linksState, seedIdentity } from "./identity";
 import { ordersState, seedOrders } from "./orders";
 import { returnsState, seedReturns } from "./returns";
+import { jobsState, seedJobs } from "./jobs";
 import { seedShifts, shiftsState } from "./shifts";
 import { failures, onUiEvent, store, ui } from "./ui";
 import { demoUser, demoUserState, inboundNumberChange, inboundText, seedDemoUser } from "./whatsapp-sim";
@@ -27,7 +28,7 @@ onUiEvent(handleUiEvent);
 // The demo's own state (chat, links, mock data) lives next to ui-calling's sessions and events, in the
 // same SQLite file, so a restart loses nothing. A real product keeps these in its own database.
 store.db.exec("CREATE TABLE IF NOT EXISTS demo_state (key TEXT PRIMARY KEY, json TEXT NOT NULL)");
-const STATE = { orders: ordersState, returns: returnsState, shifts: shiftsState, links: linksState, user: demoUserState, conversations: conversationsState };
+const STATE = { orders: ordersState, returns: returnsState, shifts: shiftsState, jobs: jobsState, links: linksState, user: demoUserState, conversations: conversationsState };
 const getState = store.db.prepare("SELECT json FROM demo_state WHERE key = ?");
 const putState = store.db.prepare(
   "INSERT INTO demo_state (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json",
@@ -109,7 +110,8 @@ function seedData() {
   seedOrders();
   seedReturns();
   seedShifts();
-  failures.ordersApi = failures.carrierApi = failures.schedulingApi = false;
+  seedJobs();
+  failures.ordersApi = failures.carrierApi = failures.schedulingApi = failures.serviceWindowClosed = false;
 }
 
 app.post("/api/chat/reset", (c) => {
@@ -142,6 +144,7 @@ app.post("/api/demo/failures", async (c) => {
   if (typeof body.ordersApi === "boolean") failures.ordersApi = body.ordersApi;
   if (typeof body.carrierApi === "boolean") failures.carrierApi = body.carrierApi;
   if (typeof body.schedulingApi === "boolean") failures.schedulingApi = body.schedulingApi;
+  if (typeof body.serviceWindowClosed === "boolean") failures.serviceWindowClosed = body.serviceWindowClosed;
   return c.json(failures);
 });
 
