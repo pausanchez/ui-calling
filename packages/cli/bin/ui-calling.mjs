@@ -103,9 +103,6 @@ function importPath(fromFile, toFile) {
   return p.startsWith(".") ? p : `./${p}`;
 }
 
-/** Where the preview's install command lives, until it's on npm. */
-const INSTALL_DOCS = "https://pausanchez.github.io/ui-calling/getting-started.html#install-and-set-up";
-
 function fill(template, vars) {
   let s = readFileSync(join(initTemplates, template), "utf8");
   for (const [k, v] of Object.entries(vars)) s = s.replaceAll(k, v);
@@ -483,12 +480,7 @@ function init() {
   const missing = wanted.filter((d) => !deps[d]);
   const steps = [];
   if (missing.length) {
-    const ours = missing.filter((d) => d.startsWith("@ui-calling/"));
-    steps.push(
-      `${pm} ${missing.join(" ")}` +
-        // Until the first release, an install from the registry would fail, or find someone else's package.
-        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the preview release's tarballs: ${INSTALL_DOCS}` : ""),
-    );
+    steps.push(`${pm} ${missing.join(" ")}`);
   }
   if (postgres) {
     steps.push(

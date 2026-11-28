@@ -40,7 +40,7 @@ export type McpAdapterOptions = {
  * to have the model include the URL in its reply.
  */
 export function createUiCallingMcpServer(ui: UiCalling, opts: McpAdapterOptions) {
-  const server = new Server({ name: opts.name ?? "ui-calling", version: opts.version ?? "0.0.1" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: opts.name ?? "ui-calling", version: opts.version ?? "0.1.0-preview.0" }, { capabilities: { tools: {} } });
   const visible = () => ui.tools({ woken: opts.staySilent, filter: opts.filter });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({

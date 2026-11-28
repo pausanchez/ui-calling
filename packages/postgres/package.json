@@ -1,6 +1,6 @@
 {
   "name": "@ui-calling/postgres",
-  "version": "0.0.1",
+  "version": "0.1.0-preview.0",
   "description": "Postgres persistence for ui-calling sessions and events, for several instances and serverless hosts. Bring your own client (pg, PGlite, Neon…); no dependencies.",
   "license": "MIT",
   "repository": {
@@ -48,7 +48,7 @@
     "platform": "node"
   },
   "dependencies": {
-    "@ui-calling/core": "^0.0.1"
+    "@ui-calling/core": "^0.1.0-preview.0"
   },
   "publishConfig": {
     "access": "public"

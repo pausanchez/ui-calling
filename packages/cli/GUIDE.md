@@ -8,7 +8,7 @@ This guide is for people and coding agents adding surfaces to a product. Print i
 
 **Starting from a task?** The recipes give the whole answer for one job: a form with several steps, a photo upload, picking a slot that can fill up, linking a WhatsApp user, and more. List them with `npx ui-calling guide recipes` and print one with `npx ui-calling guide <recipe>`. This guide holds the rules and the reference they build on.
 
-> **Not on npm yet.** Until the first release, install the packages from the tarballs in the [v0.0.1-preview release](https://github.com/pausanchez/ui-calling/releases/tag/v0.0.1-preview) ([Getting started](../../docs/getting-started.md) has the command), `ui-calling` included; `npx ui-calling` then runs the installed CLI.
+> **Preview.** `0.1.0-preview` on npm: the API may still change. Install with `npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod`.
 
 ## Mental model: three files per surface
 

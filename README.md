@@ -4,7 +4,7 @@
 
 Built for the conversations that would otherwise be lost: the user who stops halfway, the payment that fails, the slot that disappears.
 
-> **Preview.** Not on npm yet and not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
+> **Preview.** On npm as `0.1.0-preview`, not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
 
 ![The whole loop in the demo: a customer asks to return a cracked blender, the agent sends a link, they get two steps into the return screen and leave; the abandon wakes the agent, which writes first in the chat](docs/demo.gif)
 
@@ -108,9 +108,10 @@ No API key? A scripted agent runs the same loop. Options, resets and running it 
 
 ## Get started
 
-First install the preview: it's not on npm yet, so the [install command in Getting started](docs/getting-started.md#install-and-set-up) installs the packages and the CLI from the release. Then set it up in your app and generate your first screen:
+Install the packages, then set it up in your app and generate your first screen:
 
 ```bash
+npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod
 npx ui-calling init
 npx ui-calling new shift-picker
 ```
