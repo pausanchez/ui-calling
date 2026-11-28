@@ -148,8 +148,8 @@ try {
   assert.match(read("init-vite", "server/ui.ts"), /orderTrackerImpl,/);
   // The steps template keeps its drafts in init's store.
   run(vite, "new", "stock-count", "--template", "steps");
-  assert.match(read("init-vite", "server/stock-count.server.ts"), /import \{ store \} from "\.\/store";/);
-  assert.match(read("init-vite", "server/stock-count.server.ts"), /stock_count_drafts/);
+  assert.match(read("init-vite", "server/stock-count.server.ts"), /import \{ drafts \} from "\.\/store";/);
+  assert.match(read("init-vite", "server/stock-count.server.ts"), /`stock_count:\$\{subject\}/);
   // link-account for users who type an employee number: registered with it, and again with another replaces it.
   run(vite, "add", "link-account", "--identifier", "text");
   assert.match(read("init-vite", "src/ui-calling/surface-screen.tsx"), /link_account: \(\) => <LinkAccount identifier="text" \/>,/);
@@ -158,6 +158,21 @@ try {
   assert.match(read("init-vite", "server/identity.ts"), /from "\.\/store";/);
   assert.match(fails(vite, "add", "link-account", "--identifier", "fax"), /email, tel, text/);
   console.log("generated  init-vite (+2 surfaces, +1 block)");
+
+  // Postgres: installed, so init writes the Postgres store; the steps template uses its drafts the same way, and a
+  // block that needs SQLite is refused with a reason.
+  const pgApp = project("init-next-postgres", { dependencies: { next: "16", "@ui-calling/postgres": "0.0.1" } }, ["app"]);
+  const pgOut = run(pgApp, "init");
+  assert.match(read("init-next-postgres", "ui-calling/store.ts"), /export const store = postgresStore\(pool\)/);
+  assert.match(pgOut, /DATABASE_URL/);
+  assert.match(pgOut, /npm install [^\n]* pg @types\/pg/);
+  assert.doesNotMatch(pgOut, /@ui-calling\/sqlite/);
+  assert.equal(JSON.parse(read("init-next-postgres", "ui-calling.json")).store, "postgres");
+  run(pgApp, "new", "intake", "--template", "steps");
+  assert.match(read("init-next-postgres", "ui-calling/intake.server.ts"), /import \{ drafts \} from "\.\/store";/);
+  assert.match(fails(pgApp, "add", "link-account"), /needs the SQLite store/);
+  assert.match(fails(pgApp, "init", "--store", "mysql"), /"sqlite" or "postgres"/);
+  console.log("generated  init-next-postgres (+1 surface)");
 
   // React Router 7 builds on Vite but has its own server: two routes, no Hono, no proxy.
   const rr = project("init-react-router", { scripts: { dev: "react-router dev --port 5320" }, dependencies: { "react-router": "7" }, devDependencies: { "@react-router/dev": "7", vite: "7" } }, ["app/routes/+types"], {

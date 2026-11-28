@@ -40,7 +40,24 @@ export const ui = createUiCalling({
 identity.setPin(employeeId, pin);
 ```
 
-Or write your own: `{ kind: "pin" | "code", send?(who, locale), check(who, typed) }`. `check` gets `who.subject`: look up the person the chat is linked to and compare against theirs, never a shared value. Keep a lockout per person in your verifier; the runtime only counts per link.
+Or write your own: `{ kind: "pin" | "code", send?(who, locale), check(who, typed) }`. With Twilio Verify, when the subject is the user's phone number:
+
+```ts
+const verify = () => twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN).verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID!);
+
+export const twilioVerifier: Verifier = {
+  kind: "code",
+  async send({ subject }) {
+    await verify().verifications.create({ to: subject, channel: "sms" });
+    return { hint: `SMS to •••• ${subject.slice(-2)}` };
+  },
+  async check({ subject }, typed) {
+    return (await verify().verificationChecks.create({ to: subject, code: typed }).catch(() => null))?.status === "approved";
+  },
+};
+```
+
+On a trial account, Twilio Verify only texts numbers verified in its console. `check` gets `who.subject`: look up the person the chat is linked to and compare against theirs, never a shared value. Keep a lockout per person in your verifier; the runtime only counts per link.
 
 WhatsApp can't send an authentication template to a BSUID, so on WhatsApp a code goes by SMS or email, or you use a PIN.
 
@@ -72,4 +89,5 @@ Not in the package; for reading if you have the repo.
 - Contract: `verify: true` in [`shift-picker.surface.ts`](../../../apps/demo/src/components/ui-calling/shift-picker.surface.ts)
 - Verifier: `demoVerifier` in [`identity.ts`](../../../apps/demo/server/identity.ts), passed in [`ui.ts`](../../../apps/demo/server/ui.ts)
 - Screen: `verifyScreen` with the demo's PIN in [`surface-page.tsx`](../../../apps/demo/src/surface-page.tsx)
+- On Twilio Verify, deployed: the ticket screen in [the event concierge example](https://github.com/pausanchez/ui-calling-event-concierge) (`src/lib/verify.ts`)
 - Proof: "the rota needs the worker's PIN" in [`smoke.ts`](../../../apps/demo/server/smoke.ts), the verify check in [`test-runtime.ts`](../../../scripts/test-runtime.ts), and the PIN and code verifiers in [`test-store.ts`](../../../scripts/test-store.ts)

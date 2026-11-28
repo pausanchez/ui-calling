@@ -18,6 +18,7 @@
     "packages/cli/registry",
     "packages/cli/templates/surface",
     "packages/cli/templates/steps",
+    "packages/cli/templates/init/store.postgres.ts",
     "scripts",
     "apps/demo/server",
     "apps/demo/src"
