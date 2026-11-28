@@ -26,7 +26,7 @@ const raw = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")
 const fromRoot = (p) => (p ? resolve(root, p) : undefined);
 const config = raw && { ...raw, runtime: fromRoot(raw.runtime), screen: fromRoot(raw.screen), surfacesDir: fromRoot(raw.surfacesDir), serverDir: fromRoot(raw.serverDir) };
 
-const VALUE_FLAGS = ["--identifier", "--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone", "--conversation", "--port", "--webhook-path"];
+const VALUE_FLAGS = ["--identifier", "--store", "--dir", "--server-dir", "--framework", "--deliver", "--base-url", "--template", "--subject", "--locale", "--url", "--time-zone", "--conversation", "--port", "--webhook-path"];
 const [cmd, ...all] = process.argv.slice(2);
 // Everything after a bare "--" is passed through (e.g. the dev command for `whatsapp dev`).
 const dashDash = all.indexOf("--");
@@ -103,6 +103,9 @@ function importPath(fromFile, toFile) {
   return p.startsWith(".") ? p : `./${p}`;
 }
 
+/** Where the preview's install command lives, until it's on npm. */
+const INSTALL_DOCS = "https://pausanchez.github.io/ui-calling/getting-started.html#install-and-set-up";
+
 function fill(template, vars) {
   let s = readFileSync(join(initTemplates, template), "utf8");
   for (const [k, v] of Object.entries(vars)) s = s.replaceAll(k, v);
@@ -177,7 +180,7 @@ function newSurface(name) {
     // Only the server file may live elsewhere; the screen sits next to its contract.
     if (isServer) content = content.replaceAll('"./__name__.surface"', `"${importPath(serverFile, join(outDir, `${name}.surface.ts`))}"`);
     if (content.includes('"../init/store"')) {
-      if (!existsSync(storeFile)) write(storeFile, fill("store.ts", {}));
+      if (!existsSync(storeFile)) write(storeFile, fill(raw?.store === "postgres" ? "store.postgres.ts" : "store.ts", {}));
       content = content.replaceAll('"../init/store"', `"${importPath(serverFile, storeFile)}"`);
     }
     // The template imports parts from the registry (so the repo typechecks it); in your project they're in ./parts.
@@ -381,12 +384,19 @@ function init() {
   write(runtime, fill("ui.ts", { __BASE_URL__: literal(devUrl), __DELIVER__: deliver, __TIME_ZONE__: literal(timeZone) }));
   // "use client" is a Next.js directive: elsewhere it only reads as if this were Next-only.
   write(screen, framework === "next" ? fill("surface-screen.tsx", {}) : fill("surface-screen.tsx", {}).replace(/^"use client";\n/, ""));
+  // Postgres when @ui-calling/postgres is installed (or --store postgres): several instances, serverless hosts.
+  const storeFlag = flag("--store", raw?.store ?? (deps["@ui-calling/postgres"] ? "postgres" : "sqlite"));
+  if (!["sqlite", "postgres"].includes(storeFlag)) {
+    console.error(`--store is "sqlite" or "postgres", not "${storeFlag}".`);
+    process.exit(1);
+  }
+  const postgres = storeFlag === "postgres";
   // Next's dev server watches the project, so its development database lives in node_modules/.cache; elsewhere
   // .ui-calling/ (git-ignored) keeps it safe from a clean install.
-  const storeCode = fill("store.ts", {});
+  const storeCode = fill(postgres ? "store.postgres.ts" : "store.ts", {});
   write(
     join(serverLib, "store.ts"),
-    framework === "next"
+    framework === "next" || postgres
       ? storeCode
       : storeCode
           .replace("or node_modules/.cache/ui-calling/ in development, where the\n * dev server doesn't watch it.", "or .ui-calling/dev.db in development.")
@@ -412,7 +422,7 @@ function init() {
     todo.push(`Links and \`ui-calling link\` assume your dev server is at ${devUrl}. If it isn't, run init again with --base-url http://localhost:<port> --force, or edit devUrl in ${CONFIG_FILE} and baseUrl in ${runtime}.`);
   }
 
-  writeFileSync(CONFIG_FILE, JSON.stringify({ framework, runtime, screen, surfacesDir: lib, serverDir: serverLib, devUrl }, null, 2) + "\n");
+  writeFileSync(CONFIG_FILE, JSON.stringify({ framework, runtime, screen, surfacesDir: lib, serverDir: serverLib, devUrl, store: storeFlag }, null, 2) + "\n");
   console.log(`  write  ${CONFIG_FILE}`);
 
   // Point coding agents at the guide, in the instructions files they already read.
@@ -469,7 +479,7 @@ function init() {
   // Only what's missing. zod must be a direct dependency: contracts import it.
   // A Node server has no React yet: the screens' page needs it, Tailwind and a bundler (Vite, see the guide).
   const screenDeps = nodeServer && framework === "other" ? ["react", "react-dom", "vite", "@vitejs/plugin-react", "tailwindcss", "@tailwindcss/vite"] : [];
-  const wanted = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", "@ui-calling/sqlite", "zod", ...(framework === "vite" ? ["hono", "@hono/node-server", "tsx"] : []), ...screenDeps];
+  const wanted = ["@ui-calling/core", "@ui-calling/server", "@ui-calling/react", ...(postgres ? ["@ui-calling/postgres", "pg", "@types/pg"] : ["@ui-calling/sqlite"]), "zod", ...(framework === "vite" ? ["hono", "@hono/node-server", "tsx"] : []), ...screenDeps];
   const missing = wanted.filter((d) => !deps[d]);
   const steps = [];
   if (missing.length) {
@@ -477,7 +487,12 @@ function init() {
     steps.push(
       `${pm} ${missing.join(" ")}` +
         // Until the first release, an install from the registry would fail, or find someone else's package.
-        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the tarballs built in the ui-calling repo (README, "Building and publishing").` : ""),
+        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the preview release's tarballs: ${INSTALL_DOCS}` : ""),
+    );
+  }
+  if (postgres) {
+    steps.push(
+      "Set DATABASE_URL (on Supabase, the transaction pooler's, port 6543). On a serverless host, set abandonTimers: false in ui.ts and call ui.sweep() from a cron: npx ui-calling guide toc, \"Serverless\".",
     );
   }
   if (tokensStep) steps.push(tokensStep);
@@ -633,6 +648,14 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
         console.error(`Unknown block or part "${name}". Run "ui-calling list".`);
         process.exit(1);
       }
+      // Its identity helper (sqliteIdentity) keeps account links in SQLite: on the Postgres store it has no store.db.
+      if (raw?.store === "postgres" && (block.dependencies ?? []).includes("@ui-calling/sqlite")) {
+        console.error(
+          `${name} keeps its data with sqliteIdentity, which needs the SQLite store, and this project uses Postgres. ` +
+            `Keep account links and codes in your own tables instead: npx ui-calling guide link-account shows what to store.`,
+        );
+        process.exit(1);
+      }
       console.log(`Adding block ${name}`);
       block.files.forEach(copy);
       block.dependencies.forEach((d) => deps.add(d));
@@ -731,7 +754,8 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
                     --dir (default src/ui-calling, app/ui-calling or ui-calling), --server-dir
                     (default: the same for Next.js, server/ otherwise), --deliver button|message,
                     --framework next|vite|react-router|other, --base-url (your dev address, e.g.
-                    http://localhost:5173), --time-zone (default: this machine's, e.g. Europe/Madrid)
+                    http://localhost:5173), --time-zone (default: this machine's, e.g. Europe/Madrid),
+                    --store sqlite|postgres (default: postgres if @ui-calling/postgres is installed)
   new <name>        scaffold a surface (contract, screen, server) and register it
                     --template steps: a screen with several steps, a saved draft and Back
                     --dir, --server-dir (default: from ui-calling.json)

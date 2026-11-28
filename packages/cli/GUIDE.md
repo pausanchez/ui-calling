@@ -58,7 +58,7 @@ npx ui-calling init
 
 Run it in your project's root. It detects Next.js, Vite or React Router (with Express, Fastify or Koa it writes the same files and tells you how to mount the API), and writes:
 - `ui.ts`: your runtime, with `createUiCalling`, the surfaces list, `onEvent`, and `timeZone`, the zone times are written in for the agent (your machine's; `--time-zone` to choose).
-- `store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (drafts, test data) without importing `ui.ts`.
+- `store.ts`: the SQLite store, so links and context survive restarts. Your server code can import it and keep its own tables in `store.db` (test data) without importing `ui.ts`. With `@ui-calling/postgres` installed (or `--store postgres`), it's the Postgres store instead, on a `pg` pool from `DATABASE_URL`: for several instances and serverless hosts. Either way it exports `drafts`, small JSON records by key that the `steps` template keeps its drafts in.
 - `surface-screen.tsx`: renders whichever surface a link's token points to. It also sets `Referrer-Policy: no-referrer` on the page, so the token in its address doesn't leak to sites the screen links to.
 - `tokens.css`: design tokens, with shadcn variable names. Screens are styled with Tailwind v4. `init` imports it right after `@import "tailwindcss";` in your global CSS when it finds one, and tells you if your CSS sets its own `--background` or `--foreground` afterwards (a fresh Next.js app does; delete those two to use ui-calling's), or paints `html`/`body` with a background of its own. `npx ui-calling tokens` copies only this file.
 - **Next.js:** the API route (`app/api/ui/[...path]/route.ts`, with the dev routes in `next dev`) and the landing page (`app/s/[token]/page.tsx`).
@@ -113,7 +113,7 @@ Mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} 
 
 ### Options and blocks
 
-Options: `--deliver message` (the model writes the link in its reply; for MCP and plain-text channels), `--dir`, `--server-dir`, `--framework next|vite|react-router|other`, `--base-url` (your dev address; also saved as `devUrl` for `link` and `events`; by default the port in your `dev` script, or the framework's), `--time-zone`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
+Options: `--deliver message` (the model writes the link in its reply; for MCP and plain-text channels), `--dir`, `--server-dir`, `--framework next|vite|react-router|other`, `--base-url` (your dev address; also saved as `devUrl` for `link` and `events`; by default the port in your `dev` script, or the framework's), `--time-zone`, `--store sqlite|postgres`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
 
 Screens show "Back to chat" when they know where the chat is (e.g. `https://wa.me/<business number>`, or your web chat's page), and "Finish" otherwise, which also calls `complete()`. On Next.js and React Router, set `UI_CALLING_RETURN_URL`, and `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise the tab shows your layout's title. On Vite, pass `returnUrl` to `<SurfaceScreen>` in `surface-route.tsx`.
 
@@ -350,7 +350,7 @@ async function runTurn(conversationId: string, subject: string, userText?: strin
 - **Show that it's thinking.** A woken turn starts while the user is on the screen. Count turns waiting or running per conversation around `ui.turn` and show "typing…" in your chat while it's above zero.
 - **The agent module must be loaded for its `ui.onEvent` to run.** Where routes load lazily (React Router, serverless functions), a server that just restarted has no listener until something imports the agent, and a screen event's wake is lost (its context isn't: the cursor picks it up on the next message). Import the agent module from the route that mounts the API.
 - **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
-- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. `ui.turn` keeps turns apart across instances as long as they share a store that implements `acquireTurn`/`releaseTurn` (see "Persistence"); a store without them only serializes within one process, and says so in a warning. On serverless, keep the function alive for the turn with `waitUntil(ui.turn(...))` instead of returning before it ends, or hand it to a job queue. Abandon timers don't fire there either: set `abandonTimers: false` and call `ui.sweep()` from a cron.
+- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. `ui.turn` keeps turns apart across instances as long as they share a store that implements `acquireTurn`/`releaseTurn` (see "Persistence"); a store without them only serializes within one process, and says so in a warning. On serverless, keep the function alive for the turn with `waitUntil(ui.turn(...))` instead of returning before it ends, or hand it to a job queue. Abandon timers don't fire there either: set `abandonTimers: false` and call `ui.sweep()` from a cron. "Serverless" below has the code.
 
 ## Prompting the agent
 
@@ -403,6 +403,7 @@ Events of type "error" mean something failed on the screen, usually a system beh
 - **Write times in the business's zone.** Models misread bare UTC ISO times ("…T20:00:00Z" next to a local "now"). Set `createUiCalling({ timeZone: "Europe/Madrid" })`, and in `summarize` write every time with `moment.time(date)`: "held until 26 Nov 21:00 CET". The tool result's `expires_at` uses the same zone; pass it to `formatEventsForAgent` too.
 - **`describe` says what the user asked for, not the outcome.** Write "User asked to move the delivery to…" or "Worker picked shift S-12", never "Delivery was moved". The outcome comes from `summarize`. If the handler fails, the agent reads your line as "did NOT go through. Attempted: …", so it must read right in both cases. Set `wake: true` only when the agent should react right away.
 - **Secrets never reach the agent.** Add `redact: ["code"]` to an event that carries a one-time code, password or similar. The handler still gets the value, but the event log, `describe` and the agent see `"[redacted]"`. For secrets in the screen's **data** (an access code, alarm instructions), list the fields in the contract, `secret: ["access"]`, or a path into one, `secret: ["access.secret"]`, so the rest of `access` (its status, when it opens) still reaches the agent. The screen still gets them, and every value inside them is replaced with `[secret]` wherever it appears as a whole word in what `summarize` returns, before it reaches the tool result or an event. Paths are checked against the data's schema, so a typo doesn't compile; a path that still matches no field at runtime logs a warning. Only `summarize` is scrubbed: keep secrets out of `describe` and `SurfaceError` messages too. Keep them out of `summarize` anyway, and keep such screens short-lived (`ttlSeconds`).
+- **Name things the way the user does.** If `summarize` lists only IDs ("W-201 (1 left)"), the agent repeats them to the user. Give each thing its title or name next to the ID, and the day for anything time-bound ("W-201 \"Evals for LLM features\", Sat 15:00, 1 seat left"), and tell the agent in its prompt to name things, never IDs.
 - **Read IDs from `ctx.input`.** It's what the agent passed, typed by the contract, so a typo in the field that scopes the data is a compile error.
 - **Quote what the user typed.** In `describe` and `summarize`, write user text with `JSON.stringify(p.details)`, and give every string field a `.max()`. The runtime also puts what the screen reports on one line and escapes `<` and `>` before the agent reads it, so typed text can't close `<ui_events>` or fake a line.
 - **Keep payloads small and don't trust them.** The payload comes from the browser. Send IDs and the user's choices; let `summarize` give the agent the readable detail (dates, places, prices) from your own data. If the payload repeats what the user saw (e.g. a time), check it against your data in the handler and throw `SurfaceError` if it changed.
@@ -569,6 +570,19 @@ async function sendTemplate(convo: Conversation) {
 
 Keep follow-ups rare: one per abandoned screen at most, and only when it helps the user, since templates are paid and users can block a business that nags.
 
+### Through Twilio
+
+The same rules hold on Twilio's WhatsApp API; the shapes differ. [The event concierge example](https://github.com/pausanchez/ui-calling-event-concierge) does all of this.
+
+- **The subject is the phone number.** Twilio's webhook sends `From: "whatsapp:+34600000000"`: strip the prefix and use the number as the subject and the conversation's key.
+- **Check the signature against the exact public URL.** `twilio.validateRequest(authToken, header, url, params)` signs the address Twilio called, so build it from your public origin (`PUBLIC_URL` + path), not from the request, which a proxy or tunnel may have rewritten. Answer `<Response/>` at once and run the turn after.
+- **A button with the link, inside the 24-hour window:** a `twilio/call-to-action` content template, created through the Content API and never submitted for approval (unapproved ones are fine in session, with one URL button). Its button's address is fixed except a variable at the end: body `{{1}}` for the agent's text, URL `https://your.app/s/{{2}}` for the link's token, sent with `contentSid` and `contentVariables`. Create one per surface (the button's text is fixed too), and again when your domain changes.
+- **After the window:** the same kind of template, approved by WhatsApp, with a fresh link's token.
+- **The sandbox has one webhook per Twilio account.** If another project of yours used it, its replies keep coming until you change "When a message comes in" and save. Twilio's error 11200 in the message log means it couldn't reach your webhook.
+- **Codes for `verify: true`:** Twilio Verify texts the number and checks the code, in a `Verifier` of a few lines (recipe `verify-before-showing`).
+
+## Errors
+
 ## Errors
 
 When something behind the screen fails, the agent hears about it as an `error` event. It never claims an action happened, and it can pick up the conversation from there.
@@ -613,7 +627,7 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 - **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
 - **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left. Where no process stays alive (serverless), set `abandonTimers: false` and call `ui.sweep()` from a cron instead.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
-- **Several instances or serverless: `postgresStore(pool)`** from `@ui-calling/postgres`. It takes any client with `query(text, params)` (a `pg` Pool, PGlite, a serverless driver), creates its tables on first use (or pass `{ createTables: false }` and run `POSTGRES_SCHEMA` in your migrations), and makes the turn lease, status moves and `forget` single statements, safe on a shared pool. `sqliteIdentity` needs SQLite: with Postgres, keep account links and PINs in your own tables and pass your own `verifier`.
+- **Several instances or serverless: `postgresStore(pool)`** from `@ui-calling/postgres` (installed before `init`, it's what `init` writes). It takes any client with `query(text, params)` (a `pg` Pool, PGlite, a serverless driver), creates its tables on first use (or pass `{ createTables: false }` and run `POSTGRES_SCHEMA` in your migrations), and makes the turn lease, status moves and `forget` single statements, safe on a shared pool. `sqliteIdentity` needs SQLite: with Postgres, keep account links and PINs in your own tables and pass your own `verifier`.
 - **On another database,** implement `UiStore` for it. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](../../scripts/test-store.ts) run against any store; copy them into your tests.
 - **Turn leases on several instances:** implement `acquireTurn(conversationId, holder, ttlMs)` and `releaseTurn(conversationId, holder)` too, or `ui.turn` keeps turns apart only within one process. `acquireTurn` must be one atomic write that succeeds when the lease is free, expired or already `holder`'s (that renews it). In Postgres:
 
@@ -632,6 +646,43 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 - **SQLite is one machine.** Instances on different machines don't share its file, so `ui.turn`, the first open and abandon are only kept apart by a store they all reach: `postgresStore()`, or your own.
 
 The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
+
+## Serverless
+
+On Vercel, Netlify or Lambda nothing stays up between requests, and two requests may land on different instances. What changes, learned from [a whole example on Vercel, Supabase and Twilio](https://github.com/pausanchez/ui-calling-event-concierge):
+
+- **A shared store.** Install `@ui-calling/postgres` before `npx ui-calling init`, and `store.ts` is the Postgres store on a `pg` pool from `DATABASE_URL`. On Supabase, use the transaction pooler's address (port 6543): functions open and close connections often. The generated pool drops `?pgbouncer=true` (a Prisma flag node-postgres would send to the server) and quotes pasted around the value in your host's settings.
+- **Run woken turns in `waitUntil`.** The screen's request returns before the agent answers, and the function would be frozen mid-turn. Subscribe in your agent module and keep the function alive for the turn:
+
+  ```ts
+  import { waitUntil } from "@vercel/functions";
+
+  ui.onEvent((e) => {
+    if (e.wake) waitUntil(ui.turn(e.conversationId, () => runWokenTurn(e)));
+  });
+  ```
+
+  Import the agent module from the API route (`import "@/lib/agent";` in `app/api/ui/[...path]/route.ts`), so the listener exists on every cold start.
+- **Answer webhooks first.** WhatsApp providers retry a slow webhook, and the user gets two answers. Check the signature, return 200 at once, and run the turn in `waitUntil`.
+- **Abandon from a cron.** Set `abandonTimers: false` and call `ui.sweep()` from a route a scheduler hits every minute, behind a secret. Each idle screen is marked once, even when calls overlap:
+
+  ```ts
+  // app/api/cron/sweep/route.ts
+  export async function GET(req: Request) {
+    if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) return new Response(null, { status: 401 });
+    return Response.json(await ui.sweep());
+  }
+  ```
+
+  Vercel Cron runs once a day on the Hobby plan. On Supabase, `pg_cron` and `pg_net` run it every minute on any plan:
+
+  ```sql
+  create extension if not exists pg_cron; create extension if not exists pg_net;
+  select cron.schedule('ui-calling-sweep', '* * * * *',
+    $$select net.http_get(url := 'https://your.app/api/cron/sweep', headers := jsonb_build_object('Authorization', 'Bearer <CRON_SECRET>'))$$);
+  ```
+- **Say something when a turn fails.** A model or tool error on a serverless turn leaves the user on read. Catch it and send "Sorry, I'm having trouble right now, try again in a minute"; the message stays in the transcript for the next turn.
+- **Try it without a phone.** Post a webhook signed with your provider's secret, exactly as it would, and log sends instead of making them (a dry-run flag): the whole loop runs on your machine.
 
 ## Security model
 
@@ -713,6 +764,8 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `describe` written as an outcome ("Booked shift…") | A failure reads "did NOT go through. Attempted: Booked shift…" | Describe the request ("Picked shift…") |
 | Readable details sent from the browser and trusted | A tampered payload changes what the agent tells the user | IDs in the payload; details from `summarize` |
 | Always offering "try again" | The user retries something that can't work, like a full shift | Branch on `reason`, `reload()` |
+| `summarize` lists only IDs | The agent tells the user "W-201 has a seat" | Titles and days next to IDs |
+| Returning from a serverless handler before the agent's turn ends | The turn is frozen mid-way and the user gets no answer | `waitUntil(ui.turn(...))` |
 
 ## API reference
 
