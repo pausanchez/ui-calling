@@ -131,7 +131,7 @@ From a clone of the repo, `npm install` and `npm run dev`, then open http://loca
 - `ABANDON_AFTER_MS` (default 90000) controls when an opened-but-untouched screen wakes the agent.
 - `npm install` may warn about unapproved install scripts (esbuild, fsevents); it still works.
 
-**Reset data** puts orders, returns and shifts back to the start and keeps chats and account links. **Reset all** clears everything, real WhatsApp chats included.
+**Reset data** puts orders, returns, shifts and job applications back to the start and keeps chats and account links. **Reset all** clears everything, real WhatsApp chats included.
 
 ### On your own WhatsApp
 
@@ -148,5 +148,5 @@ It opens a tunnel, starts the demo with `PUBLIC_URL` set to it, points the Meta 
 - A hosted demo with the scripted agent, so you can try it without cloning
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK and OpenAI ones ran in pilots)
-- More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
+- More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker with a PIN, a multistep return with photo upload and a job application exist in the demo)
 - More languages in the blocks (en and es today)

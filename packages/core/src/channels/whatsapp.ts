@@ -40,6 +40,39 @@ export function whatsappCtaMessage(opts: {
   };
 }
 
+/**
+ * A message from an approved template: the only kind WhatsApp delivers outside the 24-hour window. `body` fills the
+ * template's {{1}}, {{2}}… in order. `urlSuffix` fills the variable at the end of a URL button's address
+ * (`https://screens.acme.com/s/{{1}}`): pass a fresh link's token, so the button opens the screen.
+ * Address it with `to` (phone number) when you have one; see the GUIDE on templates and BSUIDs.
+ */
+export function whatsappTemplateMessage(opts: {
+  to?: string;
+  recipient?: string;
+  name: string;
+  /** The template's language code as approved, e.g. "es" or "en_US". */
+  language: string;
+  body?: string[];
+  urlSuffix?: string;
+  /** Which button has the URL variable, if not the first. */
+  buttonIndex?: number;
+}) {
+  if (!opts.to && !opts.recipient) throw new Error("Pass `to` (phone number) or `recipient` (BSUID)");
+  const components: unknown[] = [];
+  if (opts.body?.length) components.push({ type: "body", parameters: opts.body.map((text) => ({ type: "text", text })) });
+  if (opts.urlSuffix) {
+    components.push({ type: "button", sub_type: "url", index: String(opts.buttonIndex ?? 0), parameters: [{ type: "text", text: opts.urlSuffix }] });
+  }
+  return {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    ...(opts.to ? { to: opts.to } : {}),
+    ...(opts.recipient ? { recipient: opts.recipient } : {}),
+    type: "template",
+    template: { name: opts.name, language: { code: opts.language }, ...(components.length ? { components } : {}) },
+  };
+}
+
 /** Free-form messages are only allowed within 24h of the user's last message; after that, use a template. */
 export function insideServiceWindow(lastUserMessageAt: Date, now = new Date()) {
   return now.getTime() - lastUserMessageAt.getTime() < 24 * 60 * 60 * 1000;

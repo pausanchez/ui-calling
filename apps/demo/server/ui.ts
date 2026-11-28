@@ -5,6 +5,7 @@ import { orderReturnImpl } from "./order-return.server";
 import { orderStatusImpl } from "./order-status.server";
 import { shiftPickerImpl } from "./shift-picker.server";
 import { linkAccountImpl } from "./link-account.server";
+import { jobApplicationImpl } from "./job-application.server";
 import { demoVerifier } from "./identity";
 
 export { failures };
@@ -29,5 +30,6 @@ export const ui = createUiCalling({
     orderReturnImpl,
     shiftPickerImpl,
     linkAccountImpl,
+    jobApplicationImpl,
   ],
 });

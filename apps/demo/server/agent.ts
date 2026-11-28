@@ -2,12 +2,16 @@ import Anthropic from "@anthropic-ai/sdk";
 import { anthropicToolResult, anthropicTools } from "@ui-calling/anthropic";
 import { STAY_SILENT, formatEventsForAgent, type SurfaceLink, type ToolRun, type UiEvent } from "@ui-calling/core";
 import {
+  insideServiceWindow,
   parseWhatsAppStatuses,
   parseWhatsAppWebhook,
   whatsappCtaMessage,
   whatsappSubject,
+  whatsappTemplateMessage,
   type WhatsAppInbound,
 } from "@ui-calling/core/whatsapp";
+import { failures } from "./failures";
+import { getApplication, listJobs } from "./jobs";
 import { PORTFOLIO_ID, customerFor, linkByPhone, relink } from "./identity";
 import { listOrderIds, getOrder } from "./orders";
 import { describeReturnable, getReturn, listReturnableOrderIds } from "./returns";
@@ -20,6 +24,8 @@ export type ChatMessage = {
   text: string;
   at: string;
   cta?: { label: string; url: string };
+  /** Sent from this approved template (outside the 24-hour window), not as free text. */
+  template?: string;
   /** Real WhatsApp chats only: how far Meta got delivering it. */
   delivery?: Delivery;
 };
@@ -179,13 +185,15 @@ function enqueue(c: Conversation, fn: () => Promise<void>) {
   return c.queue;
 }
 
+/** Only chats that came in through Meta's webhook to our number get real sends; the simulated phone doesn't. */
+const isLive = (c: Conversation) => Boolean(WHATSAPP_TOKEN && c.whatsapp?.phoneNumberId === WHATSAPP_PHONE_NUMBER_ID);
+
 function post(c: Conversation, text: string, cta?: ChatMessage["cta"]) {
   c.chat.push({ id: crypto.randomUUID(), from: "agent", text, at: new Date().toISOString(), cta });
   if (!c.whatsapp) return;
   // Address by phone when Meta shared it (it would win anyway), otherwise by BSUID.
   const to = c.whatsapp.phone ? { to: c.whatsapp.phone } : { recipient: c.whatsapp.bsuid };
-  // Only chats that came in through Meta's webhook to our number get real sends; the simulated phone doesn't.
-  const live = WHATSAPP_TOKEN && c.whatsapp.phoneNumberId === WHATSAPP_PHONE_NUMBER_ID;
+  const live = isLive(c);
   // There, "Back to chat" on the screen should reopen the WhatsApp chat, not the demo's web chat (see surface-page.tsx).
   const back = live && c.whatsapp.businessPhone?.replace(/\D/g, "");
   const url = cta && back ? `${cta.url}?wa=${back}` : cta?.url;
@@ -261,6 +269,60 @@ function applyStatuses(payload: unknown) {
 
 const whoIs = (c: Conversation) => ({ conversationId: c.id, subject: c.subject });
 
+// ------------------------------------------------- Outside the 24-hour window
+
+/** When the user last wrote. The demo's "24-hour window closed" switch moves it back a day. */
+function lastUserMessageAt(c: Conversation) {
+  const at = new Date(c.chat.findLast((m) => m.from === "user")?.at ?? Date.now());
+  return failures.serviceWindowClosed ? new Date(at.getTime() - 25 * 60 * 60 * 1000) : at;
+}
+
+/**
+ * Templates approved in WhatsApp Manager, with what the user sees (for the demo's chat). Each ends in a URL button
+ * whose address is `<PUBLIC_URL>/s/{{1}}`: the fresh link's token fills it.
+ */
+const TEMPLATES: Record<string, { name: string; text: Record<"en" | "es", (title: string) => string>; button: Record<"en" | "es", string> }> = {
+  job_application: {
+    name: "application_follow_up",
+    text: {
+      en: (title) => `Your application for ${title} is saved. You can finish it in a couple of minutes:`,
+      es: (title) => `Tu candidatura para ${title} está guardada. Puedes terminarla en un par de minutos:`,
+    },
+    button: { en: "Finish application", es: "Terminar" },
+  },
+};
+
+/**
+ * A screen woke the agent, but the user last wrote over 24 hours ago, so WhatsApp only delivers a template. An
+ * abandoned screen with one gets it, with a fresh link (the old one may have expired; the progress is on the server).
+ * Anything else waits for the user to write: the turn ends in stay_silent, so it's counted.
+ */
+async function outsideWindow(c: Conversation, e: UiEvent) {
+  const template = TEMPLATES[e.surface];
+  const session = await ui.store.getSession(e.sessionId);
+  // Templates go to a phone number: without one, wait for the user to write.
+  if (e.type !== "abandoned" || !template || !session || (c.whatsapp && !c.whatsapp.phone)) {
+    return staySilent(c, `outside WhatsApp's 24-hour window, no template for ${e.surface} ${e.type}`);
+  }
+  const locale = session.locale.startsWith("es") ? "es" : "en";
+  const link = await callSurface(c, `show_${e.surface}`, { ...session.input, locale });
+  const title = getApplication(String(session.input.job_id), c.subject, locale).job.title;
+  const text = template.text[locale](title);
+  c.chat.push({ id: crypto.randomUUID(), from: "agent", text, at: new Date().toISOString(), cta: { label: template.button[locale], url: link.url }, template: template.name });
+  if (!c.whatsapp) return;
+  const payload = whatsappTemplateMessage({
+    to: c.whatsapp.phone!,
+    name: template.name,
+    language: locale,
+    body: [title],
+    urlSuffix: link.url.split("/s/")[1],
+  });
+  if (!isLive(c)) return log(c, `would send template ${template.name}`);
+  const msg = c.chat.at(-1)!;
+  msg.delivery = { status: "sending" };
+  void sendWhatsApp(c, msg, payload);
+}
+
 /** Record a tool call for the demo panel; `finishTrace` fills in what happened. */
 function startTrace(c: Conversation, tool: string, input: unknown, id: string = crypto.randomUUID()) {
   const trace: ToolTrace = { id, at: new Date().toISOString(), agent: MODE, tool, input };
@@ -284,8 +346,8 @@ async function callSurface(c: Conversation, tool: string, input: unknown): Promi
   return run.link;
 }
 
-/** Scripted agent: end a woken turn without a message, through the same tool Claude calls. */
-async function scriptedSilence(c: Conversation, reason: string) {
+/** End a woken turn without a message, through the same tool Claude calls, so it's counted. */
+async function staySilent(c: Conversation, reason: string) {
   const trace = startTrace(c, STAY_SILENT, { reason });
   finishTrace(trace, await ui.runTool(STAY_SILENT, { reason }, whoIs(c)), false);
 }
@@ -360,11 +422,15 @@ export function handleUiEvent(e: UiEvent) {
   }
   void enqueue(c, async () => {
     const events = [...c.pending.splice(0), e];
+    if (!insideServiceWindow(lastUserMessageAt(c))) {
+      c.pending.push(...events.slice(0, -1));
+      return outsideWindow(c, e);
+    }
     if (MODE === "scripted") {
       const before = c.chat.length;
       await scriptedFollowUp(c, e);
       // Nothing worth saying: end the turn the way a model would, so the silent wake is counted.
-      if (c.chat.length === before) await scriptedSilence(c, `nothing to add after ${e.surface} ${e.type}`);
+      if (c.chat.length === before) await staySilent(c, `nothing to add after ${e.surface} ${e.type}`);
       return;
     }
     pushUser(
@@ -399,13 +465,14 @@ function systemPrompt(c: Conversation) {
   const customer = customerFor(c.subject);
   const who = customer
     ? `This WhatsApp user is linked to customer ${customer.name} (${customer.id}). Their orders in progress: ${listOrderIds(c.subject).join(", ") || "none"}. Delivered orders they can return items from: ${describeReturnable(c.subject) || "none"}. Their worker ID: ${listWorkerIds(c.subject).join(", ") || "none (not a worker)"}.`
-    : `This WhatsApp user${c.whatsapp?.username ? ` (@${c.whatsapp.username})` : ""} isn't linked to a customer account yet: WhatsApp didn't share their phone number, so you don't know who they are. Don't share, confirm or guess any personal details. If they ask about anything personal, open show_link_account (passing what they asked for) and say they need to verify once. When a <ui_events> block shows the chat is now linked, carry on with what they asked for.`;
+    : `This WhatsApp user${c.whatsapp?.username ? ` (@${c.whatsapp.username})` : ""} isn't linked to a customer account yet: WhatsApp didn't share their phone number, so you don't know who they are. Don't share, confirm or guess any personal details. If they ask about anything personal, open show_link_account (passing what they asked for) and say they need to verify once. When a <ui_events> block shows the chat is now linked, carry on with what they asked for. Applying for a job needs no account: open show_job_application for them.`;
+  const jobs = listJobs().map((j) => `${j.id} ${j.title} at ${j.location}, ${j.pay}, ${j.schedule}`).join("; ");
   return `You are the assistant of Acme Store, chatting on WhatsApp with a customer who may also be one of Acme's shift workers.
 ${who}
 
 Write like WhatsApp: 1–3 short sentences, friendly, no headings or markdown. Reply in the customer's language.
 
-You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, returning items from a delivered order (pass the item's sku and the reason if they told you), or, for workers, seeing open shifts and booking or changing their shift (that screen asks for the worker's PIN first; if it locks after wrong PINs, don't send a new link at once: suggest they ask their manager to reset it). Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
+You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, returning items from a delivered order (pass the item's sku and the reason if they told you), or, for workers, seeing open shifts and booking or changing their shift (that screen asks for the worker's PIN first; if it locks after wrong PINs, don't send a new link at once: suggest they ask their manager to reset it). Anyone looking for work can apply to an opening with show_job_application; open jobs: ${jobs}. If they stop partway, their progress is saved and the same link resumes. Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
 
 Messages wrapped in <ui_events> are reported by the screens the customer opened, not written by the customer. Use them to know what they did and follow up naturally: confirm changes, mention ticket numbers, offer next steps. Lines starting with "→ screen now shows" are what the customer saw after that event; rely on them for outcomes (ticket numbers, new dates, totals) and for later questions about the screen.
 
@@ -417,10 +484,11 @@ async function runClaude(c: Conversation, woken = false) {
   let cta: ChatMessage["cta"];
 
   for (let step = 0; step < 5; step++) {
-    // Until the user is linked, the only screen on offer is the one that links them. Recomputed every
-    // step, so the other tools appear as soon as linking succeeds.
+    // Until the user is linked, the only screens on offer are the one that links them and the job application,
+    // which needs no account. Recomputed every step, so the other tools appear as soon as linking succeeds.
     const linked = Boolean(customerFor(c.subject));
-    const tools = anthropicTools(ui, (name) => (name === "show_link_account") !== linked, { woken });
+    const offered = (name: string) => (linked ? name !== "show_link_account" : name === "show_link_account" || name === "show_job_application");
+    const tools = anthropicTools(ui, offered, { woken });
     const res = await client!.beta.messages.create({
       model: "claude-opus-5-5",
       max_tokens: 16000,
@@ -455,7 +523,7 @@ async function runClaude(c: Conversation, woken = false) {
     for (const tu of toolUses) {
       // The adapter runs the surface and builds the tool_result (an is_error one if it fails).
       const trace = startTrace(c, tu.name, tu.input, tu.id);
-      const { result, run } = await anthropicToolResult(ui, tu, whoIs(c));
+      const { result, run } = await anthropicToolResult(ui, tu, whoIs(c), offered);
       finishTrace(trace, run, true);
       if (run.ok && run.silent) silent = true;
       else if (run.ok) cta = { label: run.link.label, url: run.link.url };
@@ -502,6 +570,12 @@ const SCRIPT = {
     returnSlotFull: "That pickup slot just filled up, sorry. Pick another one on the same page and you're done.",
     returnLoadFailed: "Sorry, the returns page isn't loading right now. Tell me what you'd like to return and I'll take note.",
     steps: { items: "items", reasons: "reasons", photos: "photos", pickup: "pickup", review: "review" } as Record<string, string>,
+    applyStart: (title: string, where: string) => `Great! We're hiring for ${title} at ${where}. You can apply in a few minutes from here, no account needed 👇`,
+    applySent: (ref: string, by: string) => `Got it ✅ Your application ${ref} is in. The hiring team will reply by ${by}.`,
+    applyStalled: (step: string) => `I saw you stopped at the ${step} step of your application. Your progress is saved: the same link picks up where you left off.`,
+    applyAbandoned: "Did you get a chance to look at the application? It only takes a few minutes, and your progress is saved.",
+    applyFailed: "Sorry, your application couldn't be sent just now. Everything you filled in is saved: try again in a few minutes from the same page.",
+    applySteps: { availability: "availability", document: "ID photo", review: "final check" } as Record<string, string>,
   },
   es: {
     status: (id: string) => `Aquí tienes el estado de tu pedido ${id} en directo. Desde ahí también puedes cambiar la entrega 👇`,
@@ -535,10 +609,23 @@ const SCRIPT = {
     returnSlotFull: "Esa franja de recogida se acaba de completar, perdona. Elige otra en la misma página y listo.",
     returnLoadFailed: "Perdona, la página de devoluciones no carga ahora mismo. Dime qué quieres devolver y lo apunto.",
     steps: { items: "artículos", reasons: "motivos", photos: "fotos", pickup: "recogida", review: "revisión" } as Record<string, string>,
+    applyStart: (title: string, where: string) => `¡Genial! Buscamos ${title} en ${where}. Puedes inscribirte en unos minutos desde aquí, sin crear cuenta 👇`,
+    applySent: (ref: string, by: string) => `Recibido ✅ Tu candidatura ${ref} está enviada. El equipo de selección te responderá antes del ${by}.`,
+    applyStalled: (step: string) => `He visto que te quedaste en el paso de ${step} de tu candidatura. Lo que rellenaste está guardado: el mismo enlace sigue donde lo dejaste.`,
+    applyAbandoned: "¿Has podido ver la candidatura? Son unos minutos, y lo que rellenes se guarda.",
+    applyFailed: "Perdona, tu candidatura no se ha podido enviar ahora mismo. Lo que rellenaste está guardado: vuelve a intentarlo en unos minutos desde la misma página.",
+    applySteps: { availability: "horario", document: "foto del DNI", review: "revisión final" } as Record<string, string>,
   },
+};
+// Job titles in the chat's language (the job board keeps them in English).
+const JOB_TITLE: Record<string, Record<"en" | "es", string>> = {
+  "J-310": { en: "warehouse pickers", es: "preparadores de pedidos" },
+  "J-311": { en: "store assistants", es: "dependientes" },
 };
 
 const SHIFT_TOPIC = /\b(shifts?|rota|turnos?|horarios?)\b/i;
+// Looking for work, not asking about one's own shifts. "trabajo" alone is too often the verb ("¿cuándo trabajo?").
+const JOB_TOPIC = /\b(jobs?|hiring|apply|application|vacanc\w*|openings?)\b|busco trabajo|empleo|ofertas? de trabajo|tenéis ofertas|candidatura|inscribirme|trabajar (con|en) (vosotros|acme)/i;
 const RETURN_TOPIC = /return|send (it )?back|refund|broken|cracked|damaged|wrong item|devol|reembols|roto|rota|rajad|da[ñn]ad|equivocad/i;
 // What the user already said, so the return starts with it filled in.
 const RETURN_ITEM: [RegExp, string][] = [
@@ -561,10 +648,16 @@ function currentShiftText(c: Conversation, workerId: string) {
 
 async function scriptedReply(c: Conversation, text: string) {
   // Unicode-aware word edges: \b is ASCII-only, so it fails next to accented letters ("está").
-  c.locale = /[¿¡ñ]|(?<!\p{L})(hola|pedido|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar|devolver|devoluci[oó]n|lleg[oó]|roto|rota)(?!\p{L})/iu.test(text)
+  c.locale = /[¿¡ñ]|(?<!\p{L})(hola|pedido|busco|trabajo|ofertas|d[oó]nde|est[aá]|entrega|gracias|cu[aá]ndo|turnos?|hay|quiero|cambiar|devolver|devoluci[oó]n|lleg[oó]|roto|rota)(?!\p{L})/iu.test(text)
     ? "es"
     : "en";
   const s = SCRIPT[c.locale];
+  // Anyone can apply, linked or not: a candidate isn't a customer yet.
+  if (JOB_TOPIC.test(text)) {
+    const job = listJobs().find((j) => (/tienda|store|dependient|shop/i.test(text) ? j.id === "J-311" : j.id === "J-310"))!;
+    const r = await callSurface(c, "show_job_application", { job_id: job.id, locale: c.locale });
+    return post(c, s.applyStart(JOB_TITLE[job.id]?.[c.locale] ?? job.title, job.location.split(",")[0]), { label: r.label, url: r.url });
+  }
   if (!customerFor(c.subject)) {
     // Unknown WhatsApp user: link first, then pick up the question in scriptedFollowUp.
     c.pendingAsk = text;
@@ -612,6 +705,22 @@ async function scriptedFollowUp(c: Conversation, e: UiEvent) {
       if (ask) await scriptedReply(c, ask);
     } else if (e.type === "error") {
       followUp(c, s.verifyFailed);
+    }
+    return;
+  }
+  if (e.surface === "job_application") {
+    const jobId = String(session?.input.job_id ?? "");
+    if (e.type === "application_sent") {
+      const a = getApplication(jobId, c.subject);
+      if (!a.submitted) return;
+      const by = new Date(`${a.submitted.interviewBy}T12:00:00`).toLocaleDateString(c.locale, { weekday: "long", day: "numeric", month: "long" });
+      followUp(c, s.applySent(a.submitted.reference, by));
+    } else if (e.type === "abandoned") {
+      // Where they stopped is the step after the last one they saved.
+      const stoppedAt = (e.payload as { lastStep?: string }).lastStep ? getApplication(jobId, c.subject).draft.step : undefined;
+      followUp(c, stoppedAt && s.applySteps[stoppedAt] ? s.applyStalled(s.applySteps[stoppedAt]) : s.applyAbandoned);
+    } else if (e.type === "error") {
+      followUp(c, s.applyFailed);
     }
     return;
   }

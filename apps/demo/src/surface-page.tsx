@@ -3,6 +3,7 @@ import { OrderStatus } from "./components/ui-calling/order-status";
 import { LinkAccount } from "./components/ui-calling/link-account";
 import { OrderReturn } from "./components/ui-calling/order-return";
 import { ShiftPicker } from "./components/ui-calling/shift-picker";
+import { JobApplication } from "./components/ui-calling/job-application";
 
 /** One route serves every surface; the token decides which one renders. */
 export function SurfacePage({ token }: { token: string }) {
@@ -30,6 +31,7 @@ const SURFACES: Record<string, () => React.JSX.Element> = {
   order_return: () => <OrderReturn />,
   shift_picker: () => <ShiftPicker />,
   link_account: () => <LinkAccount />,
+  job_application: () => <JobApplication />,
 };
 
 const TEXT = {

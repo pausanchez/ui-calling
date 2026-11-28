@@ -17,13 +17,13 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   return Response.json(next.body, { status: next.status });
 }) as typeof fetch;
 const { app, CONVERSATION } = await import("./app");
-const { settled } = await import("./agent");
+const { settled, handleUiEvent } = await import("./agent");
 const { ui } = await import("./ui");
 const { DEMO_CODE, DEMO_PIN } = await import("./identity");
 const { createHmac } = await import("node:crypto");
 
 type Chat = {
-  chat: { from: string; text: string; cta?: { label: string; url: string } }[];
+  chat: { from: string; text: string; cta?: { label: string; url: string }; template?: string }[];
   timeline: UiEvent[];
   calls: { tool: string; silent?: string; whatsapp?: Json }[];
   silentWakes: number;
@@ -393,6 +393,62 @@ await check("webhook: Meta's verdict on each send reaches the chat, including fa
   const failed = (await lastAgent()).delivery;
   assert.equal(failed.status, "failed");
   assert.match(failed.error, /403 \(#131005\)/);
+});
+
+await check("jobs: anyone can apply without linking; steps are quiet, the photo is theirs, sending wakes the agent with the reference", async () => {
+  await call("POST", "/api/chat/reset");
+  await call("POST", "/api/demo/identity", { phoneShared: false });
+  const reply = await say("Hola, busco trabajo, ¿tenéis ofertas?");
+  const c = await chat();
+  assert.equal(c.inbound?.match, "not_linked");
+  assert.equal(c.calls.at(-1)?.tool, "show_job_application", "no account needed to apply");
+  assert.equal(reply.cta?.label, "Inscribirme");
+  const t = token(reply.cta!.url);
+  const open = (await call("GET", `/api/ui/sessions/${t}`)).json;
+  assert.equal(open.locale, "es");
+  assert.equal(open.data.job.id, "J-310");
+  assert.equal((await event(t, "about_saved", { name: "Ana Ruiz", town: "Badalona" })).json.data.draft.step, "availability");
+  assert.equal((await event(t, "availability_saved", { days: ["sat", "mon"], times: ["morning"] })).json.data.draft.days.join(), "mon,sat");
+  const body = new FormData();
+  body.append("file", new Blob([new Uint8Array(200).fill(7)], { type: "image/jpeg" }), "dni.jpg");
+  const up = await app.request(`/api/ui/sessions/${t}/files/document`, { method: "POST", body });
+  const { file } = (await up.json()) as { file: { id: string } };
+  assert.equal((await event(t, "document_added", { files: ["someone-elses"] })).json.reason, "unknown_photo");
+  assert.equal((await event(t, "document_added", { files: [file.id] })).json.data.draft.step, "review");
+  const steps = (await chat()).timeline.filter((e) => e.surface === "job_application" && e.kind === "domain");
+  assert.ok(steps.every((e) => !e.wake), "steps don't wake the agent");
+  const sent = await event(t, "application_sent", {});
+  const ref = sent.json.data.submitted.reference;
+  assert.match((await chat()).chat.at(-1)!.text, new RegExp(`${ref}.*antes del`));
+  assert.match((await lastEvent("application_sent")).state ?? "", new RegExp(`Sent as ${ref}`));
+});
+
+await check("jobs: a stalled application gets a nudge naming the step, and after 24 hours a template with a fresh link", async () => {
+  await call("POST", "/api/chat/reset");
+  const reply = await say("Hi, I'm looking for a job");
+  assert.equal(reply.cta?.label, "Apply");
+  const t = token(reply.cta!.url);
+  await event(t, "about_saved", { name: "Sam Lee", town: "Sabadell" });
+  // The runtime's abandon is tested in test-runtime.ts; here, what the agent does with one.
+  const step = await lastEvent("about_saved");
+  const abandon = (id: string): UiEvent => ({ ...step, id, type: "abandoned", kind: "lifecycle", payload: { lastStep: "about_saved" }, wake: true, description: "User stopped partway" });
+  handleUiEvent(abandon("ab-1"));
+  await settled(CONVERSATION);
+  assert.match((await chat()).chat.at(-1)!.text, /stopped at the availability step/);
+  // A day later WhatsApp only delivers templates: an approved one, with a new link to the same saved draft.
+  await call("POST", "/api/demo/failures", { serviceWindowClosed: true });
+  handleUiEvent(abandon("ab-2"));
+  await settled(CONVERSATION);
+  const late = (await chat()).chat.at(-1)!;
+  assert.equal(late.template, "application_follow_up");
+  assert.notEqual(token(late.cta!.url), t, "a fresh link: the first may have expired");
+  assert.equal((await call("GET", `/api/ui/sessions/${token(late.cta!.url)}`)).json.data.draft.step, "availability", "it resumes where they stopped");
+  // Any other wake waits for the user to write, counted as a silent wake.
+  const before = (await chat()).silentWakes;
+  handleUiEvent({ ...abandon("ab-3"), type: "application_sent", kind: "domain" });
+  await settled(CONVERSATION);
+  assert.equal((await chat()).silentWakes, before + 1);
+  await call("POST", "/api/demo/failures", { serviceWindowClosed: false });
 });
 
 await check("security: through a tunnel, the console's API refuses; screens and webhook still answer", async () => {

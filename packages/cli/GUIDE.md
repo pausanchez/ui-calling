@@ -541,7 +541,7 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 }
 ```
 
-- **The 24-hour window.** Free-form messages are only allowed within 24 hours of the user's last message, and using the screen doesn't count as one. A link sent at hour 23 and used at hour 25 wakes the agent, but Meta rejects its reply (error 131047). Check `insideServiceWindow()` first; outside it, send an approved template (ui-calling doesn't build those) or wait for the user to write.
+- **The 24-hour window.** Free-form messages are only allowed within 24 hours of the user's last message, and using the screen doesn't count as one. A link sent at hour 23 and used at hour 25 wakes the agent, but Meta rejects its reply (error 131047). Check `insideServiceWindow()` first; outside it, send an approved template with `whatsappTemplateMessage()` (you create and get the template approved in WhatsApp Manager) or wait for the user to write.
 - **The webhook.** Answer Meta's `GET` subscription check (`hub.verify_token`, echo `hub.challenge`). On `POST`, check the signature, start the agent turn after responding (Meta retries slow deliveries), and skip message IDs you've already handled. Subscribe to the `messages` field: it carries incoming messages and the statuses of what you sent.
 - **Delivery failures.** A send can fail after Meta accepted it. `parseWhatsAppStatuses(body)` reads `sent`, `delivered`, `read` and `failed` (with its error code) from the same webhook.
 - **Tokens.** The token on the API Setup page expires within 24 hours. For anything unattended, use a System User's permanent token with `whatsapp_business_messaging`.
@@ -550,23 +550,22 @@ export async function sendReply(convo: Conversation, text: string, link?: Surfac
 **Following up outside the window.** The abandon is the case that needs it most: the user may come back to the chat days later. Create a *utility* template in WhatsApp Manager with a URL button whose address ends in a variable (`https://screens.acme.com/s/{{1}}`), wait for Meta to approve it, and send it with a fresh link's token:
 
 ```ts
+import { whatsappTemplateMessage } from "@ui-calling/core/whatsapp";
+
 async function sendTemplate(convo: Conversation) {
   // A new link: the old one may have expired, and the user's progress lives on the server, not in the link.
   const link = await ui.call("show_order_return", { order_id: convo.orderId, locale: convo.locale }, { conversationId: convo.id, subject: convo.subject });
-  const token = link.url.split("/s/")[1];
-  const payload = {
-    messaging_product: "whatsapp",
+  const payload = whatsappTemplateMessage({
     to: convo.phone,                       // templates need a number: without one, wait for the user to write
-    type: "template",
-    template: {
-      name: "return_follow_up",            // "Your return is saved. Pick up where you left off:" + [Continue] button
-      language: { code: convo.locale },
-      components: [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] }],
-    },
-  };
+    name: "return_follow_up",              // "Your return is saved. Pick up where you left off:" + [Continue] button
+    language: convo.locale,
+    urlSuffix: link.url.split("/s/")[1],   // fills the {{1}} at the end of the button's address
+  });
   // POST it to /messages exactly like sendReply above.
 }
 ```
+
+`body: ["…"]` fills the template's text variables in order. The recipe `follow-up-abandoned` shows the whole decision: inside the window the agent writes, outside it an abandoned screen gets the template, and any other wake waits.
 
 Keep follow-ups rare: one per abandoned screen at most, and only when it helps the user, since templates are paid and users can block a business that nags.
 
