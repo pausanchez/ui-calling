@@ -20,6 +20,8 @@ export const shiftPicker = defineSurface({
     "Open shifts for a worker over the coming days: date, start and end time, location, role and how many spots are left, next to the shift they have now. Lets the worker book one, which replaces their current shift. Use it when a worker asks which shifts are available, wants to pick up a shift, or wants to change or swap their shift.",
   input: z.object({ worker_id: z.string().describe("The worker whose shifts to show, e.g. W-207") }),
   cta: { en: "Pick a shift", es: "Elegir turno" },
+  // A rota says where someone will be and when: the worker types their PIN first, so a shared phone shows nothing.
+  verify: true,
   data: z.object({
     workerId: z.string(),
     workerName: z.string(),

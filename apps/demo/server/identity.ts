@@ -1,10 +1,13 @@
-import { SurfaceError } from "@ui-calling/core";
+import { SurfaceError, type Verifier } from "@ui-calling/core";
 
 /** The demo business's portfolio. A BSUID only identifies someone together with its portfolio. */
 export const PORTFOLIO_ID = "PF-1000000001";
 
 /** Demo only: the "emailed" verification code, shown on the linking screen. */
 export const DEMO_CODE = "246810";
+
+/** Demo only: every customer's PIN for screens with `verify: true`, shown under the PIN field. */
+export const DEMO_PIN = "1357";
 
 type Customer = { id: string; name: string; phone: string; email: string };
 
@@ -70,6 +73,15 @@ export function relink(previousSubject: string, subject: string) {
   links.set(subject, id);
   return true;
 }
+
+/**
+ * Checks the PIN on screens with `verify: true` (the shift picker). A product keeps a hashed PIN per customer and
+ * locks them out after a few wrong ones, as `sqliteIdentity(store).pinVerifier()` does; the runtime also locks the link.
+ */
+export const demoVerifier: Verifier = {
+  kind: "pin",
+  check: async ({ subject }, typed) => Boolean(customerFor(subject)) && typed === DEMO_PIN,
+};
 
 export function maskEmail(email: string) {
   const [user, domain] = email.split("@");

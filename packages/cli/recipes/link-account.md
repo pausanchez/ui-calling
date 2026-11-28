@@ -56,6 +56,8 @@ resolve: async ({ shift_id }, ctx) => {
 | `pending(subject)` | A code is waiting: the screen resumes on "enter your code" after a reload |
 | `verify(subject, code)` | `{ ok: true, customerId }` and the subject is linked, or `{ ok: false, reason }`: `wrong_code` (with `attemptsLeft`), `expired`, `no_code`, `locked` |
 | `cancelVerification(subject)` | Drop the waiting code (the user starts over) |
+| `setPin(customerId, pin)` / `hasPin(customerId)` / `checkPin(subject, pin)` | A PIN for screens with `verify: true`, hashed with scrypt; wrong ones count towards the same lockout as codes |
+| `pinVerifier()` / `codeVerifier({ deliver })` | A `verifier` for `createUiCalling` (see [`verify-before-showing`](verify-before-showing.md)) |
 | `moveLink(previousSubject, subject, { keepOld? })` | The user changed number and got a new BSUID: link the new one too. The old one stays linked (links already sent keep working until they expire) unless `keepOld: false` |
 
 Options: `codeTtlMs` (10 minutes), `maxAttempts` (5), `lockMs` (15 minutes), `digits` (6).

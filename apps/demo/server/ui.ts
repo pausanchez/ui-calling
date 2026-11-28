@@ -5,6 +5,7 @@ import { orderReturnImpl } from "./order-return.server";
 import { orderStatusImpl } from "./order-status.server";
 import { shiftPickerImpl } from "./shift-picker.server";
 import { linkAccountImpl } from "./link-account.server";
+import { demoVerifier } from "./identity";
 
 export { failures };
 
@@ -21,6 +22,8 @@ export const ui = createUiCalling({
   store,
   abandonAfterMs: Number(process.env.ABANDON_AFTER_MS ?? 90_000),
   onEvent: (e) => listeners.forEach((fn) => fn(e)),
+  // The shift picker asks for the worker's PIN before it shows their rota (`verify: true` on its contract).
+  verifier: demoVerifier,
   surfaces: [
     orderStatusImpl,
     orderReturnImpl,

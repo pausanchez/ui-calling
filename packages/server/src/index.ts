@@ -75,6 +75,15 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     });
   }
 
+  // Surfaces with `verify`: the PIN or code the user typed, and "send me a code". Tiny bodies, like events.
+  const smallBody = bodyLimit({ maxSize: 4 * 1024, onError: (c) => c.json({ error: "payload_too_large", message: "Too large" }, 413) });
+  app.post("/sessions/:token/verify", smallBody, async (c) => {
+    const body = await c.req.json<{ code?: unknown }>().catch(() => ({}) as { code?: unknown });
+    if (typeof body.code !== "string") return c.json({ error: "invalid_payload", message: "Missing code" }, 400);
+    return c.json(await ui.verify(c.req.param("token"), body.code));
+  });
+  app.post("/sessions/:token/verify/send", async (c) => c.json(await ui.sendCode(c.req.param("token"))));
+
   app.post(
     "/sessions/:token/events",
     // Events are small: an ID and the user's choices. Anything bigger is a mistake or abuse.

@@ -15,6 +15,7 @@ Print one with `npx ui-calling guide <recipe>`. They build on:
 | [`file-upload`](file-upload.md) | The user has to send a photo or a document |
 | [`prefill`](prefill.md) | The user already said in the chat what the screen asks for |
 | [`link-account`](link-account.md) | You must know which customer this WhatsApp user is before showing anything personal |
+| [`verify-before-showing`](verify-before-showing.md) | The screen shows what only that person should see (a payslip, a contract), and phones get shared |
 | [`third-party-failures`](third-party-failures.md) | A system behind the screen can fail, and both the user and the agent should know |
 | [`follow-up-abandoned`](follow-up-abandoned.md) | It matters that the user finishes, and the agent should nudge once if they stop |
 

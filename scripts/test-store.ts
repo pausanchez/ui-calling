@@ -207,6 +207,33 @@ await check("identity: codes link a subject once, expire, survive a reload, and 
   assert.equal(identity.customerFor("wa:1-new"), undefined);
 });
 
+await check("identity: PIN and code verifiers check the linked customer and share one lockout", async () => {
+  const store = sqliteStore(":memory:");
+  const identity = sqliteIdentity(store, { maxAttempts: 3 });
+  const who = { subject: "wa:pin", conversationId: "c" };
+  const pin = identity.pinVerifier();
+  assert.equal(await pin.check(who, "1234"), false, "not linked: no PIN to check");
+  identity.link("wa:pin", "C-9");
+  assert.throws(() => identity.setPin("C-9", "12"), /4 to 8 digits/);
+  identity.setPin("C-9", "4821");
+  assert.equal(identity.hasPin("C-9"), true);
+  assert.notEqual(JSON.stringify(store.db.prepare("SELECT * FROM ui_pins").all()).includes("4821"), true, "stored hashed");
+  assert.equal(await pin.check(who, "4821"), true);
+  assert.equal(await pin.check({ ...who, subject: "wa:other" }, "4821"), false, "another chat isn't that customer");
+  const delivered: string[] = [];
+  const code = identity.codeVerifier({ deliver: async (_c, c) => void delivered.push(c) });
+  await code.send!(who, "es");
+  assert.equal(delivered.length, 1);
+  assert.equal(await code.check(who, delivered[0]), true);
+  assert.equal(await code.check(who, delivered[0]), false, "a code works once");
+  await assert.rejects(code.send!({ ...who, subject: "wa:nobody" }, "es"), { code: "not_linked" });
+  // Wrong PINs lock the customer out, for codes too.
+  for (let i = 0; i < 3; i++) await pin.check(who, "0000");
+  assert.equal(await pin.check(who, "4821"), false, "locked, even with the right PIN");
+  await assert.rejects(code.send!(who, "es"), { code: "locked" });
+  store.close();
+});
+
 await check("restart: a link sent before a restart still opens, and the agent's context is still there", async () => {
   const file = join(dir, "restart.db");
   const before = sqliteStore(file);

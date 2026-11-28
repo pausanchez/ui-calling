@@ -126,7 +126,7 @@ Where errors come from and how to throw your own: [GUIDE.md](packages/cli/GUIDE.
 
 - The link carries only a random token; the server keeps its hash. Data is resolved when the page opens, scoped to the user the link was sent to.
 - Events reach the agent marked as user data, not instructions, and fields like codes and passwords are never shown to it.
-- Links expire, close once the user finishes, and can be bound to one device.
+- Links expire, close once the user finishes, and can be bound to one device. Screens with personal data can ask for a PIN or a code first (`verify: true`): nothing loads until it's right.
 - A link can wake the agent only a few times a minute.
 
 The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](packages/cli/GUIDE.md#security-model).

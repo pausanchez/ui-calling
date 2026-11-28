@@ -224,6 +224,61 @@ await check("abandon: finishing counts even when the finishing event didn't wake
   assert.equal((await ui.events("c41")).filter((e) => e.type === "abandoned").length, 1);
 });
 
+await check("verify: nothing before the PIN, wrong ones are quiet, the link locks and wakes the agent once", async () => {
+  const payslip = defineSurface({
+    name: "payslip",
+    description: "A payslip.",
+    input: z.object({}),
+    data: z.object({ net: z.number() }),
+    events: { downloaded: event(z.object({}), { describe: () => "User downloaded the payslip" }) },
+    verify: true,
+  });
+  const impl = implement(payslip, { resolve: async () => ({ net: 1820 }), summarize: (d) => `Net pay ${d.net}.` });
+  assert.throws(() => createUiCalling({ baseUrl: "https://ui.example.com", surfaces: [impl] }), /verifier/, "a verify surface needs a verifier");
+  const sent: string[] = [];
+  const woke: string[] = [];
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    maxVerifyAttempts: 3,
+    onEvent: (e) => void (e.wake && woke.push(`${e.type}:${(e.payload as { code?: string }).code ?? ""}`)),
+    verifier: {
+      kind: "code",
+      send: async (who) => void sent.push(who.subject),
+      check: async (who, typed) => who.subject === "user-50" && typed === "424242",
+    },
+    surfaces: [impl],
+  });
+  const t = token((await ui.call("show_payslip", {}, { conversationId: "c50", subject: "user-50" })).url);
+  const first = await ui.open(t);
+  assert.deepEqual(first.verify, { kind: "code", attemptsLeft: 3 });
+  assert.equal(first.data, undefined, "resolve doesn't run before the code");
+  await assert.rejects(ui.emit(t, "opened"), { code: "verification_required", status: 403 });
+  await assert.rejects(ui.emit(t, "downloaded", {}), { code: "verification_required" });
+  await ui.sendCode(t);
+  assert.deepEqual(sent, ["user-50"]);
+  await assert.rejects(ui.verify(t, "111111"), { code: "refused", reason: "wrong_code", status: 422 });
+  assert.deepEqual(woke, [], "a wrong code is recorded quietly");
+  assert.deepEqual((await ui.open(t)).verify, { kind: "code", attemptsLeft: 2 });
+  const right = await ui.verify(t, " 424242 ");
+  assert.deepEqual(right.data, { net: 1820 });
+  assert.equal((await ui.open(t)).verify, undefined, "verified once per link");
+  assert.equal((await ui.emit(t, "opened")).event?.type, "opened");
+  // Another link starts again, and locks after maxVerifyAttempts.
+  const u = token((await ui.call("show_payslip", {}, { conversationId: "c51", subject: "user-51" })).url);
+  for (let i = 0; i < 2; i++) await assert.rejects(ui.verify(u, "000000"), { reason: "wrong_code" });
+  await assert.rejects(ui.verify(u, "000000"), { code: "verification_locked", status: 403 });
+  await assert.rejects(ui.verify(u, "424242"), { code: "verification_locked" }, "even the right code, once locked");
+  await assert.rejects(ui.sendCode(u), { code: "verification_locked" });
+  assert.deepEqual((await ui.open(u)).verify, { kind: "code", attemptsLeft: 0 }, "the screen still loads, to say it's locked");
+  assert.deepEqual(woke, ["error:verification_locked"], "the agent hears once, when it locks");
+  const read = formatEventsForAgent(await ui.events("c51"));
+  assert.doesNotMatch(read, /000000/, "what the user typed never reaches the agent");
+  // Codes per link are limited, so a script can't spend your SMS budget.
+  const v = token((await ui.call("show_payslip", {}, { conversationId: "c52", subject: "user-52" })).url);
+  for (let i = 0; i < 3; i++) await ui.sendCode(v);
+  await assert.rejects(ui.sendCode(v), { reason: "too_many_codes" });
+});
+
 await check("errors: unexpected messages and redacted values never reach the agent", async () => {
   console.error = () => {};
   const t = await mint("c5");

@@ -101,6 +101,25 @@ export type ToolSpec = { name: string; description: string; input_schema: Record
 /** Who a tool call is for: the conversation, and the user the link is issued to. */
 export type Who = { conversationId: string; subject: string };
 
+/**
+ * How users prove who they are on surfaces with `verify: true`. `sqliteIdentity` has two ready-made ones:
+ * `pinVerifier()` and `codeVerifier({ deliver })`.
+ */
+export type Verifier = {
+  /** "pin": the user already knows it. "code": `send` delivers one. The screen words its prompt by it. */
+  kind: "pin" | "code";
+  /**
+   * For "code": deliver a fresh code through a channel the user already controls (SMS, email), never back to the chat.
+   * Return a hint the screen shows, like "SMS to •••• 42". Throw a refused `SurfaceError` when there's nowhere to send it.
+   */
+  send?(who: Who, locale: string): Promise<{ hint?: string } | void>;
+  /**
+   * Whether what the user typed proves they're `who.subject`. Keep your own lockout per person: the runtime only
+   * limits attempts per link (`maxVerifyAttempts`), and a new link starts again.
+   */
+  check(who: Who, typed: string): Promise<boolean>;
+};
+
 /** A link minted by a tool call, ready for the channel to deliver. */
 export type SurfaceLink = {
   url: string;
@@ -179,6 +198,10 @@ export type UiCallingOptions = {
    * `moment.time()` in `summarize`) are written in it, with the zone's name. Default "UTC".
    */
   timeZone?: string;
+  /** Checks the PIN or code on surfaces with `verify: true`. Required if any surface sets it. */
+  verifier?: Verifier;
+  /** Wrong PINs or codes one link accepts before it locks and the agent is told. Default 5. */
+  maxVerifyAttempts?: number;
 };
 
 export type TurnOptions = {
@@ -277,6 +300,9 @@ export function createUiCalling(opts: UiCallingOptions) {
   const byTool = new Map(opts.surfaces.map((i) => [prefix + i.surface.name, i]));
   if (byTool.has(STAY_SILENT)) throw new Error(`A surface's tool is named ${STAY_SILENT}, which ui-calling reserves: rename the surface or change toolPrefix`);
   const slots: FileSlot[] = opts.surfaces.flatMap((i) => Object.values(i.surface.files ?? {}));
+  if (opts.surfaces.some((i) => i.surface.verify) && !opts.verifier) {
+    throw new Error("A surface sets `verify: true`, but createUiCalling has no `verifier`: pass one, e.g. sqliteIdentity(store).pinVerifier()");
+  }
   if (slots.length && !(store.putFile && store.getFile && store.listFiles && store.deleteFile)) {
     throw new Error("A surface declares `files`, but the store can't keep files: use sqliteStore(), MemoryStore, or add putFile/getFile/listFiles/deleteFile to yours");
   }
@@ -290,6 +316,16 @@ export function createUiCalling(opts: UiCallingOptions) {
     if (session.status === "completed") throw atSession(new UiCallingError("completed", "This screen is already done"), session);
     return session;
   }
+
+  const maxVerifyAttempts = opts.maxVerifyAttempts ?? 5;
+  const needsVerify = (session: UiSession) => Boolean(impls.get(session.surface)?.surface.verify && !session.verifiedAt);
+  /** A session the user may act on: verified, when its surface asks for it. */
+  async function verifiedSession(token: string) {
+    const session = await sessionFor(token);
+    if (needsVerify(session)) throw atSession(new UiCallingError("verification_required", "Verify first"), session);
+    return session;
+  }
+  const verifyPrompt = (session: UiSession) => ({ kind: opts.verifier!.kind, attemptsLeft: Math.max(0, maxVerifyAttempts - (session.verifyFailures ?? 0)) });
 
   function atSession(err: UiCallingError, session: UiSession) {
     return Object.assign(err, { surface: session.surface, locale: session.locale });
@@ -673,6 +709,10 @@ export function createUiCalling(opts: UiCallingOptions) {
     /** Called by the screen when it loads. Data is resolved fresh, scoped to the session's subject. */
     async open(token: string) {
       const session = await sessionFor(token);
+      // Nothing about the user before they prove who they are: not the data, not even whether resolve would work.
+      if (needsVerify(session)) {
+        return { surface: session.surface, locale: session.locale, data: undefined, expiresAt: session.expiresAt, verify: verifyPrompt(session) };
+      }
       const impl = impls.get(session.surface)!;
       let data;
       try {
@@ -692,7 +732,7 @@ export function createUiCalling(opts: UiCallingOptions) {
 
     /** Record an event coming from the screen, run its handler, return fresh data if any. */
     async emit(token: string, type: string, rawPayload: unknown = {}) {
-      let session = await sessionFor(token);
+      let session = await verifiedSession(token);
       const impl = impls.get(session.surface)!;
       // Whoever holds the link can post events: cap them so a loop or a script can't flood the agent.
       if ((await countEvents({ sessionId: session.id })) >= (opts.maxEventsPerSession ?? 500)) {
@@ -783,7 +823,7 @@ export function createUiCalling(opts: UiCallingOptions) {
      * Uploading records no event: the step that uses the files reports them, by ID.
      */
     async upload(token: string, slotName: string, input: { name: string; type: string; bytes: Uint8Array }) {
-      const session = await sessionFor(token);
+      const session = await verifiedSession(token);
       const declared = impls.get(session.surface)!.surface.files ?? {};
       const slot = Object.hasOwn(declared, slotName) ? declared[slotName] : undefined;
       const reject = (reason: string, message: string) =>
@@ -809,15 +849,75 @@ export function createUiCalling(opts: UiCallingOptions) {
 
     /** A file uploaded through this link, with its bytes. Another link's file is `not_found`. */
     async file(token: string, id: string) {
-      return sessionFile(await sessionFor(token), id);
+      return sessionFile(await verifiedSession(token), id);
     },
 
     /** Remove a file uploaded through this link, e.g. when the user takes a photo back. Never one from an earlier link. */
     async deleteFile(token: string, id: string) {
-      const session = await sessionFor(token);
+      const session = await verifiedSession(token);
       const { file } = await sessionFile(session, id);
       if (file.sessionId !== session.id) throw atSession(new UiCallingError("not_found", "Unknown file"), session);
       await store.deleteFile!(file.id);
+    },
+
+    /**
+     * For `verify` surfaces with a "code" verifier: send the user a code (on the screen's first load, or "send it
+     * again"). At most 3 per link. Returns the verifier's hint, e.g. "SMS to •••• 42".
+     */
+    async sendCode(token: string): Promise<{ hint?: string }> {
+      const session = await sessionFor(token);
+      if (!needsVerify(session) || !opts.verifier?.send) return {};
+      if ((session.verifyFailures ?? 0) >= maxVerifyAttempts) {
+        throw atSession(new UiCallingError("verification_locked", "Too many wrong attempts on this link"), session);
+      }
+      if ((session.verifySends ?? 0) >= 3) throw atSession(new UiCallingError("refused", "No more codes for this link", 422, false, "too_many_codes"), session);
+      await store.updateSession(session.id, { verifySends: (session.verifySends ?? 0) + 1 });
+      try {
+        return (await opts.verifier.send(session, session.locale)) ?? {};
+      } catch (err) {
+        const info = toErrorInfo(err);
+        await recordError(session, info, "action", "verify", "send the user a verification code");
+        throw atSession(
+          info.refused
+            ? new UiCallingError("refused", "No code could be sent", 422, info.retryable, info.code)
+            : new UiCallingError("upstream_error", "The code couldn't be sent right now", 502, info.retryable, info.code),
+          session,
+        );
+      }
+    },
+
+    /**
+     * For `verify` surfaces: check what the user typed. Right, and it returns what `open` returns, with the data.
+     * Wrong, and it's refused (`reason: "wrong_code"`) and recorded quietly for the agent; after `maxVerifyAttempts`
+     * the link locks and the agent is woken, so it can offer another way.
+     */
+    async verify(token: string, typed: string) {
+      const session = await sessionFor(token);
+      if (!needsVerify(session)) return api.open(token);
+      // A locked link stays locked: its screen still loads, to say so (`attemptsLeft: 0`).
+      if ((session.verifyFailures ?? 0) >= maxVerifyAttempts) {
+        throw atSession(new UiCallingError("verification_locked", "Too many wrong attempts on this link"), session);
+      }
+      // What the user typed goes to the verifier only: bounded, never stored or shown to the agent.
+      const ok = typed.length > 0 && typed.length <= 64 && (await opts.verifier!.check(session, typed.trim()));
+      if (ok) {
+        await store.updateSession(session.id, { verifiedAt: new Date().toISOString() });
+        return api.open(token);
+      }
+      const failures = (session.verifyFailures ?? 0) + 1;
+      await store.updateSession(session.id, { verifyFailures: failures });
+      const locked = failures >= maxVerifyAttempts;
+      await recordError(
+        session,
+        locked
+          ? { code: "verification_locked", message: `Wrong PIN or code ${failures} times; this link is locked`, retryable: false }
+          : { code: "wrong_code", message: "Wrong PIN or code", retryable: true, refused: true },
+        "action",
+        "verify",
+        "verify their identity",
+      );
+      if (locked) throw atSession(new UiCallingError("verification_locked", "Too many wrong attempts on this link"), session);
+      throw atSession(new UiCallingError("refused", "Wrong PIN or code", 422, true, "wrong_code"), session);
     },
 
     /**
