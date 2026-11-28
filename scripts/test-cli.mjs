@@ -131,7 +131,7 @@ try {
   assert.match(read("init-vite", "server/store.ts"), /\.ui-calling\/dev\.db/, "a clean install doesn't wipe the dev database");
   assert.match(read("init-vite", "server/index.ts"), /from "\.\/ui"/);
   assert.ok(!read("init-vite", "src/ui-calling/surface-screen.tsx").includes("use client"), "no Next.js directive outside Next.js");
-  assert.match(read("init-vite", "vite.config.ts"), /proxy: \{ "\/api": "http:\/\/localhost:8787" \}/);
+  assert.match(read("init-vite", "vite.config.ts"), /proxy: \{ "\/api": `http:\/\/localhost:\$\{process\.env\.API_PORT \?\? 8787\}` \}/);
   assert.match(read("init-vite", "src/main.tsx"), /import \{ surfaceRoute \} from "\.\/ui-calling\/surface-route";\n[\s\S]*\{surfaceRoute\(\) \?\? <App \/>\}/);
   assert.match(read("init-vite", "package.json"), /"dev:api": "tsx watch --env-file-if-exists=\.env server\/index\.ts"/);
   // `tsc -b` covers the server too.
@@ -172,7 +172,16 @@ try {
   assert.match(read("init-next-postgres", "ui-calling/intake.server.ts"), /import \{ drafts \} from "\.\/store";/);
   assert.match(fails(pgApp, "add", "link-account"), /needs the SQLite store/);
   assert.match(fails(pgApp, "init", "--store", "mysql"), /"sqlite" or "postgres"/);
-  console.log("generated  init-next-postgres (+1 surface)");
+  // Switching back to SQLite rewrites store.ts without --force, and the surface stays registered.
+  assert.match(run(pgApp, "init", "--store", "sqlite"), /store switched to sqlite/);
+  assert.match(read("init-next-postgres", "ui-calling/store.ts"), /export const store = sqliteStore\(/);
+  assert.match(read("init-next-postgres", "ui-calling/ui.ts"), /intakeImpl,/);
+  assert.equal(JSON.parse(read("init-next-postgres", "ui-calling.json")).store, "sqlite");
+  // Every package installed (to try it out): SQLite, which runs without a database.
+  const both = project("init-next-both", { dependencies: { next: "16", "@ui-calling/postgres": "0.0.1", "@ui-calling/sqlite": "0.0.1" } }, ["app"]);
+  assert.match(run(both, "init"), /--store postgres for Postgres/);
+  assert.equal(JSON.parse(read("init-next-both", "ui-calling.json")).store, "sqlite");
+  console.log("generated  init-next-postgres (+1 surface), init-next-both");
 
   // React Router 7 builds on Vite but has its own server: two routes, no Hono, no proxy.
   const rr = project("init-react-router", { scripts: { dev: "react-router dev --port 5320" }, dependencies: { "react-router": "7" }, devDependencies: { "@react-router/dev": "7", vite: "7" } }, ["app/routes/+types"], {
@@ -199,6 +208,11 @@ try {
   assert.equal(read("init-react-router", "app/routes.ts").match(/api\/ui/g)?.length, 1);
   run(rr, "new", "todays-route");
   assert.match(read("init-react-router", "server/ui.ts"), /todaysRouteImpl,/);
+  // init --force after new: the files are rewritten, and the surface is registered again.
+  run(rr, "init", "--force");
+  assert.match(read("init-react-router", "server/ui.ts"), /import \{ todaysRouteImpl \} from "[^"]+";[\s\S]*todaysRouteImpl,\n\s*\/\* ui-calling:surfaces \*\//);
+  assert.equal(read("init-react-router", "server/ui.ts").match(/todaysRouteImpl,/g)?.length, 1);
+  assert.match(read("init-react-router", "app/ui-calling/surface-screen.tsx"), /todays_route: \(\) => <TodaysRoute \/>,/);
   // `<command> --help` prints that command only.
   const help = run(rr, "init", "--help");
   assert.match(help, /--framework next\|vite\|react-router\|other/);
@@ -214,9 +228,20 @@ try {
   assert.match(exOut, /before any body parser/);
   assert.match(exOut, /react react-dom vite @vitejs\/plugin-react tailwindcss @tailwindcss\/vite/, "the screens' page needs React and a bundler");
   assert.match(read("init-express", ".gitignore"), /^\.ui-calling\/$/m, "created when missing: Tailwind v4 scans what git doesn't ignore");
+  // Express on "module": "nodenext": every relative import the CLI writes ends in .js (the final typecheck resolves them).
+  const nn = project("init-express-nodenext", { type: "module", dependencies: { express: "5" } }, [], {
+    "tsconfig.json": JSON.stringify({ compilerOptions: { module: "nodenext", moduleResolution: "nodenext" } }),
+  });
+  run(nn, "init");
+  run(nn, "new", "shift-picker");
+  run(nn, "new", "intake", "--template", "steps");
+  assert.match(read("init-express-nodenext", "server/ui.ts"), /from "\.\/store\.js";/);
+  assert.match(read("init-express-nodenext", "server/ui.ts"), /from "\.\/shift-picker\.server\.js";/);
+  assert.match(read("init-express-nodenext", "ui-calling/shift-picker.tsx"), /from "\.\/shift-picker\.surface\.js";/);
+  assert.match(read("init-express-nodenext", "ui-calling/surface-screen.tsx"), /from "\.\/shift-picker\.js";/);
   const bare = project("init-bare", {});
   assert.match(run(bare, "init"), /using the generic setup/);
-  console.log("generated  init-express, init-bare");
+  console.log("generated  init-express, init-express-nodenext, init-bare");
 
   // A monorepo root isn't an app: refuse instead of writing files nothing uses.
   const mono = project("monorepo", { workspaces: ["apps/*"] }, ["apps/web"]);

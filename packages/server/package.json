@@ -1,6 +1,6 @@
 {
   "name": "@ui-calling/server",
-  "version": "0.0.1",
+  "version": "0.1.0-preview.0",
   "description": "HTTP routes that serve ui-calling surfaces and collect their events (Hono, runs on Node, Bun, Workers; a Node (req, res) handler for Express and Fastify).",
   "license": "MIT",
   "repository": {
@@ -56,7 +56,7 @@
     "removeNodeProtocol": false
   },
   "dependencies": {
-    "@ui-calling/core": "^0.0.1",
+    "@ui-calling/core": "^0.1.0-preview.0",
     "hono": "^4.13.0"
   },
   "publishConfig": {

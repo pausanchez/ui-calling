@@ -1,6 +1,6 @@
 # Getting started
 
-ui-calling is a preview: not on npm yet, and the API may still change. What it is and why: the [overview](../README.md).
+ui-calling is a preview (`0.1.0-preview` on npm), and the API may still change. What it is and why: the [overview](../README.md).
 
 ## Three words
 
@@ -10,11 +10,10 @@ ui-calling is a preview: not on npm yet, and the API may still change. What it i
 
 ## Install and set up
 
-> **Not on npm yet.** Install the preview tarballs from the [v0.0.1-preview release](https://github.com/pausanchez/ui-calling/releases/tag/v0.0.1-preview); `npx ui-calling` then runs the installed CLI. Add the adapter for your agent SDK the same way (`ui-calling-anthropic-0.0.1.tgz`, `-ai-sdk-`, `-openai-` or `-mcp-`), and `ui-calling-postgres-0.0.1.tgz` if you run several instances or on serverless.
+Add the adapter for your agent SDK (`@ui-calling/anthropic`, `@ui-calling/ai-sdk`, `@ui-calling/openai` or `@ui-calling/mcp`), and `@ui-calling/postgres` if you run several instances or on serverless. `ui-calling` is the CLI: installing it pins the version `npx ui-calling` runs.
 
 ```bash
-R=https://github.com/pausanchez/ui-calling/releases/download/v0.0.1-preview
-npm install $R/ui-calling-core-0.0.1.tgz $R/ui-calling-server-0.0.1.tgz $R/ui-calling-react-0.0.1.tgz $R/ui-calling-sqlite-0.0.1.tgz $R/ui-calling-0.0.1.tgz zod
+npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod
 ```
 
 ```bash
@@ -37,7 +36,7 @@ npx ui-calling new shift-picker
 - Screens use Tailwind v4.
 - `ui-calling.json` records where things live, so `new` and `add` register each surface by themselves.
 - `new` generates three files (contract, server, screen) that compile as-is, with TODOs where your product comes in.
-- **Postgres instead of SQLite:** install `ui-calling-postgres-0.0.1.tgz` and `pg` before `init`, and `store.ts` is the Postgres store on `DATABASE_URL`. For several instances or serverless hosts.
+- **Postgres instead of SQLite:** install `@ui-calling/postgres` and `pg`, then `npx ui-calling init --store postgres`: `store.ts` is the Postgres store on `DATABASE_URL`. For several instances or serverless hosts. Running `init --store sqlite` or `--store postgres` later switches `store.ts` and keeps your surfaces.
 - **When a stalled screen wakes the agent:** `abandonAfterMs`, on `createUiCalling` or on one contract. It's off until you set it; the demo uses 90 seconds.
 
 Verified end to end on Next.js 16, Vite, React Router 7 and Express 5, and in four pilot apps that coding agents built from the packages alone. For a deployed app to read from top to bottom, see [the event concierge](https://github.com/pausanchez/ui-calling-event-concierge): Vercel, Supabase Postgres and Twilio WhatsApp, with screenshots of every step. [GUIDE.md](../packages/cli/GUIDE.md) covers the patterns, rules and a done checklist, and is written so coding agents can follow it too (`npx ui-calling guide` prints it in any project). Agents working on this repo should read [AGENTS.md](../AGENTS.md).

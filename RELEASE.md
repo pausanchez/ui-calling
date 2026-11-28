@@ -23,25 +23,25 @@ Real people, without a client: the [event concierge](https://github.com/pausanch
 
 ## 1. Decisions
 
-- [ ] **Version.** Every package is `0.0.1` today. The preview is `0.1.0-preview.0` for all packages, released together; later previews bump the last number, and the stable release is `0.1.0`.
+- [x] **Version.** The preview is `0.1.0-preview.0` for all packages, released together; later previews bump the last number, and the stable release is `0.1.0`.
 - [x] **Copyright holder** in `LICENSE` (MIT; copied into every package): "San Pau" (decided 2026-11-28), in the root `LICENSE` and `packages/*/LICENSE`.
-- [ ] **npm organization.** The `@ui-calling` scope needs an npm org named `ui-calling` (free for public packages). The names `ui-calling` and `@ui-calling/*` were free on 2026-11-25; check again with `npm view <name>` right before publishing.
-- [ ] **Public repo.** The docs site on GitHub Pages is public either way. From a private repo, Pages needs a paid plan; otherwise make the repo public first.
+- [x] **npm organization.** The npm org `ui-calling` exists, owned by `sanpau` (2026-11-28). The names `ui-calling` and `@ui-calling/*` were free on 2026-11-25; check again with `npm view <name>` right before publishing.
+- [x] **Public repo.** The docs site on GitHub Pages is public either way. From a private repo, Pages needs a paid plan; otherwise make the repo public first.
 
 ## 2. Before publishing
 
 - [x] The pilots' findings are fixed: the Next.js + Anthropic SDK pilot (PRs #22, #23), the Vite + AI SDK pilot (PR #24), the React Router + Anthropic manual loop pilot (PR #26) and the Express + OpenAI Responses pilot (PR #29).
 - [x] The security review's findings are fixed or listed under "Known limits" below (see the PR that added this file).
-- [ ] `npm test` passes.
-- [ ] Change the pre-release notes from "not on npm yet" to "preview on npm":
+- [x] `npm test` passes.
+- [x] Change the pre-release notes from "not on npm yet" to "preview on npm":
   - `README.md`: the "Preview" note at the top keeps "the API may still change" and drops "Not on npm yet"; the install line under "Get started" points at `npm install`.
   - `docs/getting-started.md`: the "Not on npm yet" note and the tarball install under "Install and set up" become `npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod`, with the adapters and `@ui-calling/postgres` named the same way. The tarball steps for trying a change live in AGENTS.md.
   - `packages/cli/GUIDE.md`: the "Not on npm yet" note at the top.
   - The `v0.0.1-preview` GitHub release: mark it superseded by the npm preview.
   - The docs page artifact, if it's still shared: its "Pre-release" note.
-- [ ] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite`, `postgres` and the adapters (`^0.1.0-preview.0`, which also accepts later previews and `0.1.0`).
-- [ ] `npm run build`.
-- [ ] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running), on create-react-router (`npm run typecheck`, `react-router build`), and on a plain Express app (`init`, `uiCallingNodeHandler`, `link`, `events`).
+- [x] Set the version in every `packages/*/package.json`, and the `@ui-calling/core` range in `server`, `react`, `sqlite`, `postgres` and the adapters (`^0.1.0-preview.0`, which also accepts later previews and `0.1.0`).
+- [x] `npm run build`.
+- [x] Try the packed tarballs in fresh apps, as in AGENTS.md: `create-next-app`, install the tarballs, `init`, `new` (both templates), `next build`, then `npx ui-calling link` against `next dev`; the same on create-vite (`tsc -b`, `vite build`, a screen with `dev` and `dev:api` running), on create-react-router (`npm run typecheck`, `react-router build`), and on a plain Express app (`init`, `uiCallingNodeHandler`, `link`, `events`).
 
 ## Known limits (from the security review, accepted for the preview and 0.1)
 

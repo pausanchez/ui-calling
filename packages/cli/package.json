@@ -1,6 +1,6 @@
 {
   "name": "ui-calling",
-  "version": "0.0.1",
+  "version": "0.1.0-preview.0",
   "description": "Copy ui-calling surfaces and design tokens into your project, shadcn style.",
   "license": "MIT",
   "repository": {

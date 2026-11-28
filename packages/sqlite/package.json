@@ -1,6 +1,6 @@
 {
   "name": "@ui-calling/sqlite",
-  "version": "0.0.1",
+  "version": "0.1.0-preview.0",
   "description": "Zero-config persistence for ui-calling sessions and events, on Node's built-in SQLite (node:sqlite). No dependencies.",
   "license": "MIT",
   "repository": {
@@ -52,7 +52,7 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "@ui-calling/core": "^0.0.1"
+    "@ui-calling/core": "^0.1.0-preview.0"
   },
   "publishConfig": {
     "access": "public"

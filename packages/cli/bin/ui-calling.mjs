@@ -66,7 +66,7 @@ function write(target, content) {
     return false;
   }
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, content);
+  writeFileSync(target, nodeNextImports(target, content));
   console.log(`  write  ${relative(process.cwd(), target)}`);
   return true;
 }
@@ -74,13 +74,13 @@ function write(target, content) {
 /** Write a file even if it exists (for --replace). */
 function writeOver(target, content) {
   mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, content);
+  writeFileSync(target, nodeNextImports(target, content));
   console.log(`  write  ${relative(process.cwd(), target)}`);
   return true;
 }
 
 function copy(rel) {
-  write(join(outDir, basename(rel)), readFileSync(join(registryDir, rel)));
+  write(join(outDir, basename(rel)), readFileSync(join(registryDir, rel), "utf8"));
 }
 
 /** Parts go in `<surfaces dir>/parts/`; screens import them from there. Already there: kept, unless --force. */
@@ -89,7 +89,7 @@ function addPart(name) {
   for (const rel of part.files) {
     const target = join(outDir, "parts", basename(rel));
     if (existsSync(target) && !force) console.log(`  keep   ${shown(target)} (already there; --force replaces it)`);
-    else write(target, readFileSync(join(registryDir, rel)));
+    else write(target, readFileSync(join(registryDir, rel), "utf8"));
   }
   return part;
 }
@@ -97,14 +97,33 @@ function addPart(name) {
 /** Path for messages: relative to where the command runs. */
 const shown = (p) => relative(process.cwd(), p) || ".";
 
-/** Import path from the file at `fromFile` to `toFile`, without extension. */
+/**
+ * A project whose tsconfig.json resolves modules like Node (`"module": "nodenext"`, a plain Express app) needs `.js` on
+ * every relative import; bundlers (Next.js, Vite, React Router) don't. create-vite's tsconfig.node.json only covers
+ * vite.config, so only tsconfig.json counts.
+ */
+const nodeNext = (() => {
+  const file = join(root, "tsconfig.json");
+  if (!existsSync(file)) return false;
+  const t = readFileSync(file, "utf8");
+  if (/"moduleResolution"\s*:\s*"bundler"/i.test(t)) return false;
+  return /"(module|moduleResolution)"\s*:\s*"node(16|18|20|next)"/i.test(t);
+})();
+
+/** `./x` → `./x.js` on NodeNext. Paths that already name a file type are left alone. */
+const withExtension = (p) => (nodeNext && !/\.(m?js|cjs|jsx|json|css)$/.test(p) ? `${p}.js` : p);
+
+/** Import path from the file at `fromFile` to `toFile`: without extension, or `.js` on NodeNext. */
 function importPath(fromFile, toFile) {
   let p = relative(dirname(resolve(fromFile)), resolve(toFile)).split(sep).join("/").replace(/\.(tsx?|jsx?)$/, "");
-  return p.startsWith(".") ? p : `./${p}`;
+  return withExtension(p.startsWith(".") ? p : `./${p}`);
 }
 
-/** Where the preview's install command lives, until it's on npm. */
-const INSTALL_DOCS = "https://pausanchez.github.io/ui-calling/getting-started.html#install-and-set-up";
+/** The relative imports templates write as `./x`, with `.js` added on NodeNext. */
+function nodeNextImports(target, content) {
+  if (!nodeNext || !/\.(tsx?|mts)$/.test(target) || typeof content !== "string") return content;
+  return content.replace(/(from\s+|import\s*\(\s*)"(\.\.?\/[^"]+)"/g, (_, lead, p) => `${lead}"${withExtension(p)}"`);
+}
 
 function fill(template, vars) {
   let s = readFileSync(join(initTemplates, template), "utf8");
@@ -133,6 +152,26 @@ function register(file, importLine, entry) {
   writeFileSync(file, s);
   console.log(`  update ${shown(file)}`);
   return true;
+}
+
+/** After `init --force` rewrote a generated file: put back the imports and entries `new` and `add` had registered. */
+function keepRegistrations(file, before) {
+  if (!before.includes("// ui-calling:imports") || !before.includes("/* ui-calling:surfaces */")) return;
+  const imports = before.slice(0, before.indexOf("// ui-calling:imports")).match(/^import \{ \w+ \} from "\.[^"]*";$/gm) ?? [];
+  const block = before.slice(0, before.indexOf("/* ui-calling:surfaces */"));
+  // The entries sit just above the marker, one per line: `fooImpl,` or `foo: () => <Foo />,`.
+  const entries = [];
+  for (const line of block.split("\n").reverse().slice(1)) {
+    const t = line.trim();
+    if (!/^\w+(: .*)?,$/.test(t)) break;
+    entries.unshift(t);
+  }
+  const fresh = readFileSync(file, "utf8");
+  for (const i of imports.filter((i) => !fresh.includes(i))) {
+    const name = i.match(/\{ (\w+) \}/)[1];
+    const entry = entries.find((e) => e === `${name},` || e.includes(`<${name}`));
+    if (entry) register(file, i, entry);
+  }
 }
 
 /** Register a surface's implementation in the runtime and its component in the screen, if `init` made them. */
@@ -263,11 +302,11 @@ function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg }) {
   const config = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"].find((f) => existsSync(f));
   const c = config && readFileSync(config, "utf8");
   if (c && !c.includes("/api") && !/\bserver\s*:/.test(c) && /defineConfig\(\{\n/.test(c)) {
-    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // ui-calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { proxy: { "/api": "http://localhost:${API_PORT}" } },\n`));
+    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // ui-calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { proxy: { "/api": \`http://localhost:\${process.env.API_PORT ?? ${API_PORT}}\` } },\n`));
     console.log(`  update ${config}`);
     done.push(`/api proxied to the API in ${config}`);
   } else if (!c?.includes("/api")) {
-    todo.push(`In vite.config, proxy "/api" to http://localhost:${API_PORT} (server.proxy), so the screens reach the API.`);
+    todo.push(`In vite.config, proxy "/api" to http://localhost:${API_PORT} (server.proxy; the API's port is API_PORT, default ${API_PORT}), so the screens reach the API.`);
   }
 
   // create-vite's main.tsx renders <App />: show the screen instead on /s/:token.
@@ -381,20 +420,26 @@ function init() {
   const devUrl = flag("--base-url", raw?.devUrl ?? `http://localhost:${guessedPort}`);
   // The zone times are written in for the agent: --time-zone, else this machine's (usually the business's).
   const timeZone = flag("--time-zone", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  // --force rewrites ui.ts and surface-screen.tsx: keep the surfaces `new` and `add` registered there.
+  const registered = [runtime, screen].map((f) => [f, existsSync(f) ? readFileSync(f, "utf8") : ""]);
   write(runtime, fill("ui.ts", { __BASE_URL__: literal(devUrl), __DELIVER__: deliver, __TIME_ZONE__: literal(timeZone) }));
   // "use client" is a Next.js directive: elsewhere it only reads as if this were Next-only.
   write(screen, framework === "next" ? fill("surface-screen.tsx", {}) : fill("surface-screen.tsx", {}).replace(/^"use client";\n/, ""));
-  // Postgres when @ui-calling/postgres is installed (or --store postgres): several instances, serverless hosts.
-  const storeFlag = flag("--store", raw?.store ?? (deps["@ui-calling/postgres"] ? "postgres" : "sqlite"));
+  if (force) for (const [file, before] of registered) keepRegistrations(file, before);
+  // Postgres with --store postgres, or when @ui-calling/postgres is installed without @ui-calling/sqlite: several
+  // instances, serverless hosts. Both installed (everything, to try it): SQLite, which runs with no database.
+  const storeFlag = flag("--store", raw?.store ?? (deps["@ui-calling/postgres"] && !deps["@ui-calling/sqlite"] ? "postgres" : "sqlite"));
   if (!["sqlite", "postgres"].includes(storeFlag)) {
     console.error(`--store is "sqlite" or "postgres", not "${storeFlag}".`);
     process.exit(1);
   }
   const postgres = storeFlag === "postgres";
+  // Switching stores (init --store sqlite on a Postgres setup) rewrites store.ts without --force: it's the point.
+  const switching = Boolean(raw?.store && flag("--store") && flag("--store") !== raw.store);
   // Next's dev server watches the project, so its development database lives in node_modules/.cache; elsewhere
   // .ui-calling/ (git-ignored) keeps it safe from a clean install.
   const storeCode = fill(postgres ? "store.postgres.ts" : "store.ts", {});
-  write(
+  (switching ? writeOver : write)(
     join(serverLib, "store.ts"),
     framework === "next" || postgres
       ? storeCode
@@ -418,6 +463,8 @@ function init() {
   if (framework === "vite") setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg });
   if (framework === "react-router") setUpReactRouter({ runtime, screen, done, todo });
   done.push(`times for the agent in ${timeZone} (timeZone in ${runtime}; --time-zone to change)`);
+  if (switching) done.push(`store switched to ${storeFlag} in ${join(serverLib, "store.ts")}`);
+  else if (!postgres && deps["@ui-calling/postgres"]) done.push(`SQLite store, which needs no database (--store postgres for Postgres)`);
   if (framework === "other" && !flag("--base-url") && !raw?.devUrl) {
     todo.push(`Links and \`ui-calling link\` assume your dev server is at ${devUrl}. If it isn't, run init again with --base-url http://localhost:<port> --force, or edit devUrl in ${CONFIG_FILE} and baseUrl in ${runtime}.`);
   }
@@ -483,12 +530,7 @@ function init() {
   const missing = wanted.filter((d) => !deps[d]);
   const steps = [];
   if (missing.length) {
-    const ours = missing.filter((d) => d.startsWith("@ui-calling/"));
-    steps.push(
-      `${pm} ${missing.join(" ")}` +
-        // Until the first release, an install from the registry would fail, or find someone else's package.
-        (ours.length ? `\n     Not on npm yet: install ${ours.join(", ")} from the preview release's tarballs: ${INSTALL_DOCS}` : ""),
-    );
+    steps.push(`${pm} ${missing.join(" ")}`);
   }
   if (postgres) {
     steps.push(
@@ -581,14 +623,28 @@ async function devCommand(which) {
   });
   const json = await res.json().catch(() => ({ message: `${base}/dev/links isn't there. The dev routes need uiCallingHandler(ui, { dev: true }) in development (init sets this up for Next.js, Vite and React Router).` }));
   if (!res.ok) {
-    // A refusal from resolve: say which, and the usual cause (the test user isn't linked to anyone yet).
-    if (json.error && json.error !== "unknown_surface" && json.error !== "invalid_payload" && res.status === 422) {
+    if (json.error === "invalid_payload" && Array.isArray(json.fields)) {
+      // Say what the contract takes, so the next try works: link shift-picker id=<string>.
+      const usage = json.fields.map((f) => (f.required ? `${f.name}=<${f.type}>` : `[${f.name}=<${f.type}>]`)).join(" ");
+      console.error(`${json.message}\n\nThis screen takes: npx ui-calling link ${surface}${usage ? ` ${usage}` : ""}`);
+    } else if (json.error === "unexpected") {
+      // Not a refusal: the server failed. The cause is only in its log (the runtime never sends raw errors out).
+      const db = raw?.store === "postgres" ? " With the Postgres store, the usual cause is a database that isn't reachable: check DATABASE_URL." : "";
+      console.error(`The server failed opening the screen. The cause is in your dev server's log ("[ui-calling] unexpected error").${db}`);
+    } else if (json.error && json.error !== "unknown_surface" && res.status === 422) {
+      // A refusal from resolve: say which, and the usual cause (the test user isn't linked to anyone yet).
       console.error(`The screen refused subject "${subject}": ${json.error}: ${json.message}`);
       console.error(`In development, give "${subject}" a test account at startup (with the link-account block: identity.link("${subject}", "<customer id>")), or pass --subject <a linked subject>.`);
     } else console.error(json.message ?? json.error ?? `HTTP ${res.status}`);
     process.exit(1);
   }
-  console.log(json.url);
+  // The link's address comes from the app's baseUrl. When both are on this machine but on different ports (the dev
+  // server took another one), print the link on the one that answered: that's the one that opens.
+  const linkUrl = new URL(json.url);
+  const answered = new URL(base);
+  const local = (u) => ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+  const moved = linkUrl.origin !== answered.origin && local(linkUrl) && local(answered);
+  console.log(moved ? `${answered.origin}${linkUrl.pathname}` : json.url);
   // What the agent is told the screen will show: your summarize() for the data it opens with.
   const seen = (() => {
     try {
@@ -596,9 +652,11 @@ async function devCommand(which) {
     } catch {}
   })();
   if (seen) console.log(`\nThe agent reads: ${seen}`);
-  // The link's address comes from the app's baseUrl (PUBLIC_URL): say so when it isn't the server we just talked to.
-  if (new URL(json.url).origin !== new URL(base).origin) {
-    console.log(`\nNote: this link points at ${new URL(json.url).origin}, but your dev server answered at ${new URL(base).origin}. Set PUBLIC_URL=${new URL(base).origin} for the app, or open it at ${new URL(base).origin}${new URL(json.url).pathname}.`);
+  if (moved) {
+    console.log(`\nNote: your app's baseUrl is ${linkUrl.origin}, but the dev server answered at ${answered.origin}. Links your agent sends will point at ${linkUrl.origin}: set PUBLIC_URL=${answered.origin}, or devUrl in ${CONFIG_FILE} and baseUrl in ui.ts.`);
+  } else if (linkUrl.origin !== answered.origin && !local(linkUrl)) {
+    // A tunnel (PUBLIC_URL): the link is meant to point elsewhere. Say where it was opened.
+    console.log(`\nNote: this link points at ${linkUrl.origin} (PUBLIC_URL); your dev server answered at ${answered.origin}.`);
   }
   const again = [conversationId !== `dev:${subject}` ? `--conversation ${conversationId}` : subject !== "dev-user" ? `--subject ${subject}` : ""].filter(Boolean).join(" ");
   console.log(`\nOpened for subject "${subject}" in conversation "${conversationId}". What the agent reads back: npx ui-calling events${again ? ` ${again}` : ""}`);
@@ -755,7 +813,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
                     (default: the same for Next.js, server/ otherwise), --deliver button|message,
                     --framework next|vite|react-router|other, --base-url (your dev address, e.g.
                     http://localhost:5173), --time-zone (default: this machine's, e.g. Europe/Madrid),
-                    --store sqlite|postgres (default: postgres if @ui-calling/postgres is installed)
+                    --store sqlite|postgres (default: postgres if @ui-calling/postgres is installed and @ui-calling/sqlite isn't; again later, switches store.ts)
   new <name>        scaffold a surface (contract, screen, server) and register it
                     --template steps: a screen with several steps, a saved draft and Back
                     --dir, --server-dir (default: from ui-calling.json)

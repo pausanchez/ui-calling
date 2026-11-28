@@ -4,7 +4,7 @@
 
 Built for the conversations that would otherwise be lost: the user who stops halfway, the payment that fails, the slot that disappears.
 
-> **Preview.** Not on npm yet and not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
+> **Preview.** On npm as `0.1.0-preview`, not ready for production; the API may still change. MIT licensed and self-hosted: it runs in your app, not on someone else's platform.
 
 ![The whole loop in the demo: a customer asks to return a cracked blender, the agent sends a link, they get two steps into the return screen and leave; the abandon wakes the agent, which writes first in the chat](docs/demo.gif)
 
@@ -108,9 +108,10 @@ No API key? A scripted agent runs the same loop. Options, resets and running it 
 
 ## Get started
 
-First install the preview: it's not on npm yet, so the [install command in Getting started](docs/getting-started.md#install-and-set-up) installs the packages and the CLI from the release. Then set it up in your app and generate your first screen:
+Install the packages, then set it up in your app and generate your first screen:
 
 ```bash
+npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod
 npx ui-calling init
 npx ui-calling new shift-picker
 ```
@@ -146,7 +147,7 @@ The whole model, plus persistence, languages and WhatsApp identity: [GUIDE.md](p
 
 - **WhatsApp's 24-hour window.** Using the screen doesn't reopen it. If the agent wakes more than 24 hours after the user's last message, Meta rejects a free-form reply: check `insideServiceWindow()` and send an approved template instead: `whatsappTemplateMessage()` fills it with a fresh link, and the demo does it for a job application abandoned the day before. [GUIDE.md](packages/cli/GUIDE.md#sending-on-whatsapp)
 - **Will people trust a link in a chat?** Only if it looks like you. Screens are served from your own domain, with your brand in the design tokens, and the agent says what the screen is for before sending it. Link previews never load data or count as opening the screen.
-- **Serverless hosts.** `sqliteStore()` needs a lasting disk; on hosts without one, use `postgresStore(pool)` from `@ui-calling/postgres` (install it before `init`, and `init` sets it up), or implement `UiStore` for your database. Abandon timers don't run between requests there: set `abandonTimers: false` and call `ui.sweep()` from a cron. [GUIDE.md](packages/cli/GUIDE.md#serverless) has the rest, and [the event concierge](https://github.com/pausanchez/ui-calling-event-concierge) runs it on Vercel.
+- **Serverless hosts.** `sqliteStore()` needs a lasting disk; on hosts without one, use `postgresStore(pool)` from `@ui-calling/postgres` (`npx ui-calling init --store postgres` sets it up), or implement `UiStore` for your database. Abandon timers don't run between requests there: set `abandonTimers: false` and call `ui.sweep()` from a cron. [GUIDE.md](packages/cli/GUIDE.md#serverless) has the rest, and [the event concierge](https://github.com/pausanchez/ui-calling-event-concierge) runs it on Vercel.
 - **Several instances.** A screen event and a user message must never run the agent at once, or it answers twice. Run every turn through `ui.turn(conversationId, fn)`: it queues turns per conversation and takes a lease in the store. That holds only across instances that reach the same store: SQLite on one machine (a cluster sharing the file), `postgresStore()` across machines. [GUIDE.md](packages/cli/GUIDE.md#persistence)
 - **Why the name?** Tool calling lets an agent call your functions. ui-calling lets it call a screen, and hear back from it.
 

@@ -53,15 +53,26 @@ export function uiCallingRoutes(ui: UiCalling, opts: RouteOptions = {}) {
     });
     app.post("/dev/links", async (c) => {
       const body = await c.req.json<{ surface?: string; input?: Record<string, unknown>; subject?: string; conversationId?: string; locale?: string }>();
-      const tool = ui.tools().find((t) => t.name === body.surface || t.name.endsWith(`_${body.surface}`))?.name;
-      if (!tool) return c.json({ error: "unknown_surface", message: `No surface "${body.surface}". Surfaces: ${ui.tools().map((t) => t.name).join(", ")}` }, 404);
+      const spec = ui.tools().find((t) => t.name === body.surface || t.name.endsWith(`_${body.surface}`));
+      if (!spec) return c.json({ error: "unknown_surface", message: `No surface "${body.surface}". Surfaces: ${ui.tools().map((t) => t.name).join(", ")}` }, 404);
       const subject = body.subject ?? "dev-user";
       const conversationId = body.conversationId ?? `dev:${subject}`;
-      const run = await ui.runTool(tool, { ...body.input, ...(body.locale ? { locale: body.locale } : {}) }, { conversationId, subject });
-      // A refusal from resolve (e.g. the test user isn't linked) is 422 with its code; bad input stays 400.
+      // The CLI reads id=1 as a number: where the contract wants a string, give it one.
+      const props = (spec.input_schema.properties ?? {}) as Record<string, { type?: unknown }>;
+      const input = Object.fromEntries(
+        Object.entries(body.input ?? {}).map(([k, v]) => [k, props[k]?.type === "string" && (typeof v === "number" || typeof v === "boolean") ? String(v) : v]),
+      );
+      const run = await ui.runTool(spec.name, { ...input, ...(body.locale ? { locale: body.locale } : {}) }, { conversationId, subject });
+      // A refusal from resolve (e.g. the test user isn't linked) is 422 with its code; bad input stays 400 and says
+      // what the contract takes; anything else (a store that's down, resolve throwing) is 500.
       if (!run.ok) {
-        const bad = run.error.code === "invalid_payload" || run.error.code === "unknown_surface";
-        return c.json({ error: run.error.code, message: run.error.message }, bad ? 400 : 422);
+        const code = run.error.code;
+        if (code === "invalid_payload") {
+          const required = (spec.input_schema.required ?? []) as string[];
+          const fields = Object.entries(props).filter(([k]) => k !== "locale").map(([k, p]) => ({ name: k, type: typeof p.type === "string" ? p.type : "json", required: required.includes(k) }));
+          return c.json({ error: code, message: run.error.message, fields }, 400);
+        }
+        return c.json({ error: code, message: run.error.message }, code === "unknown_surface" ? 400 : code === "unexpected" ? 500 : 422);
       }
       return c.json({ url: run.silent ? undefined : run.link.url, conversationId, toolResult: run.content });
     });
