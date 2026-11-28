@@ -1,6 +1,6 @@
 {
   "name": "@ui-calling/core",
-  "version": "0.1.0-preview.0",
+  "version": "0.1.0-preview.1",
   "description": "Surfaces, handoff sessions and semantic events: let an AI agent call a UI like a function.",
   "license": "MIT",
   "repository": {

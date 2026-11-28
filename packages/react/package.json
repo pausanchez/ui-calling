@@ -1,6 +1,6 @@
 {
   "name": "@ui-calling/react",
-  "version": "0.1.0-preview.0",
+  "version": "0.1.0-preview.1",
   "description": "React bindings for ui-calling surfaces: typed data, semantic events, automatic lifecycle tracking.",
   "license": "MIT",
   "repository": {
@@ -52,7 +52,7 @@
     "removeNodeProtocol": false
   },
   "dependencies": {
-    "@ui-calling/core": "^0.1.0-preview.0"
+    "@ui-calling/core": "^0.1.0-preview.1"
   },
   "peerDependencies": {
     "react": ">=18"
