@@ -46,8 +46,9 @@ export const jobApplication = defineSurface({
     }),
     document_added: event(z.object({ files: z.array(z.string()).min(1).max(2) }), {
       describe: (p) => `Step 3 of 4: added ${p.files.length} photo${p.files.length === 1 ? "" : "s"} of their ID or work permit`,
+      reasons: ["unknown_photo"],
     }),
     // The finish line, and the only event that wakes the agent.
-    application_sent: event(z.object({}), { describe: () => "Step 4 of 4: sent the application", wake: true }),
+    application_sent: event(z.object({}), { describe: () => "Step 4 of 4: sent the application", wake: true, reasons: ["incomplete"] }),
   },
 });

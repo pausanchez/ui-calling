@@ -36,11 +36,14 @@ export const __const__ = defineSurface({
     details_saved: event(z.object({ details: z.string().max(500) }), {
       // JSON.stringify quotes what the user typed, so the agent reads it as their words.
       describe: (p) => `Step 1 of 3: entered details ${JSON.stringify(p.details)}`,
+      // The codes its handler may throw: the screen needs a message for each.
+      reasons: ["details_missing"],
     }),
     choice_saved: event(z.object({ choice: z.string().max(100) }), {
       describe: (p) => `Step 2 of 3: chose ${p.choice}`,
+      reasons: ["unknown_choice"],
     }),
     // The finish line: the only event that wakes the agent. On failure it reads as "Attempted: …".
-    submitted: event(z.object({}), { describe: () => "Step 3 of 3: submitted", wake: true }),
+    submitted: event(z.object({}), { describe: () => "Step 3 of 3: submitted", wake: true, reasons: ["incomplete"] }),
   },
 });

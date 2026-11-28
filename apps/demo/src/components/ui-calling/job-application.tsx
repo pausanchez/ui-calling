@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { pickLocalized, type SurfaceData } from "@ui-calling/core";
+import { pickLocalized, type SurfaceData, type SurfaceReason } from "@ui-calling/core";
 import { SurfaceActionError, useSurface, useSurfaceSteps } from "@ui-calling/react";
 import { Card, Shell, Skeleton, btn } from "./parts/screen-kit";
 import { ActionBar } from "./parts/action-bar";
@@ -42,7 +42,8 @@ const JOB_APPLICATION_MESSAGES = {
     offline: "We couldn't reach the server. Check your connection and try again.",
     failed: "That didn't go through. Your assistant already knows.",
     tryAgain: "Try again",
-    errors: { incomplete: "A step is missing. Go back and fill it in.", unknown_photo: "Upload the photo again." } as Record<string, string>,
+    // One message per reason the contract declares.
+    errors: { incomplete: "A step is missing. Go back and fill it in.", unknown_photo: "Upload the photo again." } satisfies Record<Reason, string>,
     unavailable: "This page isn't available right now",
     unavailableBody: "Your assistant already knows and will follow up in the chat.",
     refused: "This job isn't open any more",
@@ -80,7 +81,7 @@ const JOB_APPLICATION_MESSAGES = {
     offline: "No hemos podido conectar. Comprueba tu conexión e inténtalo de nuevo.",
     failed: "No se ha podido completar. Tu asistente ya lo sabe.",
     tryAgain: "Reintentar",
-    errors: { incomplete: "Falta un paso. Vuelve atrás y rellénalo.", unknown_photo: "Vuelve a subir la foto." } as Record<string, string>,
+    errors: { incomplete: "Falta un paso. Vuelve atrás y rellénalo.", unknown_photo: "Vuelve a subir la foto." } satisfies Record<Reason, string>,
     unavailable: "Esta página no está disponible ahora mismo",
     unavailableBody: "Tu asistente ya lo sabe y te escribirá por el chat.",
     refused: "Esta oferta ya no está abierta",
@@ -94,6 +95,7 @@ const JOB_APPLICATION_MESSAGES = {
 
 export type JobApplicationMessages = (typeof JOB_APPLICATION_MESSAGES)["en"];
 type Data = SurfaceData<typeof jobApplication>;
+type Reason = SurfaceReason<typeof jobApplication>;
 type Step = (typeof jobApplicationSteps)[number];
 
 /** The screen's states. The steps live in <Steps>, which only renders once the data is there. */
@@ -164,7 +166,7 @@ function Steps({ data, t }: { data: Data; t: JobApplicationMessages }) {
       }
     } catch (err) {
       const e = err instanceof SurfaceActionError ? err : null;
-      const known = e?.reason ? t.errors[e.reason] : undefined;
+      const known = e?.reason ? (t.errors as Record<string, string | undefined>)[e.reason] : undefined;
       setProblem({
         message: known ?? (!e || e.code === "network" ? t.offline : t.failed),
         retry: !known && (!e || e.retryable) ? { label: t.tryAgain, onClick: () => void next() } : undefined,

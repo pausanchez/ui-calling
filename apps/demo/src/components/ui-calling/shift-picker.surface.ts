@@ -44,6 +44,7 @@ export const shiftPicker = defineSurface({
         describe: (p) =>
           `Worker picked the shift on ${p.date}, ${p.start}–${p.end} at ${p.location} (${p.shift_id}) to replace their current one`,
         wake: true,
+        reasons: ["shift_changed", "shift_full", "shift_not_found", "shift_already_booked", "scheduling_api_unavailable"],
       },
     ),
   },
