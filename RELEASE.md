@@ -64,7 +64,8 @@ npm publish -w packages/cli --tag next
 - **`--tag next`:** npm 11 refuses to publish a prerelease (`0.1.0-preview.N`) without a tag. The first version of a package also becomes its `latest`, so `npm install @ui-calling/core` installs it; the stable release publishes without `--tag`.
 - **2FA:** npm needs two-factor authentication on the account to publish, and asks for it in the browser on each `npm publish`.
 - **Review:** a package's first publish can sit in npm's review for a while, showing only a placeholder (`0.0.0-stage`, "awaiting a staged release"). `npm view <name>` shows the real version once it's through.
-- **A version can't be published twice.** If one goes out wrong, fix it and bump that package (`0.1.0-preview.1`): the CLI's first preview lost its `bin` because the path started with `./`, and `test-cli` checks that now.
+- **A version can't be published twice.** If one goes out wrong, fix it and bump that package (`0.1.0-preview.1`).
+- **`bin` paths without `./`:** npm 11 rewrites `./bin/ui-calling.mjs` on publish with a warning that reads as if the command were removed (it isn't). `test-cli` checks the plain form, so the warning doesn't come back.
 
 Scoped packages publish as public (`publishConfig.access`).
 

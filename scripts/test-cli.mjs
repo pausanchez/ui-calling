@@ -28,7 +28,7 @@ function project(name, pkg, dirs = [], files = {}) {
 }
 
 rmSync(tmp, { recursive: true, force: true });
-// npm 11 publishes a bin path that starts with "./" without it, warning that it "was invalid and removed".
+// npm 11 rewrites a bin path that starts with "./" on publish, with a warning that it "was invalid and removed".
 const cliPkg = JSON.parse(readFileSync(join(root, "packages/cli/package.json"), "utf8"));
 for (const [name, path] of Object.entries(cliPkg.bin)) assert.ok(!path.startsWith("./"), `bin ${name}: write "${path.slice(2)}", not "${path}"`);
 try {
