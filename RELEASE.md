@@ -10,7 +10,7 @@ There are two releases, each with its own gate (decided 2026-11-28, replacing th
 
 **Stable (`0.1.0`, the "preview" label removed).** Real users first:
 - [ ] The event pilot below has run, and its findings are fixed or listed under "Known limits".
-- [ ] The coding-agent test passes against the packages on npm (section 5).
+- [x] The coding-agent test passes against the packages on npm (section 5): two fresh agents built a 5-step return from npm alone on 2026-11-28 (Next.js + Anthropic, Vite + AI SDK); their findings are fixed in the PR after `v0.1.0-preview.0`.
 - [ ] At least one product we don't own runs it with real users.
 
 ### The event pilot
@@ -83,5 +83,5 @@ Run it again after publishing, so the site shows the npm install.
 
 ## 5. After
 
-- [ ] In a new folder, install from npm, not tarballs: `npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite zod`, then `npx ui-calling init`, `new`, `link`.
-- [ ] Run the coding-agent test again against the published packages (same brief as PR #14).
+- [x] In a new folder, install from npm, not tarballs: `npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite zod`, then `npx ui-calling init`, `new`, `link`.
+- [x] Run the coding-agent test again against the published packages (same brief as PR #14).

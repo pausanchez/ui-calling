@@ -8,7 +8,7 @@ This guide is for people and coding agents adding surfaces to a product. Print i
 
 **Starting from a task?** The recipes give the whole answer for one job: a form with several steps, a photo upload, picking a slot that can fill up, linking a WhatsApp user, and more. List them with `npx ui-calling guide recipes` and print one with `npx ui-calling guide <recipe>`. This guide holds the rules and the reference they build on.
 
-> **Preview.** `0.1.0-preview` on npm: the API may still change. Install with `npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod`.
+> **Preview.** `0.1.0-preview` on npm: the API may still change. Install with `npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod`, plus the adapter for your agent SDK (`@ui-calling/anthropic`, `/ai-sdk`, `/openai` or `/mcp`). `init` prints anything else your framework needs (on Vite: `hono @hono/node-server tsx` for the API server).
 
 ## Mental model: three files per surface
 
@@ -115,7 +115,7 @@ Mount the API yourself, then route `/s/:token` to `<SurfaceScreen token={token} 
 
 Options: `--deliver message` (the model writes the link in its reply; for MCP and plain-text channels), `--dir`, `--server-dir`, `--framework next|vite|react-router|other`, `--base-url` (your dev address; also saved as `devUrl` for `link` and `events`; by default the port in your `dev` script, or the framework's), `--time-zone`, `--store sqlite|postgres` (run it again with the other one to switch `store.ts`; your surfaces stay registered). On a tsconfig with `"module": "nodenext"`, the generated imports end in `.js`. To set up again in another `--dir`, move the files and edit `ui-calling.json`, or pass `--force`.
 
-Screens show "Back to chat" when they know where the chat is (e.g. `https://wa.me/<business number>`, or your web chat's page), and "Finish" otherwise, which also calls `complete()`. On Next.js and React Router, set `UI_CALLING_RETURN_URL`, and `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise the tab shows your layout's title. On Vite, pass `returnUrl` to `<SurfaceScreen>` in `surface-route.tsx`.
+Screens show "Back to chat" when they know where the chat is (e.g. `https://wa.me/<business number>`, or your web chat's page), and "Finish" otherwise, which also calls `complete()`. On Next.js and React Router, set `UI_CALLING_RETURN_URL`, and `UI_CALLING_PAGE_TITLE` (e.g. your shop's name) for the browser tab; otherwise the tab shows your layout's title. On Vite, the same two are `VITE_UI_CALLING_RETURN_URL` and `VITE_UI_CALLING_PAGE_TITLE` (read in `surface-route.tsx`).
 
 Ready-made blocks: `npx ui-calling list`, then `npx ui-calling add order-status`. `add` copies the contract and the screen, and writes `order-status.server.ts` with example data so the screen renders right away. Replace the example with your data. Running `add --force` later updates the contract and screen but never overwrites the server file; `add --replace` rewrites all three, to swap a screen of your own for the block.
 
@@ -422,7 +422,7 @@ A link tracks the user's time on one screen, not your business process. Each sta
 - **Read IDs from `ctx.input`.** It's what the agent passed, typed by the contract, so a typo in the field that scopes the data is a compile error.
 - **Quote what the user typed.** In `describe` and `summarize`, write user text with `JSON.stringify(p.details)`, and give every string field a `.max()`. The runtime also puts what the screen reports on one line and escapes `<` and `>` before the agent reads it, so typed text can't close `<ui_events>` or fake a line.
 - **Keep payloads small and don't trust them.** The payload comes from the browser. Send IDs and the user's choices; let `summarize` give the agent the readable detail (dates, places, prices) from your own data. If the payload repeats what the user saw (e.g. a time), check it against your data in the handler and throw `SurfaceError` if it changed.
-- **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. When it's a business refusal (the shift filled up, the code was wrong) rather than an outage, add `refused: true`: the screen gets 422 `refused` instead of 502 `upstream_error`, so monitoring doesn't read it as your back office being down. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
+- **Errors are thrown, not swallowed.** Throw `SurfaceError(code, message, { retryable })` from `resolve` or handlers; the agent gets an `error` event. When only part of the screen depends on what failed, `ctx.reportError(err)` tells the agent and the screen still loads ([When only part of the screen fails](#when-only-part-of-the-screen-fails)). When it's a business refusal (the shift filled up, the code was wrong) rather than an outage, add `refused: true`: the screen gets 422 `refused` instead of 502 `upstream_error`, so monitoring doesn't read it as your back office being down. Its code and message go to the agent as written, so leave out secrets and stack traces. In the browser, call `reportError(err, "what the user was doing")` from `useSurface()` when a third-party SDK fails. Render crashes are reported automatically.
 - **The screen can explain failures.** A failed `emit` throws `SurfaceActionError`, and its `reason` is your `SurfaceError` code. Map known reasons to messages in the user's language ("that shift just filled up"), call `reload()` when the screen may be stale, and only offer "try again" for retryable failures.
 - **Declare the codes a handler throws.** `event(payload, { describe, reasons: ["shift_full", "shift_changed"] })` tells whoever reads the contract what can go wrong. In the screen, type the messages with `satisfies Record<SurfaceReason<typeof contract>, string>`, so a new code doesn't compile until it has a message. A code the event doesn't list still reaches the screen, and the server logs a warning.
 - **`complete()` means "the user is done here", and it closes the link.** Call it on the "back to chat" link or a final button, not after every action. It records a `completed` event and stops the screen counting as abandoned. From then on the link refuses everything (410, `error: "completed"`), so a tab left open or a forwarded link can't act again. The screen gets `status: "completed"`: show "all done" and a way back to the chat. `surface-screen.tsx` from `init` already does. If the user needs the screen again, the agent opens a new link.
@@ -604,6 +604,7 @@ When something behind the screen fails, the agent hears about it as an `error` e
 | Source | How it's caught | Example |
 |---|---|---|
 | `load` | `resolve` throws when the page opens | Orders API returns 503 |
+| `partial` | `ctx.reportError(err, context)` in `resolve`: the screen still loads | The carrier can't list pickup slots, but the rest of the return works |
 | `action` | An event handler throws; includes what the user tried | Carrier API times out while rescheduling |
 | `client` | `reportError(err, context)` from `useSurface()` | A maps or payments SDK fails in the browser |
 | `render` | Built-in error boundary in `<SurfaceProvider>` | A component crashes |
@@ -613,7 +614,24 @@ throw new SurfaceError("carrier_timeout", "Carrier API timed out after 10s", { r
 ```
 
 - Throw `SurfaceError` for failures you expect. Its code and message go to the agent as written, so keep them free of secrets. Other errors go through `describeError`. By default the agent gets a generic `unexpected` error and the real one is only logged on your server, since raw messages can carry secrets.
-- The first error of each kind in a session wakes the agent. Retries are still recorded, but they don't trigger a new message (`wakeOnError: false` turns waking off).
+- The first error with a given code in a session wakes the agent, whether it came from a load, a partial load or an action: one outage is one thing to tell it. The screen's own errors (`client`, `render`) wake it once per session. Later ones are still recorded, but they don't trigger a new message (`wakeOnError: false` turns waking off).
+
+### When only part of the screen fails
+
+Throwing in `resolve` takes the whole screen down, draft included. When one part depends on a third party and the rest doesn't (pickup slots in step 4 of a return), catch that call, return data that says the part isn't available, and pass the error to `ctx.reportError`:
+
+```ts
+resolve: async ({ order_id }, ctx) => {
+  const r = await loadReturn(order_id, ctx.subject);
+  const slots = await carrier.slots(r.address).catch(async (err) => {
+    await ctx.reportError(new SurfaceError("carrier_unavailable", "Carrier API timed out listing pickup slots", { retryable: true }), "loading pickup slots");
+    return null;
+  });
+  return { ...r, pickupOptions: slots ?? [], pickupUnavailable: !slots };
+},
+```
+
+The user keeps the screen and their draft, and the step says "can't load pickup times, try again in a minute". The agent gets an `error` event (`source: "partial"`) and is woken once per code for that link, however often `resolve` runs. It's ignored while the agent creates the link: the agent reads `summarize` then, so say it there too.
 - The screen shows the user a generic message in their language, never the upstream error.
 
 The demo has switches in its side panel to simulate outages.
@@ -630,6 +648,7 @@ Each one has its own status, so the screen, your monitoring and the agent can te
 | Infrastructure: your store or server failed | 500 `internal` | Nothing it can rely on: see below | Retry with the same key |
 | Still running: a retry while the first try runs | 409 `in_progress`, retryable | Nothing new | Wait and retry with the same key |
 | The link: expired, completed, another device, not verified | 410, 403 | Nothing new | Show the matching screen |
+| Part of the data: `ctx.reportError` in `resolve` | 200, with the data you returned | An `error` event that wakes it (first of each code) | Says that part isn't available |
 | In the browser: `reportError`, render crashes | (the screen reports it) | An `error` event, waking once per session | Its own fallback |
 
 ## Retries and failures
@@ -810,7 +829,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 |---|---|---|
 | Data in `input` | Personal data leaks into the URL and the LLM transcript | IDs in `input`, data in `resolve` |
 | Handler returns nothing after a change | The agent can't tell the user the outcome | Return the updated data |
-| `catch {}` around a failing API in `resolve` | The agent thinks everything worked | Throw `SurfaceError` |
+| `catch {}` around a failing API in `resolve` | The agent thinks everything worked | Throw `SurfaceError`, or, when the rest of the screen still works, `ctx.reportError(err)` and return data that says what's missing |
 | Click-level events ("button_clicked") | The context fills with noise | One event per meaningful fact |
 | Hard-coded strings in JSX | The screen ignores the conversation's language | Use the messages object |
 | `describe` written as an outcome ("Booked shift…") | A failure reads "did NOT go through. Attempted: Booked shift…" | Describe the request ("Picked shift…") |
@@ -877,7 +896,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `bindToDevice?` (only the first device that opens the link can use it), `verify?` (a PIN or code before any data loads), `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent), `includePayload?` (default `true`; `false` leaves the JSON out of what the agent reads when `describe` already says it), `reasons?` (the `SurfaceError` codes its handler may throw; `SurfaceReason<typeof contract>` is their union, for the screen's messages; an unlisted code logs a warning) |
 | `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any; `moment.time(date)` writes a time in `timeZone`), `on?: { [event]: (payload, ctx) => Promise<data \| ctx.unchanged() \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
-| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?), resolve(), unchanged(data?), eventKey? }`; `eventKey` (in handlers) is the key the screen sent with this action, the same on every retry: pass it to APIs that take an idempotency key; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface; `resolve()` runs `resolve` again with the link's input, for a handler to return; `unchanged(data?)` says the event changed nothing (not recorded, no wake) |
+| `ctx` | `{ subject, input, conversationId, locale, session, files(ids?), resolve(), unchanged(data?), reportError(err, context?), eventKey? }`; `reportError` records a failure of part of the screen for the agent (waking it once per code) without failing the load; `eventKey` (in handlers) is the key the screen sent with this action, the same on every retry: pass it to APIs that take an idempotency key; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface; `resolve()` runs `resolve` again with the link's input, for a handler to return; `unchanged(data?)` says the event changed nothing (not recorded, no wake) |
 | `new SurfaceError(code, message, { retryable?, refused? })` | An expected failure; `code` and `message` reach the agent, `code` reaches the screen as `reason`. `refused: true` for a business refusal (422, doesn't wake the agent) rather than an outage (502) |
 
 ### `UiEvent`
@@ -909,7 +928,7 @@ type UiEvent = {
 | `returned` | The user comes back to a screen they'd left | No |
 | `completed` | `complete()` is called; the link closes | No |
 | `abandoned` | No event whose contract says `wake: true` (and no failed action that woke the agent) by `abandonAfterMs` after the last activity, counted from the `opened` the screen reports (a `GET` of the session alone doesn't start it); names the last step saved, if any. A refused action doesn't count as finishing. Off unless set | Yes |
-| `error` | `resolve`, a handler, `reportError` or a render crash failed | First of each kind |
+| `error` | `resolve`, `ctx.reportError`, a handler, `reportError` or a render crash failed | First of each code (the screen's own: once) |
 
 ### React
 
@@ -932,7 +951,7 @@ What `@ui-calling/server` serves under your mount point, whichever handler you u
 | `POST /sessions/:token/files/:slot`, multipart with a `file` field | `200 { file: { id, slot, name, type, size } }` |
 | `GET /sessions/:token/files/:id` | The file's bytes, with its type, `nosniff` and a sandboxing CSP |
 | `DELETE /sessions/:token/files/:id` | `200 { ok: true }` |
-| `POST /dev/links` with `{ surface, input?, subject?, conversationId?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it. `422 { error, message }` when `resolve` refuses (e.g. `account_not_linked`) |
+| `POST /dev/links` with `{ surface, input?, subject?, conversationId?, locale? }` | Only with `dev: true`, never in production. `200 { url, conversationId, toolResult }`: a link for a test user, as the agent would get it. `422 { error, message }` when `resolve` refuses (e.g. `account_not_linked`); `400 { error: "invalid_payload", message, fields }` when the input doesn't match the contract (`fields`: each one's `name`, `type`, `required`); `500` when the server fails (the cause is in its log) |
 | `GET /dev/events/:conversationId?hide=left,returned&timeZone=…` | Only with `dev: true`. What the agent would read, as text, in the runtime's `timeZone` unless you pass one; `hide` leaves out event types |
 
 Errors are `{ error, message, retryable, reason }`. Once the link is known (`expired`, `completed`, `upstream_error`), they also carry `surface` and `locale`, so the screen can explain in the user's language:

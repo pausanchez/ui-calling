@@ -273,7 +273,7 @@ function allowTunnelInNextDev(done) {
  * the screen on /s/:token. Each step that can't be done safely on your files becomes a line in "Next" instead.
  */
 const API_PORT = 8787;
-function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg }) {
+function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg, devUrl }) {
   const serverEntry = join(serverLib, "index.ts");
   write(serverEntry, fill("vite-server.ts", { __UI_IMPORT__: importPath(serverEntry, runtime), __API_PORT__: String(API_PORT) }));
   const route = join(lib, "surface-route.tsx");
@@ -302,7 +302,10 @@ function setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg }) {
   const config = ["vite.config.ts", "vite.config.mts", "vite.config.js", "vite.config.mjs"].find((f) => existsSync(f));
   const c = config && readFileSync(config, "utf8");
   if (c && !c.includes("/api") && !/\bserver\s*:/.test(c) && /defineConfig\(\{\n/.test(c)) {
-    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // ui-calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { proxy: { "/api": \`http://localhost:\${process.env.API_PORT ?? ${API_PORT}}\` } },\n`));
+    // --base-url on another port than Vite's: the dev server has to listen there, or links point at nothing.
+    const port = new URL(devUrl).port;
+    const listen = port && port !== "5173" ? `port: ${port}, strictPort: true, ` : "";
+    writeFileSync(config, c.replace(/defineConfig\(\{\n/, `defineConfig({\n  // ui-calling: the screens call /api/ui, served by ${serverEntry.split(sep).join("/")} (npm run dev:api).\n  server: { ${listen}proxy: { "/api": \`http://localhost:\${process.env.API_PORT ?? ${API_PORT}}\` } },\n`));
     console.log(`  update ${config}`);
     done.push(`/api proxied to the API in ${config}`);
   } else if (!c?.includes("/api")) {
@@ -460,7 +463,7 @@ function init() {
     allowTunnelInNextDev(done);
   }
   const todo = [];
-  if (framework === "vite") setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg });
+  if (framework === "vite") setUpVite({ lib, serverLib, runtime, screen, done, todo, pkg, devUrl });
   if (framework === "react-router") setUpReactRouter({ runtime, screen, done, todo });
   done.push(`times for the agent in ${timeZone} (timeZone in ${runtime}; --time-zone to change)`);
   if (switching) done.push(`store switched to ${storeFlag} in ${join(serverLib, "store.ts")}`);
@@ -632,9 +635,12 @@ async function devCommand(which) {
       const db = raw?.store === "postgres" ? " With the Postgres store, the usual cause is a database that isn't reachable: check DATABASE_URL." : "";
       console.error(`The server failed opening the screen. The cause is in your dev server's log ("[ui-calling] unexpected error").${db}`);
     } else if (json.error && json.error !== "unknown_surface" && res.status === 422) {
-      // A refusal from resolve: say which, and the usual cause (the test user isn't linked to anyone yet).
+      // A refusal from resolve: say which. Only a refusal about the account gets the linking hint; anything else
+      // (an order that isn't theirs, a closed shift) is about the input.
       console.error(`The screen refused subject "${subject}": ${json.error}: ${json.message}`);
-      console.error(`In development, give "${subject}" a test account at startup (with the link-account block: identity.link("${subject}", "<customer id>")), or pass --subject <a linked subject>.`);
+      if (/link|account|customer|identity|unknown_user/i.test(`${json.error}`)) {
+        console.error(`In development, give "${subject}" a test account at startup (with the link-account block: identity.link("${subject}", "<customer id>"), or your own table of subject → customer), or pass --subject <a linked subject>.`);
+      } else console.error(`That's your resolve refusing this input for "${subject}". Check the IDs you passed, or pass --subject for another test user.`);
     } else console.error(json.message ?? json.error ?? `HTTP ${res.status}`);
     process.exit(1);
   }
@@ -663,11 +669,13 @@ async function devCommand(which) {
 }
 
 /**
- * Recipes link to demo and package files by relative path, which works in the repo but goes nowhere from the
- * CLI: print them as GitHub links instead. Links to other recipes (x.md) stay as they are.
+ * The guide and recipes link to repo files by relative path, which works in the repo but goes nowhere from the
+ * CLI: print them as GitHub links instead. A link to another recipe (x.md) becomes the command that prints it.
  */
-function repoLinks(md) {
-  return md.replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui-calling/blob/main/${posix.normalize(posix.join("packages/cli/recipes", rel))})`);
+function repoLinks(md, from = "packages/cli/recipes") {
+  return md
+    .replace(/\]\((\.\.\/[^)#]+)\)/g, (_, rel) => `](https://github.com/pausanchez/ui-calling/blob/main/${posix.normalize(posix.join(from, rel))})`)
+    .replace(/\[([^\]]+)\]\(([a-z-]+)\.md\)/g, (_, text, name) => `${text} (npx ui-calling guide ${name})`);
 }
 
 // `<command> --help` shows that command's usage instead of running it.
@@ -777,7 +785,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
     const recipesDir = join(pkgDir, "recipes");
     const recipes = readdirSync(recipesDir).filter((f) => f.endsWith(".md") && f !== "README.md").map((f) => f.slice(0, -3));
     const [topic] = names;
-    const guide = readFileSync(join(pkgDir, "GUIDE.md"), "utf8");
+    const guide = repoLinks(readFileSync(join(pkgDir, "GUIDE.md"), "utf8"), "packages/cli");
     // The guide's sections, by their ## heading: `guide toc` lists them, `guide <section>` prints one. A ### heading
     // works too (guide vite), printing just that part.
     const slug = (title) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -795,7 +803,7 @@ switch (rest.includes("--help") || rest.includes("-h") ? "help" : cmd) {
       console.log("Sections (npx ui-calling guide <section>, or one word of it, e.g. guide agent):\n");
       for (const x of sections) console.log(`  ${x.slug.padEnd(38)} ${x.title}`);
       console.log(`\nRecipes (npx ui-calling guide <recipe>): ${recipes.join(", ")}`);
-    } else if (topic === "recipes") process.stdout.write(readFileSync(join(recipesDir, "README.md"), "utf8"));
+    } else if (topic === "recipes") process.stdout.write(repoLinks(readFileSync(join(recipesDir, "README.md"), "utf8")));
     else if (recipes.includes(topic)) process.stdout.write(repoLinks(readFileSync(join(recipesDir, `${topic}.md`), "utf8")));
     else if (section) process.stdout.write(section.text);
     else {

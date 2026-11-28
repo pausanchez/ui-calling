@@ -133,5 +133,5 @@ export class SurfaceError extends Error {
   }
 }
 
-/** Where a failure happened, as reported to the agent. */
-export type ErrorSource = "load" | "action" | "client" | "render";
+/** Where a failure happened, as reported to the agent. "partial": `ctx.reportError` (the screen loaded without a part). */
+export type ErrorSource = "load" | "partial" | "action" | "client" | "render";

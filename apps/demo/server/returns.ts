@@ -6,7 +6,7 @@ type Return = SurfaceData<typeof orderReturn>;
 type Draft = Return["draft"];
 type Step = Draft["step"];
 type Slot = Return["pickupOptions"][number];
-type Order = Omit<Return, "draft" | "submitted" | "pickupOptions" | "uploaded"> & { owner: string };
+type Order = Omit<Return, "draft" | "submitted" | "pickupOptions" | "pickupUnavailable" | "uploaded"> & { owner: string };
 /** A return as the returns system knows it; the screen adds this link's uploads (see order-return.server.ts). */
 export type StoredReturn = Omit<Return, "uploaded">;
 
@@ -100,7 +100,7 @@ export function getReturn(orderId: string, subject: string, prefill?: { sku?: st
     drafts.set(orderId, { ...current, draft: { ...current.draft, lines: [...current.draft.lines, line] } });
   }
   const { owner, ...rest } = order;
-  return { ...rest, ...drafts.get(orderId)!, pickupOptions: [...pickups.values()] };
+  return { ...rest, ...drafts.get(orderId)!, pickupOptions: [...pickups.values()], pickupUnavailable: false };
 }
 
 /** Save a step: merge it into the draft and move the furthest step reached forward, never back. */

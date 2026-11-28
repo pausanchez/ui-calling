@@ -20,7 +20,14 @@ const money = (r: StoredReturn, n: number) => `${n.toFixed(2)} ${r.currency}`;
 
 /** Server-side half of "order_return": a return draft saved step by step, then filed with a carrier pickup. */
 export const orderReturnImpl = implement(orderReturn, {
-  resolve: async ({ order_id, sku, reason }, ctx) => withUploads(getReturn(order_id, ctx.subject, { sku, reason }), ctx),
+  resolve: async ({ order_id, sku, reason }, ctx) => {
+    const r = await withUploads(getReturn(order_id, ctx.subject, { sku, reason }), ctx);
+    // The carrier lists the pickup slots. When it's down, the rest of the return still works: say so on the pickup
+    // step, keep the draft, and tell the agent (once) instead of failing the whole screen.
+    if (!failures.carrierApi) return r;
+    await ctx.reportError(new SurfaceError("carrier_unavailable", "Carrier API timed out listing pickup slots", { retryable: true }), "loading pickup slots");
+    return { ...r, pickupOptions: [], pickupUnavailable: true };
+  },
   // Everything the screen shows, in one line: where the user is, what they picked, and the outcome.
   summarize: (r) => {
     const name = (sku: string) => r.items.find((i) => i.sku === sku)?.name ?? sku;
@@ -40,7 +47,7 @@ export const orderReturnImpl = implement(orderReturn, {
       `${head} Draft, reached step ${step} of 5 (${r.draft.step}). Items: ${lines || "none chosen yet"}. ` +
       `Photos: ${r.draft.photos.length}${needsPhotos(r) ? " (required for damaged or wrong items)" : ""}. ` +
       `Refund: ${r.draft.refund?.replace("_", " ") ?? "not chosen"}. ` +
-      `Pickup: ${r.draft.pickup ? `${r.draft.pickup.date}, ${r.draft.pickup.window}` : "not chosen"}. ` +
+      `Pickup: ${r.draft.pickup ? `${r.draft.pickup.date}, ${r.draft.pickup.window}` : "not chosen"}${r.pickupUnavailable ? " (no slots to offer now: the carrier isn't answering)" : ""}. ` +
       `Not returnable: ${r.items.filter((i) => !i.returnable).map((i) => i.name).join(", ") || "none"}.`
     );
   },

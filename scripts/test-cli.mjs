@@ -160,7 +160,13 @@ try {
   assert.equal(read("init-vite", "src/ui-calling/surface-screen.tsx").match(/link_account:/g)?.length, 1);
   assert.match(read("init-vite", "server/identity.ts"), /from "\.\/store";/);
   assert.match(fails(vite, "add", "link-account", "--identifier", "fax"), /email, tel, text/);
-  console.log("generated  init-vite (+2 surfaces, +1 block)");
+  // --base-url on another port: Vite is told to listen there, so links open.
+  const vitePort = project("init-vite-port", { scripts: { dev: "vite" }, devDependencies: { vite: "7" } }, ["src"], {
+    "vite.config.ts": "import { defineConfig } from 'vite'\n\nexport default defineConfig({\n  plugins: [],\n})\n",
+  });
+  run(vitePort, "init", "--base-url", "http://localhost:5181");
+  assert.match(read("init-vite-port", "vite.config.ts"), /server: \{ port: 5181, strictPort: true, proxy:/);
+  console.log("generated  init-vite (+2 surfaces, +1 block), init-vite-port");
 
   // Postgres: installed, so init writes the Postgres store; the steps template uses its drafts the same way, and a
   // block that needs SQLite is refused with a reason.
@@ -263,7 +269,7 @@ try {
   const index = run(tmp, "guide", "recipes");
   for (const f of recipes) {
     const name = f.slice(0, -3);
-    assert.ok(index.includes(`(${f})`), `recipes/README.md lists ${name}`);
+    assert.ok(index.includes(`(npx ui-calling guide ${name})`), `recipes/README.md lists ${name}`);
     const text = run(tmp, "guide", name);
     for (const [, link] of text.matchAll(/\]\(([^)#]+\.(?:md|ts|tsx))\)/g)) {
       // From the CLI, repo files are GitHub links (the repo has no other address for someone with only the package).
@@ -271,11 +277,16 @@ try {
       const onDisk = repoPath === link ? join(recipesDir, link) : join(root, repoPath);
       assert.ok(existsSync(onDisk), `${f} links to ${link}, which doesn't exist`);
     }
+    for (const [, other] of text.matchAll(/\(npx ui-calling guide ([a-z-]+)\)/g)) assert.ok(recipes.includes(`${other}.md`), `${f} points at recipe ${other}, which doesn't exist`);
   }
   assert.match(fails(tmp, "guide", "no-such-recipe"), /No section or recipe "no-such-recipe"/);
   // Sections by heading, or by one word of it.
   assert.match(run(tmp, "guide", "toc"), /testing-without-servers/);
   assert.match(run(tmp, "guide", "testing"), /^## Testing without servers/);
+  // From the CLI, the guide's repo links go to GitHub, not to paths that only exist in the repo.
+  const printed = run(tmp, "guide");
+  assert.doesNotMatch(printed, /\]\(\.\.\//);
+  assert.match(printed, /https:\/\/github\.com\/pausanchez\/ui-calling\/blob\/main\/scripts\/test-guarantees\.ts/);
   console.log(`ok         ${recipes.length} recipes listed, printed, and their links resolve`);
 
   writeFileSync(join(tmp, "tsconfig.json"), JSON.stringify({ extends: "../tsconfig.json", include: ["./**/*.ts", "./**/*.tsx"] }));

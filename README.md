@@ -108,10 +108,10 @@ No API key? A scripted agent runs the same loop. Options, resets and running it 
 
 ## Get started
 
-Install the packages, then set it up in your app and generate your first screen:
+Install the packages and the adapter for your agent SDK (here Anthropic's), then set it up in your app and generate your first screen. `init` prints anything else your framework needs.
 
 ```bash
-npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite ui-calling zod
+npm install @ui-calling/core @ui-calling/server @ui-calling/react @ui-calling/sqlite @ui-calling/anthropic ui-calling zod
 npx ui-calling init
 npx ui-calling new shift-picker
 ```
