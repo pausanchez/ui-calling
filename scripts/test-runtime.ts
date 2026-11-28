@@ -194,6 +194,36 @@ await check("abandon: a user who stops partway through the steps is reported, wi
   assert.ok(!(await flaky.events("c12")).some((e) => e.type === "abandoned"));
 });
 
+await check("abandon: finishing counts even when the finishing event didn't wake the agent", async () => {
+  // With no wakes left (here none at all), "submitted" is recorded quietly: the user still finished.
+  const form = defineSurface({
+    name: "form",
+    description: "A form.",
+    input: z.object({}),
+    data: z.object({}),
+    events: { submitted: event(z.object({}), { describe: () => "User submitted the form", wake: true }) },
+  });
+  const ui = createUiCalling({
+    baseUrl: "https://ui.example.com",
+    abandonAfterMs: 30,
+    maxWakesPerMinute: 0,
+    surfaces: [implement(form, { resolve: async () => ({}), summarize: () => "Form." })],
+  });
+  const t = token((await ui.call("show_form", {}, { conversationId: "c40", subject: "user-40" })).url);
+  // Two tabs opening it at once: one first open, one return, and one abandon timer.
+  const opens = await Promise.all([ui.emit(t, "opened"), ui.emit(t, "opened")]);
+  assert.deepEqual(opens.map((o) => o.event?.type).sort(), ["opened", "returned"]);
+  assert.equal((await ui.emit(t, "submitted", {})).event?.wake, false);
+  await sleep(80);
+  assert.ok(!(await ui.events("c40")).some((e) => e.type === "abandoned"), "a finished screen isn't abandoned");
+  // And an untouched one is abandoned once, however many timers or sweeps look at it.
+  const idle = token((await ui.call("show_form", {}, { conversationId: "c41", subject: "user-41" })).url);
+  await Promise.all([ui.emit(idle, "opened"), ui.emit(idle, "opened")]);
+  await sleep(80);
+  await Promise.all([ui.sweep(), ui.sweep()]);
+  assert.equal((await ui.events("c41")).filter((e) => e.type === "abandoned").length, 1);
+});
+
 await check("errors: unexpected messages and redacted values never reach the agent", async () => {
   console.error = () => {};
   const t = await mint("c5");

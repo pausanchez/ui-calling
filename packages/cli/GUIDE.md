@@ -350,7 +350,7 @@ async function runTurn(conversationId: string, subject: string, userText?: strin
 - **Show that it's thinking.** A woken turn starts while the user is on the screen. Count turns waiting or running per conversation around `ui.turn` and show "typing…" in your chat while it's above zero.
 - **The agent module must be loaded for its `ui.onEvent` to run.** Where routes load lazily (React Router, serverless functions), a server that just restarted has no listener until something imports the agent, and a screen event's wake is lost (its context isn't: the cursor picks it up on the next message). Import the agent module from the route that mounts the API.
 - **`onEvent` never holds up the screen.** The user's request returns without waiting for the promise you return, and if `onEvent` throws, the error is logged and the action still counts. So start the turn and return; don't do the work inline.
-- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. `ui.turn` keeps turns apart across instances as long as they share a store that implements `acquireTurn`/`releaseTurn` (see "Persistence"); a store without them only serializes within one process, and says so in a warning. On serverless, keep the function alive for the turn with `waitUntil(ui.turn(...))` instead of returning before it ends, or hand it to a job queue.
+- **Several instances or serverless:** `onEvent` is called from the screen's `POST /events` request, on whichever instance got it. `ui.turn` keeps turns apart across instances as long as they share a store that implements `acquireTurn`/`releaseTurn` (see "Persistence"); a store without them only serializes within one process, and says so in a warning. On serverless, keep the function alive for the turn with `waitUntil(ui.turn(...))` instead of returning before it ends, or hand it to a job queue. Abandon timers don't fire there either: set `abandonTimers: false` and call `ui.sweep()` from a cron.
 
 ## Prompting the agent
 
@@ -611,7 +611,7 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
 - **Where the file goes:** `.ui-calling/ui-calling.db` in production. In development it's `node_modules/.cache/ui-calling/`: Next's dev server watches the whole project, and a database inside it reloads the page on every event, so the screen never finishes loading. Pass a path to choose your own; on Vite, `init` passes `.ui-calling/dev.db`, which survives a clean install.
 - **Tests** set `UI_CALLING_DB` (a temp file, or `:memory:`) before importing your runtime, so they never touch the dev database.
 - **Your own tables** (drafts, mock data) can live in the same file: `store.db` is the open `DatabaseSync`. `init` puts the store in its own `store.ts`, so your server code can import it without importing `ui.ts`.
-- **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left.
+- **Abandon timers** for screens that were open when the process stopped are re-armed on start, with the time they had left. Where no process stays alive (serverless), set `abandonTimers: false` and call `ui.sweep()` from a cron instead.
 - **The default `MemoryStore`** forgets everything on restart. It's what the tests use.
 - **On serverless hosts without a lasting disk,** implement `UiStore` for your database. Its `listEvents` must honor `after` (an event ID: return only events appended after it) and `limit`, and throw `UnknownEventError` for an ID it doesn't have. The `contract()` checks in [scripts/test-store.ts](../../scripts/test-store.ts) run against any store; copy them into your tests.
 - **Turn leases on several instances:** implement `acquireTurn(conversationId, holder, ttlMs)` and `releaseTurn(conversationId, holder)` too, or `ui.turn` keeps turns apart only within one process. `acquireTurn` must be one atomic write that succeeds when the lease is free, expired or already `holder`'s (that renews it). In Postgres:
@@ -627,6 +627,8 @@ createUiCalling({ store: sqliteStore(), ... })   // from @ui-calling/sqlite: .ui
   ```
 
   `sqliteStore()` does the same in its `ui_turns` table, so processes sharing one file (a cluster on one machine) keep turns apart too.
+- **Status moves on several instances:** implement `updateSessionIf(id, status, patch)` as one conditional write that returns whether it changed a row (`UPDATE ui_sessions SET … WHERE id = $1 AND status = $2`). Without it, two tabs or instances can both record the first `opened`, or both mark a screen `abandoned` and wake the agent twice. Add `countEvents` so each event doesn't read the session's whole history to check its limits.
+- **SQLite is one machine.** Instances on different machines don't share its file, so `ui.turn`, the first open and abandon are only kept apart by a store they all reach, such as your database.
 
 The demo keeps its own state in the same file, so you can restart it mid-conversation. Old links still open, and the agent still remembers what happened.
 
@@ -720,9 +722,10 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `surfaces` | required | The `implement(…)` results to expose as tools |
 | `baseUrl` | required | Public origin of your screens; links are `baseUrl + pathPrefix + token` |
 | `pathPrefix` | `"/s/"` | Path in front of the token |
-| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after`; add `acquireTurn`/`releaseTurn` so `ui.turn` works across instances |
+| `store` | in memory | Where sessions and events live: `sqliteStore()` or your own `UiStore`. A custom store's `listEvents` must honor `after` and `limit`, and throw `UnknownEventError` for an unknown `after`; add `acquireTurn`/`releaseTurn` so `ui.turn` works across instances, and `updateSessionIf` so opens and abandons are recorded once |
 | `ttlSeconds` | `3600` | Link lifetime; a surface's own `ttlSeconds` wins |
-| `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen goes this long without activity and hasn't finished (no event with `wake: true`) |
+| `abandonAfterMs` | off | Record a waking `abandoned` event if an opened screen goes this long without activity and hasn't finished (no event whose contract says `wake: true`) |
+| `abandonTimers` | `true` | Check for abandon with in-process timers. `false` on serverless, where they never fire: call `ui.sweep()` from a cron instead |
 | `onEvent` | none | `(event: UiEvent) => void \| Promise<void>`, called for every recorded event |
 | `onSilentWake` | none | `({ conversationId, subject, reason, at }) => void \| Promise<void>`, called each time a woken turn calls `stay_silent`: count wakes that cost tokens and said nothing |
 | `toolPrefix` | `"show_"` | Tool name is `toolPrefix + surface name` |
@@ -749,6 +752,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `ui.onSilentWake(handler)` | Like the `onSilentWake` option, from code that imports `ui`. Returns an unsubscribe function |
 | `ui.forget({ conversationId } \| { subject } \| { expiredBefore })` | Deletes matching sessions with their events and files: a deletion request, or a retention policy run on a schedule. Returns the counts |
 | `ui.ready` | Resolves once abandon timers from before a restart are re-armed |
+| `ui.sweep()` | Records `abandoned` for every opened screen idle past `abandonAfterMs`, now. For a cron where timers don't run (`abandonTimers: false`); safe on several instances. Returns `{ abandoned }` |
 | `ui.timeZone` | The zone times are written in for the agent (`timeZone`, default `"UTC"`): pass it to `formatEventsForAgent` |
 
 `who` is `{ conversationId, subject }`: the conversation events report to, and the user the data is scoped to.
@@ -791,7 +795,7 @@ type UiEvent = {
 | `left` | The tab is hidden or closed | No |
 | `returned` | The user comes back to a screen they'd left | No |
 | `completed` | `complete()` is called; the link closes | No |
-| `abandoned` | No event with `wake: true` (and no failed action that woke the agent) by `abandonAfterMs` after the last activity, counted from the `opened` the screen reports (a `GET` of the session alone doesn't start it); names the last step saved, if any. A refused action doesn't count as finishing. Off unless set | Yes |
+| `abandoned` | No event whose contract says `wake: true` (and no failed action that woke the agent) by `abandonAfterMs` after the last activity, counted from the `opened` the screen reports (a `GET` of the session alone doesn't start it); names the last step saved, if any. A refused action doesn't count as finishing. Off unless set | Yes |
 | `error` | `resolve`, a handler, `reportError` or a render crash failed | First of each kind |
 
 ### React

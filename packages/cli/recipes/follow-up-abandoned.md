@@ -17,7 +17,7 @@ export const ui = createUiCalling({
 
 ## What the agent gets
 
-The finish line is any event with `wake: true`, or a failed action that woke the agent (an outage: the agent already heard about it). A refusal, like a wrong code, doesn't count: the user may have given up after it. If neither happened and the user has been idle for `abandonAfterMs`, the runtime records one `abandoned` event, which wakes the agent:
+The finish line is any event whose contract says `wake: true` (even one recorded quietly past `maxWakesPerMinute`), or a failed action that woke the agent (an outage: the agent already heard about it). A refusal, like a wrong code, doesn't count: the user may have given up after it. If neither happened and the user has been idle for `abandonAfterMs`, the runtime records one `abandoned` event, which wakes the agent:
 
 | What the user did | What the agent reads |
 |---|---|
@@ -41,7 +41,7 @@ In the demo the reply is specific because the event names the step: "I saw you s
 
 - **One nudge, not a reminder series.** `abandoned` fires once per link. If you want more, schedule them yourself and respect the user's silence.
 - **`wake: true` only on the real finish.** A wake event in the middle of a flow (say, on step 1) counts as finishing, and no `abandoned` will ever come.
-- **Timers live in the process.** They're re-armed after a restart, but on serverless nothing runs between requests. There, check open sessions from a scheduled job instead.
+- **Timers live in the process.** They're re-armed after a restart, but on serverless nothing runs between requests. There, set `abandonTimers: false` and call `ui.sweep()` from a cron every minute or so; it's safe on several instances at once.
 - **The link stays valid** until it expires, so "the link still works" is true. Check `ttlSeconds` before promising it.
 
 ## In the ui-calling repo
