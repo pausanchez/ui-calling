@@ -14,8 +14,14 @@ export type UiSession = {
   createdAt: string;
   expiresAt: string;
   openedAt?: string;
-  /** For surfaces with `bindToDevice`: the hash of the secret the first browser to open the link got as a cookie. */
+  /** For `bindToDevice` surfaces: the hash of the secret the first browser to open the link got as a cookie. */
   deviceHash?: string;
+  /** For `verify` surfaces: when the user proved who they are on this link. */
+  verifiedAt?: string;
+  /** For `verify` surfaces: wrong PINs or codes typed on this link. */
+  verifyFailures?: number;
+  /** For `verify` surfaces: codes sent for this link. */
+  verifySends?: number;
 };
 
 /** A file uploaded from a screen. Its bytes live in the store; events and the agent only see this. */
@@ -75,11 +81,13 @@ export class UiCallingError extends Error {
       | "too_many_events"
       | "invalid_file"
       | "refused"
-      | "other_device",
+      | "other_device"
+      | "verification_required"
+      | "verification_locked",
     message: string,
     public status: 400 | 403 | 404 | 410 | 422 | 429 | 502 = code === "not_found"
       ? 404
-      : code === "other_device"
+      : code === "other_device" || code === "verification_required" || code === "verification_locked"
         ? 403
       : code === "expired" || code === "completed"
         ? 410

@@ -19,7 +19,7 @@ globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
 const { app, CONVERSATION } = await import("./app");
 const { settled } = await import("./agent");
 const { ui } = await import("./ui");
-const { DEMO_CODE } = await import("./identity");
+const { DEMO_CODE, DEMO_PIN } = await import("./identity");
 const { createHmac } = await import("node:crypto");
 
 type Chat = {
@@ -126,6 +126,29 @@ await check("shifts: Spanish chat opens the picker in Spanish", async () => {
   const reply = await say("Hola, ¿qué turnos hay disponibles? Quiero cambiar el mío");
   assert.equal(reply.cta?.label, "Elegir turno");
   assert.equal((await call("GET", `/api/ui/sessions/${token(reply.cta!.url)}`)).json.locale, "es");
+});
+
+await check("shifts: the rota needs the worker's PIN; wrong ones are refused quietly, and the data only comes after", async () => {
+  const t = token((await chat()).chat.find((m) => m.cta)!.cta!.url);
+  const before = (await call("GET", `/api/ui/sessions/${t}`)).json;
+  assert.deepEqual(before.verify, { kind: "pin", attemptsLeft: 5 });
+  assert.equal(before.data, undefined, "nothing about the worker before the PIN");
+  assert.equal((await event(t, "shift_selected", {})).status, 403, "no actions before the PIN");
+  const wrong = await call("POST", `/api/ui/sessions/${t}/verify`, { code: "0000" });
+  assert.equal(wrong.status, 422);
+  assert.equal(wrong.json.reason, "wrong_code");
+  const recorded = await lastEvent("error");
+  assert.equal(recorded.wake, false, "a wrong PIN doesn't wake the agent");
+  assert.doesNotMatch(JSON.stringify(await chat()), /"0000"/, "what the user typed never reaches the agent");
+  const right = await call("POST", `/api/ui/sessions/${t}/verify`, { code: DEMO_PIN });
+  assert.equal(right.status, 200);
+  assert.ok(right.json.data.open.length, "the rota comes with the right PIN");
+  assert.equal((await call("GET", `/api/ui/sessions/${t}`)).json.verify, undefined, "once per link");
+  // A link that locks wakes the agent, which says why in the chat's language.
+  const locked = token((await say("¿Qué turnos hay?")).cta!.url);
+  for (let i = 0; i < 5; i++) await call("POST", `/api/ui/sessions/${locked}/verify`, { code: "9999" });
+  await settled(CONVERSATION);
+  assert.match((await chat()).chat.at(-1)!.text, /bloqueado/);
 });
 
 await check("shifts: a full shift is refused with a reason (422, not an outage); a free one books and the code reaches the agent", async () => {

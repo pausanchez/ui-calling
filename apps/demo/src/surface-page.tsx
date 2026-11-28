@@ -1,4 +1,4 @@
-import { SurfaceProvider, useSurfaceSession } from "@ui-calling/react";
+import { SurfaceProvider, VerifyStep, useSurfaceSession } from "@ui-calling/react";
 import { OrderStatus } from "./components/ui-calling/order-status";
 import { LinkAccount } from "./components/ui-calling/link-account";
 import { OrderReturn } from "./components/ui-calling/order-return";
@@ -11,7 +11,14 @@ export function SurfacePage({ token }: { token: string }) {
   const wa = new URLSearchParams(location.search).get("wa");
   const returnUrl = wa && /^\d{6,15}$/.test(wa) ? `https://wa.me/${wa}` : "/";
   return (
-    <SurfaceProvider token={token} returnUrl={returnUrl}>
+    <SurfaceProvider
+      token={token}
+      returnUrl={returnUrl}
+      // The built-in PIN step, with the demo's PIN under it (DEMO_PIN in server/identity.ts).
+      verifyScreen={(p) => (
+        <VerifyStep {...p} note={<p className="text-center text-sm text-muted-foreground">{p.locale.startsWith("es") ? "PIN de la demo" : "Demo PIN"}: 1357</p>} />
+      )}
+    >
       <Router />
     </SurfaceProvider>
   );

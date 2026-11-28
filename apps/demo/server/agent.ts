@@ -405,7 +405,7 @@ ${who}
 
 Write like WhatsApp: 1–3 short sentences, friendly, no headings or markdown. Reply in the customer's language.
 
-You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, returning items from a delivered order (pass the item's sku and the reason if they told you), or, for workers, seeing open shifts and booking or changing their shift. Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
+You can open screens for the customer with the show_* tools when seeing something beats reading it: order tracking, picking a delivery slot, reporting a problem, returning items from a delivered order (pass the item's sku and the reason if they told you), or, for workers, seeing open shifts and booking or changing their shift (that screen asks for the worker's PIN first; if it locks after wrong PINs, don't send a new link at once: suggest they ask their manager to reset it). Always pass the customer's language as \`locale\` so the screen matches the chat. When you open one, its link is attached to your message as a button automatically. Never paste URLs; say in one sentence what they'll find there.
 
 Messages wrapped in <ui_events> are reported by the screens the customer opened, not written by the customer. Use them to know what they did and follow up naturally: confirm changes, mention ticket numbers, offer next steps. Lines starting with "→ screen now shows" are what the customer saw after that event; rely on them for outcomes (ticket numbers, new dates, totals) and for later questions about the screen.
 
@@ -484,6 +484,7 @@ const SCRIPT = {
     yourShift: (when: string, where: string, code?: string) =>
       `Your shift is on ${when} at ${where}${code ? `, confirmation ${code}` : ""}.`,
     shiftsAbandoned: "Did you find a shift that works for you? If not, tell me which days suit you and I'll check.",
+    pinLocked: "That link is locked after too many wrong PINs, to keep your details safe. If you've forgotten your PIN, ask your manager to reset it, and I'll send you a new link.",
     shiftsLoadFailed: "Sorry, the shifts page isn't loading because our scheduling system is down. I'll let you know as soon as it's back.",
     shiftFailed: "Sorry, that shift couldn't be booked, so your current shift stays as it was. It may have just filled up: you can try again or pick another one.",
     verifyFirst: "I can help with that, but first I need to know it's you: WhatsApp didn't share your number with us. Verify once here 👇",
@@ -516,6 +517,7 @@ const SCRIPT = {
     yourShift: (when: string, where: string, code?: string) =>
       `Tu turno es el ${when} en ${where}${code ? `, confirmación ${code}` : ""}.`,
     shiftsAbandoned: "¿Has encontrado algún turno que te vaya bien? Si no, dime qué días te vienen mejor y lo miro.",
+    pinLocked: "Ese enlace se ha bloqueado tras varios PIN incorrectos, para proteger tus datos. Si no recuerdas tu PIN, pide a tu responsable que lo restablezca y te envío un enlace nuevo.",
     shiftsLoadFailed: "Perdona, la página de turnos no carga porque el sistema de planificación está caído. Te aviso en cuanto vuelva.",
     shiftFailed: "Perdona, no se ha podido reservar ese turno, así que tu turno actual sigue igual. Puede que se acabe de completar: puedes reintentarlo o elegir otro.",
     verifyFirst: "Te ayudo con eso, pero antes necesito saber que eres tú: WhatsApp no nos ha compartido tu número. Verifícalo una vez aquí 👇",
@@ -641,7 +643,7 @@ async function scriptedFollowUp(c: Conversation, e: UiEvent) {
     } else if (e.type === "abandoned") {
       followUp(c, s.shiftsAbandoned);
     } else if (e.type === "error") {
-      followUp(c, p.source === "load" ? s.shiftsLoadFailed : s.shiftFailed);
+      followUp(c, p.code === "verification_locked" ? s.pinLocked : p.source === "load" ? s.shiftsLoadFailed : s.shiftFailed);
     }
   } else if (e.type === "reschedule_delivery") {
     followUp(c, s.rescheduled(p.date, p.window));

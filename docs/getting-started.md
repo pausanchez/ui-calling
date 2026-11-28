@@ -140,15 +140,13 @@ The demo also answers a real WhatsApp number, using a Meta test number on the Wh
 npm run dev:whatsapp
 ```
 
-It opens a tunnel, starts the demo with `PUBLIC_URL` set to it, points the Meta app's webhook there and prints `Ready`. Message the test number. Your number isn't linked to a demo customer, so the agent first sends a linking screen: use `lucia.romero@example.com` and code `246810`. At every start the demo prints one `WhatsApp` line that names an expired token or a webhook pointing at an old address.
+It opens a tunnel, starts the demo with `PUBLIC_URL` set to it, points the Meta app's webhook there and prints `Ready`. Message the test number. Your number isn't linked to a demo customer, so the agent first sends a linking screen: use `lucia.romero@example.com` and code `246810`. The shift picker then asks for a PIN: `1357`. At every start the demo prints one `WhatsApp` line that names an expired token or a webhook pointing at an old address.
 
 ## Roadmap
 
 - A hosted demo with the scripted agent, so you can try it without cloning
-- Step-up verification for sensitive surfaces (WhatsApp authentication templates cannot be sent to a BSUID, the anonymous user ID WhatsApp gives a business, so it needs another channel)
 - A Postgres store for hosts without a lasting disk (serverless); `UiStore` is the interface to implement
 - A send helper for the WhatsApp Cloud API (`whatsappCtaMessage` builds the payload; the demo sends it, see GUIDE.md)
 - Live, model-backed tests for the adapters (they're tested in-process; the Anthropic one also runs in the demo, and the AI SDK and OpenAI ones ran in pilots)
 - More blocks: payslip viewer, document signing, availability calendar (today: `order-status` and `link-account`; a shift picker and a multistep return with photo upload exist in the demo)
-- A PIN step before a sensitive screen shows its data (`bindToDevice` already stops a forwarded link from working on another device)
 - More languages in the blocks (en and es today)

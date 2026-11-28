@@ -84,6 +84,12 @@ export type SurfaceContract<
    * Needs `@ui-calling/server` (it sets the cookie); link previews don't count as opening.
    */
   bindToDevice?: boolean;
+  /**
+   * The user proves who they are before the screen gets its data: a PIN they know, or a code sent by SMS or email,
+   * checked by `createUiCalling`'s `verifier`. `resolve` doesn't run until they do, so a forwarded link or a shared
+   * phone shows nothing. Once per link. For payslips, contracts, ID documents.
+   */
+  verify?: boolean;
 };
 
 /** A top-level field of the data, when the data is an object; any name otherwise (so any surface fits `AnySurface`). */

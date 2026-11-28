@@ -12,8 +12,25 @@ import {
 } from "react";
 import type { AnySurface, SurfaceData, SurfaceEventName, SurfaceEventPayload, SurfaceFileSlot, UiFileRef } from "@ui-calling/core";
 
-/** `completed`: the user already finished on this screen, so its link no longer works. */
-type Status = "loading" | "ready" | "expired" | "completed" | "error";
+/**
+ * `completed`: the user already finished on this screen, so its link no longer works.
+ * `verify`: the surface sets `verify: true` and the user hasn't typed their PIN or code yet; `SurfaceProvider`
+ * shows its own step for it (or your `verifyScreen`) instead of the screen.
+ */
+type Status = "loading" | "verify" | "ready" | "expired" | "completed" | "error";
+
+/** What a `verify` surface asks before showing anything: a PIN the user knows, or a code sent to them. */
+export type VerifyPrompt = { kind: "pin" | "code"; attemptsLeft: number };
+
+/** What `verifyScreen` gets to draw your own verify step. */
+export type VerifyStepProps = {
+  prompt: VerifyPrompt;
+  locale: string;
+  /** Check what the user typed. Resolves when it's right (the screen then loads); rejects with a `SurfaceActionError`: `reason: "wrong_code"`, or `code: "verification_locked"`. */
+  submit: (typed: string) => Promise<void>;
+  /** For `kind: "code"`: send a code (again). Resolves with the verifier's hint, e.g. "SMS to •••• 42". */
+  sendCode: () => Promise<{ hint?: string }>;
+};
 
 type ContextValue = {
   status: Status;
@@ -92,7 +109,14 @@ function CloseTabHint({ locale }: { locale: string }) {
   );
 }
 
-export function SurfaceProvider(props: { token: string; endpoint?: string; returnUrl?: string; children: ReactNode }) {
+export function SurfaceProvider(props: {
+  token: string;
+  endpoint?: string;
+  returnUrl?: string;
+  /** Your own verify step for `verify` surfaces. Without it, a plain one in the user's language (en/es) styled with your tokens. */
+  verifyScreen?: (props: VerifyStepProps) => ReactNode;
+  children: ReactNode;
+}) {
   const base = `${props.endpoint ?? "/api/ui"}/sessions/${encodeURIComponent(props.token)}`;
   const [state, setState] = useState<{
     status: Status;
@@ -102,6 +126,7 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     error?: string;
     errorCode?: string;
     errorReason?: string;
+    verify?: VerifyPrompt;
   }>({ status: "loading" });
   const opened = useRef(false);
 
@@ -181,6 +206,33 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
     [emit],
   );
 
+  /** The data is in: show the screen, and record `opened` once (a verify surface only gets here after the PIN). */
+  const ready = useCallback(
+    (json: { surface: string; locale: string; data: unknown }) => {
+      setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
+      if (!opened.current) {
+        opened.current = true;
+        void emit("opened").catch(() => {});
+      }
+    },
+    [emit],
+  );
+
+  const submitVerify = useCallback(
+    async (typed: string) => {
+      try {
+        ready(await send(`${base}/verify`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: typed }) }));
+      } catch (err) {
+        if (err instanceof SurfaceActionError && err.reason === "wrong_code") {
+          setState((s) => (s.verify ? { ...s, verify: { ...s.verify, attemptsLeft: Math.max(0, s.verify.attemptsLeft - 1) } } : s));
+        }
+        throw err;
+      }
+    },
+    [base, send, ready],
+  );
+  const sendCode = useCallback(async () => (await send(`${base}/verify/send`, { method: "POST" })) as { hint?: string }, [base, send]);
+
   useEffect(() => {
     let cancelled = false;
     fetch(base)
@@ -196,17 +248,14 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
           const errorCode = res.status >= 500 && !json.surface ? "network" : (json.error ?? "network");
           return setState({ status: "error", surface: json.surface, locale, error: json.message ?? json.error, errorCode, errorReason: json.reason });
         }
-        setState({ status: "ready", surface: json.surface, locale: json.locale, data: json.data });
-        if (!opened.current) {
-          opened.current = true;
-          void emit("opened").catch(() => {});
-        }
+        if (json.verify) return setState({ status: "verify", surface: json.surface, locale: json.locale, verify: json.verify });
+        ready(json);
       })
       .catch((e) => !cancelled && setState({ status: "error", error: String(e), errorCode: "network" }));
     return () => {
       cancelled = true;
     };
-  }, [base, emit]);
+  }, [base, ready]);
 
   useEffect(() => {
     if (state.status !== "ready") return;
@@ -257,10 +306,127 @@ export function SurfaceProvider(props: { token: string; endpoint?: string; retur
   return (
     <SurfaceContext.Provider value={value}>
       <SurfaceErrorBoundary report={(err, info) => reportError(err, info, "render")} locale={locale} returnUrl={props.returnUrl}>
-        {props.children}
+        {state.status === "verify" && state.verify
+          ? (props.verifyScreen ?? ((p: VerifyStepProps) => <VerifyStep {...p} />))({ prompt: state.verify, locale, submit: submitVerify, sendCode })
+          : props.children}
         {closeHint && <CloseTabHint locale={locale} />}
       </SurfaceErrorBoundary>
     </SurfaceContext.Provider>
+  );
+}
+
+const VERIFY_TEXT = {
+  en: {
+    pinTitle: "Enter your PIN",
+    pinHelp: "This screen has personal details. Enter your PIN to see them.",
+    codeTitle: "Enter the code we sent you",
+    codeHelp: "This screen has personal details. We've sent you a code to check it's you.",
+    label: "PIN or code",
+    submit: "Continue",
+    resend: "Send a new code",
+    wrong: (n: number) => (n === 1 ? "That's not right. You have 1 try left." : `That's not right. You have ${n} tries left.`),
+    locked: "Too many wrong tries. Go back to the chat to ask for help.",
+    noCode: "We couldn't send a code. Go back to the chat to ask for help.",
+    failed: "Something went wrong. Check your connection and try again.",
+  },
+  es: {
+    pinTitle: "Introduce tu PIN",
+    pinHelp: "Esta pantalla tiene datos personales. Introduce tu PIN para verlos.",
+    codeTitle: "Introduce el código que te hemos enviado",
+    codeHelp: "Esta pantalla tiene datos personales. Te hemos enviado un código para comprobar que eres tú.",
+    label: "PIN o código",
+    submit: "Continuar",
+    resend: "Enviar otro código",
+    wrong: (n: number) => (n === 1 ? "No es correcto. Te queda 1 intento." : `No es correcto. Te quedan ${n} intentos.`),
+    locked: "Demasiados intentos. Vuelve al chat para pedir ayuda.",
+    noCode: "No hemos podido enviarte un código. Vuelve al chat para pedir ayuda.",
+    failed: "Algo ha fallado. Comprueba tu conexión e inténtalo de nuevo.",
+  },
+};
+
+/** The built-in verify step: one field, big enough to tap, in the user's language. Wrap it in your `verifyScreen` to add to it. */
+export function VerifyStep({ prompt, locale, submit, sendCode, note }: VerifyStepProps & { note?: ReactNode }) {
+  const t = VERIFY_TEXT[locale.toLowerCase().startsWith("es") ? "es" : "en"];
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | undefined>(prompt.attemptsLeft <= 0 ? t.locked : undefined);
+  const [hint, setHint] = useState<string>();
+  const [locked, setLocked] = useState(prompt.attemptsLeft <= 0);
+  const sent = useRef(false);
+  const requestCode = useCallback(() => {
+    sendCode().then(
+      (r) => setHint(r.hint),
+      (err: SurfaceActionError) => setMessage(err.code === "network" ? t.failed : t.noCode),
+    );
+  }, [sendCode, t]);
+  // A code is sent once, when the step first shows; a reload within the same link sends another (at most 3).
+  useEffect(() => {
+    if (prompt.kind === "code" && !sent.current && prompt.attemptsLeft > 0) {
+      sent.current = true;
+      requestCode();
+    }
+  }, [prompt.kind, requestCode]);
+
+  const onSubmit = async (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    if (!typed.trim() || busy) return;
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      await submit(typed);
+    } catch (err) {
+      const a = err as SurfaceActionError;
+      if (a.code === "verification_locked") {
+        setLocked(true);
+        setMessage(t.locked);
+      } else setMessage(a.reason === "wrong_code" ? t.wrong(Math.max(0, prompt.attemptsLeft - 1)) : t.failed);
+      setTyped("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = { width: "100%", boxSizing: "border-box", minHeight: 48, padding: "10px 12px", fontSize: 20, letterSpacing: 4, textAlign: "center", borderRadius: 8, border: "1px solid var(--border, #ccc)", background: "var(--background, #fff)", color: "var(--foreground, #111)" } as const;
+  return (
+    <main style={{ minHeight: "100dvh", maxWidth: 420, margin: "0 auto", padding: "32px 16px", fontFamily: "inherit", color: "var(--foreground, #111)" }}>
+      <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>{prompt.kind === "pin" ? t.pinTitle : t.codeTitle}</h1>
+        <p style={{ margin: 0, color: "var(--muted-foreground, #555)" }}>
+          {prompt.kind === "pin" ? t.pinHelp : t.codeHelp}
+          {hint && <> ({hint})</>}
+        </p>
+        <input
+          aria-label={t.label}
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          inputMode="numeric"
+          autoComplete={prompt.kind === "code" ? "one-time-code" : "off"}
+          type={prompt.kind === "pin" ? "password" : "text"}
+          maxLength={12}
+          autoFocus
+          disabled={locked}
+          style={field}
+        />
+        {message && (
+          <p role="alert" style={{ margin: 0, color: "var(--destructive, #b42318)" }}>
+            {message}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={busy || locked || !typed.trim()}
+          style={{ minHeight: 48, borderRadius: 8, border: 0, fontSize: 16, fontWeight: 600, background: "var(--primary, #111)", color: "var(--primary-foreground, #fff)", opacity: busy || locked || !typed.trim() ? 0.6 : 1 }}
+        >
+          {t.submit}
+        </button>
+        {prompt.kind === "code" && !locked && (
+          <button type="button" onClick={requestCode} style={{ minHeight: 44, border: 0, background: "none", color: "var(--primary, #111)", fontSize: 15, textDecoration: "underline" }}>
+            {t.resend}
+          </button>
+        )}
+        {note}
+      </form>
+    </main>
   );
 }
 

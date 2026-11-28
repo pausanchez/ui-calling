@@ -411,6 +411,7 @@ Events of type "error" mean something failed on the screen, usually a system beh
 - **`complete()` means "the user is done here", and it closes the link.** Call it on the "back to chat" link or a final button, not after every action. It records a `completed` event and stops the screen counting as abandoned. From then on the link refuses everything (410, `error: "completed"`), so a tab left open or a forwarded link can't act again. The screen gets `status: "completed"`: show "all done" and a way back to the chat. `surface-screen.tsx` from `init` already does. If the user needs the screen again, the agent opens a new link.
 - **Delete what you don't need to keep.** Events hold what users typed, and files what they uploaded. `ui.forget({ subject })` answers a deletion request; run `ui.forget({ expiredBefore })` on a schedule for a retention policy. Your own tables (drafts, account links) are yours to clear.
 - **Bind sensitive links to one device.** A link is a bearer token: forwarded, it works for anyone. Set `bindToDevice: true` on screens that show secrets: the first browser to open it gets a cookie, and any other device sees "this link was already opened on another device" (403 `other_device`). Link previews don't count as opening. It needs `@ui-calling/server`, which sets the cookie.
+- **Ask who it is before showing personal data.** A link opened on a shared or lent phone shows everything to whoever holds it. Set `verify: true` on screens with payslips, contracts or ID documents and pass a `verifier` to `createUiCalling` (`sqliteIdentity(store).pinVerifier()`, or `codeVerifier({ deliver })` for a code by SMS or email). `resolve` doesn't run until the user types the right PIN or code, once per link; `SurfaceProvider` shows the step. Wrong ones are refused quietly; after `maxVerifyAttempts` the link locks and the agent is woken. Recipe: `npx ui-calling guide verify-before-showing`.
 - **Short-lived links for sensitive screens.** Set `ttlSeconds` on the contract (e.g. `10 * 60` for identity checks or payments). It overrides `createUiCalling`'s default of 1 hour, and the agent is told the real expiry.
 - **The URL carries only the token.** Never put personal data in `input`; load it in `resolve`.
 - **Strings live in the messages object.** Use `locale` from `useSurface()` for dates and currency (`toLocaleDateString(locale)`, `toLocaleString(locale, { style: "currency" })`).
@@ -736,6 +737,8 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `deliverLinks` | `"button"` | `"button"`: the model never sees the URL. `"message"`: the model writes it in its reply |
 | `maxEventsPerSession` | `500` | Events one link may record; after that the screen gets 429 |
 | `maxWakesPerMinute` | `6` | `wake: true` events one link may send per minute before they're recorded quietly, so a script holding a link can't run up agent turns |
+| `verifier` | none | `{ kind: "pin" \| "code", send?(who, locale), check(who, typed) }`: checks who opens screens with `verify: true`. Required if one sets it. `sqliteIdentity` has `pinVerifier()` and `codeVerifier({ deliver })` |
+| `maxVerifyAttempts` | `5` | Wrong PINs or codes one link takes before it locks and the agent is woken |
 | `deviceClaimGraceMs` | `5000` | For `bindToDevice`: how long after the first open a request without the cookie still gets it (pages often load twice at once) |
 
 ### The runtime
@@ -753,6 +756,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 | `ui.forget({ conversationId } \| { subject } \| { expiredBefore })` | Deletes matching sessions with their events and files: a deletion request, or a retention policy run on a schedule. Returns the counts |
 | `ui.ready` | Resolves once abandon timers from before a restart are re-armed |
 | `ui.sweep()` | Records `abandoned` for every opened screen idle past `abandonAfterMs`, now. For a cron where timers don't run (`abandonTimers: false`); safe on several instances. Returns `{ abandoned }` |
+| `ui.verify(token, typed)` / `ui.sendCode(token)` | For `verify` surfaces, what the screen calls (`POST /sessions/:token/verify` with `{ code }`, `POST /sessions/:token/verify/send`). `verify` returns what `open` does, with the data |
 | `ui.timeZone` | The zone times are written in for the agent (`timeZone`, default `"UTC"`): pass it to `formatEventsForAgent` |
 
 `who` is `{ conversationId, subject }`: the conversation events report to, and the user the data is scoped to.
@@ -761,7 +765,7 @@ Check three things: the outcome shows up in a `→ screen now shows` line, failu
 
 | API | Fields |
 |---|---|
-| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `bindToDevice?` (only the first device that opens the link can use it), `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
+| `defineSurface({ … })` | `name`, `description`, `input` (Zod object), `data` (Zod), `events`, `cta?` (label per language), `ttlSeconds?`, `bindToDevice?` (only the first device that opens the link can use it), `verify?` (a PIN or code before any data loads), `files?` (slots: `{ accept, maxBytes, maxFiles? }`), `secret?` (data fields kept from the agent), `abandonAfterMs?` (this surface's wait, or `false`) |
 | `event(payload, { … })` | `describe(payload) => string`, `wake?` (default `false`), `redact?` (payload keys hidden from the log and the agent), `includePayload?` (default `true`; `false` leaves the JSON out of what the agent reads when `describe` already says it) |
 | `implement(surface, { … })` | `resolve(input, ctx) => Promise<data>`, `summarize(data, moment) => string` (`moment.after` is the event it follows, if any; `moment.time(date)` writes a time in `timeZone`), `on?: { [event]: (payload, ctx) => Promise<data \| ctx.unchanged() \| void> }`. `resolve` and handlers must be `async` (or return a Promise) |
 | `ctx` | `{ subject, input, conversationId, locale, session, files(ids?), resolve(), unchanged(data?) }`; `input` is what the agent passed, typed by the contract; `files()` lists this link's uploads; `files(ids)` also accepts this user's uploads from earlier links to the same surface; `resolve()` runs `resolve` again with the link's input, for a handler to return; `unchanged(data?)` says the event changed nothing (not recorded, no wake) |
@@ -831,6 +835,7 @@ Errors are `{ error, message, retryable, reason }`. Once the link is known (`exp
 | 404 | `not_found`, `unknown_surface` | No such link; for `POST /dev/links`, no such surface |
 | 410 | `expired`, `completed` | The link ran out, or the user already finished |
 | 403 | `other_device` | A `bindToDevice` link was already opened on another device |
+| 403 | `verification_required`, `verification_locked` | A `verify` link acted on before the PIN, or locked after too many wrong ones. A wrong one is 422 `refused` with `reason: "wrong_code"` |
 | 413 | `payload_too_large`, `invalid_file` | The event body is over 64 KB, or an upload is bigger than any slot accepts |
 | 422 | `refused` | A handler or `resolve` threw `SurfaceError(..., { refused: true })`: a business refusal, not an outage; `reason` is its code |
 | 429 | `too_many_events` | The link reached `maxEventsPerSession` |
